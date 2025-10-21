@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: Backend Auth API
+  description: OpenAPI specification documenting authentication endpoints (register, login).
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+tags:
+  - name: Auth
+    description: Authentication endpoints (register, login, refresh, logout)
+paths:
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              register:
+                value:
+                  name: "Alice"
+                  email: "alice@example.com"
+                  password: "P@ssw0rd"
+      responses:
+        '200':
+          description: User registered successfully with tokens and session id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error during registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              login:
+                value:
+                  email: "alice@example.com"
+                  password: "P@ssw0rd"
+      responses:
+        '200':
+          description: Login successful; returns access and refresh tokens and session id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Bad request (missing fields / validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized (invalid credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Refresh access token using a refresh token
+      description: Issues a new access token when provided with a valid refresh token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            examples:
+              refresh:
+                value:
+                  refresh_token: "<your-refresh-token>"
+      responses:
+        '200':
+          description: Access token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          description: Bad request (missing or invalid body)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Logout current user
+      description: Revokes the user's session using the access token; requires Authorization bearer token.
+      responses:
+        '200':
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '401':
+          description: Unauthorized (missing or invalid access token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Could not revoke token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          example: "Alice"
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        password:
+          type: string
+          format: password
+          example: "P@ssw0rd"
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        password:
+          type: string
+          format: password
+          example: "P@ssw0rd"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        name:
+          type: string
+          example: "Alice"
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+
+    RegisterResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "User registered successfully"
+        user:
+          $ref: '#/components/schemas/User'
+        session_id:
+          type: string
+          example: "session_abc123"
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refresh_token:
+          type: string
+          example: "dummytoken.refresh.part"
+        access_token_expires_in:
+          type: string
+          example: "15m"
+        refresh_token_expires_in:
+          type: string
+          example: "24h"
+
+    LoginResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          example: "session_abc123"
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refresh_token:
+          type: string
+          example: "dummytoken.refresh.part"
+        access_token_expires_at:
+          type: string
+          format: date-time
+        refresh_token_expires_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Invalid credentials"
+
+    RefreshRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          example: "<your-refresh-token>"
+
+    RefreshResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        message:
+          type: string
+          example: "Access token refreshed successfully"
+
+    LogoutResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Logged out successfully"
+
+security:
+  - bearerAuth: []

@@ -21,6 +21,18 @@ services:
         condition: service_healthy
     networks:
       - dbaas
+  swagger:
+    image: swaggerapi/swagger-ui:latest
+    restart: unless-stopped
+    environment:
+      SWAGGER_JSON: /spec/openapi.yaml
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./openapi.yaml:/spec/openapi.yaml:ro
+    depends_on: []
+    networks:
+      - dbaas
   psql_bp:
     image: postgres:latest
     restart: unless-stopped
