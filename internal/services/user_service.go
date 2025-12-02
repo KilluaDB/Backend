@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	_ "log"
 	"net/mail"
 	"time"
 
