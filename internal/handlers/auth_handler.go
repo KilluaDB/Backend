@@ -57,14 +57,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H {"error": err.Error()})
+		responses.Fail(c, http.StatusBadRequest, err, "Invalid Format")
 		return
 	}
 
 	ctx := c.Request.Context()
 	accessToken, refreshToken, err := h.userService.Login(req.Email, req.Password, ctx)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		responses.Fail(c, http.StatusUnauthorized, err, "Failed to login")
 		return
 	}
 
@@ -82,13 +82,13 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	
 	_, exists := c.Get("userId") // Extracted from access token
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
 	ctx := c.Request.Context()
 	if err := h.userService.Logout(ctx, refreshToken); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not revoke token"})
+		responses.Fail(c, http.StatusInternalServerError, err, "Could not revoke token")
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {	
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil {
-		c.JSON(401, gin.H{"error": "missing token"})
+		responses.Fail(c, http.StatusUnauthorized, err, "missing token")
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	ctx := c.Request.Context()
 	accessToken, refresToken, err := h.userService.Refresh(ctx, refreshToken)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token", "details": err.Error()})
+		responses.Fail(c, http.StatusUnauthorized, err, "Invalid or expired refresh token")
 		return
 	}
 	
