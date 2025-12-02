@@ -1,7 +1,11 @@
 package services
 
 import (
+	"context"
 	"errors"
+	"log"
+	_ "log"
+	"net/mail"
 	"time"
 
 	"my_project/internal/models"
@@ -13,129 +17,139 @@ import (
 
 type UserService struct {
 	userRepo    *repositories.UserRepository
-	sessionRepo *repositories.SessionRepository
+	redisRepo   *repositories.RedisRepository
 }
 
-func NewUserService(userRepo *repositories.UserRepository, sessionRepo *repositories.SessionRepository) *UserService {
+func NewUserService(userRepo *repositories.UserRepository, redisRepo *repositories.RedisRepository) *UserService {
 	return &UserService{
 		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
+		redisRepo:   redisRepo,
 	}
 }
 
-func (s *UserService) Register(user *models.User) (string, string, uuid.UUID, error) {
-	// 1. Check if it already exists
-	existing, _ := s.userRepo.FindUserByEmail(user.Email)
+func (s *UserService) Register(email, password string, ctx context.Context) (string, string, error) {
+	// 1. Check the email format
+	_, err := mail.ParseAddress(email)
+	if err != nil {
+		return "", "", err
+	}
+	
+	// 2. Check if it already exists
+	existing, err := s.userRepo.FindUserByEmail(email)
+
+	if err != nil {
+		return "", "", err
+	}
+
 	if existing != nil {
-		return "", "", uuid.Nil, errors.New("user already exists")
+		return "", "", errors.New("user already exists")
 	}
 
-	// 2. Hash password before saving
-	hashedPassword, err := utils.Hash(user.Password)
+	// 3. Hash password before saving
+	hashedPassword, err := utils.Hash(password)
 	if err != nil {
-		return "", "", uuid.Nil, err
+		return "", "", err
 	}
-	user.Password = string(hashedPassword)
 
-	// 3. Save user in DB
+	// 4. Create and save user in DB
+	user := &models.User{
+		Email:        email,
+		PasswordHash: string(hashedPassword),
+	}
 	if err := s.userRepo.Create(user); err != nil {
-		return "", "", uuid.Nil, err
+		return "", "", err
 	}
 
-	// 4. Generate tokens
-	accessToken, err := utils.GenerateJWT(user.ID, 15*time.Minute, utils.AccessTokenSecret)
+	// 5. Generate tokens
+	accessToken, refreshToken, jti, err := utils.GenerateTokens(user.ID)
 	if err != nil {
-		return "", "", uuid.Nil, err
+		return "", "", err
 	}
 
-	refreshToken, err := utils.GenerateJWT(user.ID, 24*time.Hour, utils.RefreshTokenSecret)
-	if err != nil {
-		return "", "", uuid.Nil, err
+	//TODO: jti instead of refreshToken
+	if err := s.redisRepo.StoreSession(ctx, jti, user.ID.String()); err != nil {
+		return "", "", err
 	}
 
-	// 5. Create a session for the refresh token
-	session := &models.Session{
-		UserID:       user.ID,
-		RefreshToken: refreshToken,
-		ExpiresAt:    time.Now().Add(24 * time.Hour),
-	}
-
-	if err := s.sessionRepo.Create(session); err != nil {
-		return "", "", uuid.Nil, err
-	}
-
-	return accessToken, refreshToken, session.ID, nil
+	return accessToken, refreshToken, nil
 }
 
-func (s *UserService) Login(email, password string) (string, string, uuid.UUID, error) {
+func (s *UserService) Login(email, password string, ctx context.Context) (string, string, error) {
 	user, err := s.userRepo.FindUserByEmail(email)
 	if err != nil {
-		return "", "", uuid.Nil, errors.New("user not found")
+		return "", "", errors.New("user not found")
 	}
-
-	if err := utils.VerifyPassword(user.Password, password); err != nil {
-		return "", "", uuid.Nil, errors.New("invalid password")
+	
+	if err := utils.VerifyPassword(user.PasswordHash, password); err != nil {
+		return "", "", errors.New("invalid password")
 	}
 
 	// Generate access + refresh tokens
-	accessToken, err := utils.GenerateJWT(user.ID, 15*time.Minute, utils.AccessTokenSecret)
+	accessToken, refreshToken, jti, err := utils.GenerateTokens(user.ID)
 	if err != nil {
-		return "", "", uuid.Nil, err
+		return "", "", err
 	}
 
-	refreshToken, err := utils.GenerateJWT(user.ID, 24*time.Hour, utils.RefreshTokenSecret)
-	if err != nil {
-		return "", "", uuid.Nil, err
+	//TODO: jti instead of refreshToken
+	if err := s.redisRepo.StoreSession(ctx, jti, user.ID.String()); err != nil {
+		return "", "", err
 	}
 
-	// Create session
-	session := &models.Session{
-		UserID:       user.ID,
-		RefreshToken: refreshToken,
-		ExpiresAt:    time.Now().Add(24 * time.Hour),
-	}
-
-	if err := s.sessionRepo.Create(session); err != nil {
-		return "", "", uuid.Nil, err
-	}
-
-	return accessToken, refreshToken, session.ID, nil
+	return accessToken, refreshToken, nil
 }
 
-func (s *UserService) Logout(refreshToken string) error {
-	return s.sessionRepo.Revoke(refreshToken)
-}
-
-func (s *UserService) Refresh(refreshToken string) (string, error) {
-	// 1. Validate refresh token in database
-	session, err := s.sessionRepo.FindByToken(refreshToken)
-	if err != nil {
-		return "", errors.New("refresh token not found")
-	}
-
-	if session.IsRevoked {
-		return "", errors.New("refresh token revoked")
-	}
-
-	if time.Now().After(session.ExpiresAt) {
-		return "", errors.New("refresh token expired")
-	}
-
-	// 2. Validate refresh token signature
+func (s *UserService) Logout(ctx context.Context, refreshToken string) error {
 	claims, err := utils.VerifyJWT(refreshToken, utils.RefreshTokenSecret)
 	if err != nil {
-		return "", errors.New("invalid refresh token")
+		log.Print(err)
+		return errors.New("refresh token not found")
+	}
+	
+	_ = s.redisRepo.Blacklist(ctx, claims.ID)
+	_ = s.redisRepo.DeleteSession(ctx, claims.ID)
+
+	return nil
+}
+
+func (s *UserService) Refresh(ctx context.Context, refreshToken string) (string, string, error) {
+	claims, err := utils.VerifyJWT(refreshToken, utils.RefreshTokenSecret)
+	if err != nil {
+		return "", "", errors.New("refresh token not found")
+	}
+
+	blocked, err := s.redisRepo.IsBlacklisted(ctx, claims.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if blocked {
+		return "", "", errors.New("token revoked")
+	}
+ 
+	if time.Now().After(claims.ExpiresAt.Time) {
+		return "", "", errors.New("refresh token expired")
 	}
 
 	// 3. Generate new access token
-	accessToken, err := utils.GenerateJWT(claims.UserID, 15*time.Minute, utils.AccessTokenSecret)
+	sub := claims.RegisteredClaims.Subject
+	userId, err := uuid.Parse(sub)
 	if err != nil {
-		return "", errors.New("could not generate new access token")
+    	return "", "", errors.New("invalid UUID in JWT sub claim")
 	}
 
-	return accessToken, nil
-}
+	accessToken, refreshToken, newJTI, err := utils.GenerateTokens(userId)
+	if err != nil {
+		return "", "", err
+	}
 
-func (s *UserService) LogoutByUserID(userID uint) error {
-	return s.userRepo.DeleteRefreshTokensByUserID(userID)
+	err = s.redisRepo.Blacklist(ctx, claims.ID)
+	if err != nil {
+		return "", "", err
+	}
+
+	err = s.redisRepo.StoreSession(ctx, newJTI, userId.String())
+	if err != nil {
+		return "", "", err
+	}
+
+	return accessToken, refreshToken, nil
 }
