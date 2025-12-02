@@ -45,3 +45,24 @@ func (r *DatabaseCredentialRepository) FindByInstanceID(dbInstanceID uuid.UUID) 
 	}
 	return &cred, nil
 }
+
+// ProjectRepository
+type ProjectRepository struct { 
+	db *gorm.DB 
+}
+
+func NewProjectsRepository(db *gorm.DB) *ProjectRepository {
+	return &ProjectRepository{db: db}
+}
+
+func (r *ProjectRepository) FindByIDAndUserID(id uuid.UUID, userID uuid.UUID) (*models.Project, error) {
+	var proj models.Project
+	err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&proj).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &proj, nil
+}
