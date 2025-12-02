@@ -45,15 +45,21 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	userUUID, ok := userId.(uuid.UUID)
+	// userId is set as a string in the auth middleware; parse to UUID
+	userIdStr, ok := userId.(string)
 	if !ok {
-		responses.Fail(c, http.StatusInternalServerError, nil, "Invalid userId format")
+		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	userUUID, err := uuid.Parse(userIdStr)
+	if err != nil {
+		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
 	projectUUID, err := uuid.Parse(projectId)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, nil, "Invalid projectId format")
+		responses.Fail(c, http.StatusBadRequest, nil, "Invalid projectId format")
 		return
 	}
 
@@ -92,7 +98,7 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 
 	userUUID, ok := userId.(uuid.UUID)
 	if !ok {
-		responses.Fail(c, http.StatusInternalServerError, nil, "Invalid user ID format")
+		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
 		return
 	}
 

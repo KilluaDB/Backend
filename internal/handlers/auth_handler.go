@@ -47,7 +47,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		"refresh_token_expires_in": "24h",
 	}
 
-	responses.Success(c, http.StatusOK, res, "New user registered successfully!")
+	responses.Success(c, http.StatusCreated, res, "New user registered successfully!")
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -78,7 +78,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	refreshToken, _ := c.Cookie("refresh_token")
+	refreshToken, err := c.Cookie("refresh_token")
+	if err != nil {
+		responses.Fail(c, http.StatusBadRequest, nil, "Missing refresh token")
+		return
+	}
 	
 	_, exists := c.Get("userId") // Extracted from access token
 	if !exists {
@@ -88,7 +92,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if err := h.userService.Logout(ctx, refreshToken); err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Could not revoke token")
+		responses.Fail(c, http.StatusUnauthorized, err, "Could not revoke token")
 		return
 	}
 
@@ -100,7 +104,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {	
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil {
-		responses.Fail(c, http.StatusUnauthorized, err, "missing token")
+		responses.Fail(c, http.StatusBadRequest, err, "Missing refresh token")
 		return
 	}
 
