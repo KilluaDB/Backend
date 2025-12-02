@@ -16,23 +16,43 @@ var (
 
 // Claims represents JWT claims.
 type Claims struct {
-	UserID uuid.UUID `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
 // GenerateJWT creates a signed JWT with expiration.
-func GenerateJWT(userID uuid.UUID, duration time.Duration, secret []byte) (string, error) {
-	claims := &Claims{
-		UserID: userID,
+func GenerateTokens(userID uuid.UUID) (string, string, string, error) {
+	jti := uuid.NewString()
+	
+	accessClaims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
+			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
-			ID:        uuid.NewString(),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 		},
 	}
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessString, err := accessToken.SignedString(AccessTokenSecret)
+	if err != nil {
+		return "", "", "", err
+	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(secret)
+	refreshClaims := &Claims{
+		// UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
+			Subject:   userID.String(),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30*24*time.Hour)),
+		},
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshString, err := refreshToken.SignedString(RefreshTokenSecret)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return accessString, refreshString, jti, nil
 }
 
 // VerifyJWT parses and validates a JWT string.
