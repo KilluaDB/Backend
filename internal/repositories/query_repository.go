@@ -66,3 +66,26 @@ func (r *ProjectRepository) FindByIDAndUserID(id uuid.UUID, userID uuid.UUID) (*
 	}
 	return &proj, nil
 }
+
+// QueryHistoryRepository
+type QueryHistoryRepository struct {
+	db *gorm.DB
+}
+
+func NewQueryHistoryRepository(db *gorm.DB) *QueryHistoryRepository {
+	return &QueryHistoryRepository{db: db}
+}
+
+func (r *QueryHistoryRepository) Create(exec *models.QueryHistory) error {
+	return r.db.Create(exec).Error
+}
+
+func (r *QueryHistoryRepository) FindByUserID(userID uuid.UUID, limit int) ([]models.QueryHistory, error) {
+	var execs []models.QueryHistory
+	query := r.db.Where("user_id = ?", userID).Order("executed_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&execs).Error
+	return execs, err
+}
