@@ -104,3 +104,20 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
+// executeNonSelectQuery executes non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+func (s *QueryService) executeNonSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
+	result, err := db.Exec(query)
+	if err != nil {
+		return &QueryResult{Error: err.Error()}, nil
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return &QueryResult{Error: err.Error()}, nil
+	}
+
+	return &QueryResult{
+		RowsAffected: rowsAffected,
+		RowCount:     0,
+	}, nil
+}
