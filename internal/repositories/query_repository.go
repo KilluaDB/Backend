@@ -26,3 +26,22 @@ func (r *DatabaseInstanceRepository) FindRunningByProjectID(projectID uuid.UUID)
 	}
 	return &inst, nil
 }
+
+// DatabaseCredentialRepository
+type DatabaseCredentialRepository struct { 
+	db *gorm.DB 
+}
+
+func NewDatabaseCredentialRepository(db *gorm.DB) *DatabaseCredentialRepository { 
+	return &DatabaseCredentialRepository{db: db} 
+}
+
+func (r *DatabaseCredentialRepository) FindByInstanceID(dbInstanceID uuid.UUID) (*models.DatabaseCredential, error) {
+	var cred models.DatabaseCredential
+	err := r.db.Where("db_instance_id = ?", dbInstanceID).Order("created_at DESC").First(&cred).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) { return nil, nil }
+		return nil, err
+	}
+	return &cred, nil
+}
