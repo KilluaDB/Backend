@@ -52,26 +52,26 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email" binding:"required,email"`
+		Email    string `json:"email"    binding:"required,email"`
 		Password string `json:"password" binding:"required"`
 	}
+
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H {"error": err.Error()})
 		return
 	}
 
-	access, refresh, sessionID, err := h.userService.Login(req.Email, req.Password)
+	ctx := c.Request.Context()
+	accessToken, refreshToken, err := h.userService.Login(req.Email, req.Password, ctx)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
+	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
+
 	res := gin.H{
-		"session_id":               sessionID,
-		"access_token":             access,
-		"refresh_token":            refresh,
-		"access_token_expires_at":  time.Now().Add(15 * time.Minute),
-		"refresh_token_expires_at": time.Now().Add(24 * time.Hour),
+		"access_token":             accessToken,
 	}
 
 	responses.Success(c, http.StatusOK, res, "User Login Successfully!")
