@@ -9,20 +9,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// User matches users table defined in script.sql
+// Columns: id, name (nullable), email (NOT NULL UNIQUE), password_hash, created_at, last_login_at
 type User struct {
-	ID            uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
-	Name          string    `gorm:"size:255;not null;unique" json:"name" validate:"required,min=2,max=100"`
-	Email         string    `gorm:"size:100;not null;unique" json:"email" validate:"required,email"`
-	Password      string    `gorm:"size:100;not null" json:"password" validate:"required,min=6"`
-	CreatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
-	LastLoginAt   time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"last_login_at"`
-	RefreshToken  string
-	RefreshExpiry time.Time
+	ID           uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	Email        string     `gorm:"type:text;not null;unique" json:"email"`
+	PasswordHash string     `gorm:"type:text;not null" json:"password_hash"`
+	CreatedAt    time.Time  `gorm:"type:timestamptz;autoCreateTime" json:"created_at"`
+	LastLoginAt  *time.Time `gorm:"type:timestamptz" json:"last_login_at,omitempty"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
-	// Ensure UUID exists
 	if u.ID == uuid.Nil {
 		u.ID = uuid.New()
 	}
@@ -30,7 +27,6 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 func (u *User) Prepare() {
-	u.Name = html.EscapeString(strings.TrimSpace(u.Name))
 	u.Email = html.EscapeString(strings.TrimSpace(u.Email))
 }
 
