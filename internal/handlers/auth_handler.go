@@ -78,16 +78,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	userID, exists := c.Get("userID") // Extracted from access token
+	refreshToken, _ := c.Cookie("refresh_token")
+	
+	_, exists := c.Get("userId") // Extracted from access token
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	if err := h.userService.LogoutByUserID(userID.(uint)); err != nil {
+	ctx := c.Request.Context()
+	if err := h.userService.Logout(ctx, refreshToken); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not revoke token"})
 		return
 	}
+
+	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
