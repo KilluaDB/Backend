@@ -285,3 +285,8 @@ func (s *QueryService) executeNonSelectQuery(db *sql.DB, query string) (*QueryRe
 		RowCount:     0,
 	}, nil
 }
+
+// GetQueryHistory returns query execution history for a user
+func (s *QueryService) GetQueryHistory(userID uuid.UUID, limit int) ([]models.QueryHistory, error) {
+	return s.execRepo.FindByUserID(userID, limit)
+}
