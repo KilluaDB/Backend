@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"my_project/internal/models"
+	_ "log"
 	"my_project/internal/responses"
 	"my_project/internal/services"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,26 +19,28 @@ func NewAuthHandler(userService *services.UserService) *AuthHandler {
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	// 1. Validate input
-	var user models.User
-	if err := c.ShouldBind(&user); err != nil {
+	var req struct {
+		Email    string `json:"email"    binding:"required,email"`
+		Password string `json:"password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Please provide your email and password correctly")
 		return
 	}
 
-	user.Prepare()
-
 	// 2. Register user (and get tokens)
-	accessToken, refreshToken, sessionID, err := h.userService.Register(&user)
+	ctx := c.Request.Context()
+	accessToken, refreshToken, err := h.userService.Register(req.Email, req.Password, ctx)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Could not register user")
 		return
 	}
 
-	// 3. Return tokens and user info
+	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
+
+	// 3. Return tokens
 	res := gin.H{
 		"message":                  "User registered successfully",
-		"user":                     user,
-		"session_id":               sessionID,
 		"access_token":             accessToken,
 		"refresh_token":            refreshToken,
 		"access_token_expires_in":  "15m",
