@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler) {
+func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, queryHandler *handlers.QueryHandler) {
 	api := router.Group("/api/v1")
 
 	authRoutes := NewAuthRoutes(authHandler)
@@ -15,6 +15,9 @@ func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userH
 
 	userRoutes := NewUserRoutes(userHandler)
 	userRoutes.RegisterRoutes(api)
+
+	queryRoutes := NewQueryRoutes(queryHandler)
+	queryRoutes.RegisterRoutes(api)
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
