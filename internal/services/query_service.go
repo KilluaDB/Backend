@@ -104,6 +104,62 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
+// executeSelectQuery executes a SELECT query
+func (s *QueryService) executeSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
+	rows, err := db.Query(query)
+	if err != nil {
+		return &QueryResult{Error: err.Error()}, nil
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return &QueryResult{Error: err.Error()}, nil
+	}
+
+	var resultRows []map[string]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return &QueryResult{Error: err.Error()}, nil
+		}
+
+		rowMap := make(map[string]interface{})
+		for i, col := range columns {
+			val := values[i]
+			if val != nil {
+				switch v := val.(type) {
+				case []byte:
+					rowMap[col] = string(v)
+				case time.Time:
+					rowMap[col] = v.Format(time.RFC3339)
+				default:
+					rowMap[col] = v
+				}
+			} else {
+				rowMap[col] = nil
+			}
+		}
+		resultRows = append(resultRows, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		return &QueryResult{Error: err.Error()}, nil
+	}
+
+	return &QueryResult{
+		Columns:      columns,
+		Rows:         resultRows,
+		RowCount:     len(resultRows),
+		RowsAffected: int64(len(resultRows)),
+	}, nil
+}
+
 // executeNonSelectQuery executes non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
 func (s *QueryService) executeNonSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
 	result, err := db.Exec(query)
