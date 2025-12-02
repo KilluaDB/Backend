@@ -92,23 +92,22 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
-func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	var req struct {
-		RefreshToken string `json:"refresh_token"`
-	}
-
-	// 1. Parse request body
-	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Refresh token required"})
+func (h *AuthHandler) Refresh(c *gin.Context) {	
+	refreshToken, err := c.Cookie("refresh_token")
+	if err != nil {
+		c.JSON(401, gin.H{"error": "missing token"})
 		return
 	}
 
 	// 2. Ask the service layer to issue a new access token
-	accessToken, err := h.userService.Refresh(req.RefreshToken)
+	ctx := c.Request.Context()
+	accessToken, refresToken, err := h.userService.Refresh(ctx, refreshToken)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token", "details": err.Error()})
 		return
 	}
+	
+	c.SetCookie("refresh_token", refresToken, 30*24*3600, "/", "", true, true)
 
 	// 3. Return the new access token
 	c.JSON(http.StatusOK, gin.H{
