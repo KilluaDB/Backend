@@ -104,6 +104,114 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
+// ExecuteQuery executes a SQL query on the specified database connection
+func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
+	startTime := time.Now()
+
+	// Validate project ownership
+	project, err := s.projectRepo.FindByIDAndUserID(projectId, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if project == nil {
+		return nil, nil, errors.New("project not found or not accessible")
+	}
+
+	// Find running DB instance for this project
+	inst, err := s.instanceRepo.FindRunningByProjectID(projectId)
+	if err != nil {
+		return nil, nil, err
+	}
+	if inst == nil {
+		return nil, nil, errors.New("no running database instance for this project")
+	}
+
+	// Fetch credentials for the instance
+	cred, err := s.credRepo.FindByInstanceID(inst.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cred == nil {
+		return nil, nil, errors.New("no credentials configured for this database instance")
+	}
+
+	// Validate query
+	if err := s.ValidateSQLQuery(req.Query); err != nil {
+		execTime := time.Since(startTime).Milliseconds()
+		exec := &models.QueryHistory{
+			DBInstanceID:    inst.ID,
+			UserID:          userID,
+			QueryText:       req.Query,
+			ExecutedAt:      time.Now().UTC(),
+			Success:         false,
+			ExecutionTimeMs: int(execTime),
+		}
+		_ = s.execRepo.Create(exec)
+		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
+	}
+
+	//TODO: 
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		inst.Endpoint, inst.Port, cred.Username, cred.PasswordEncrypted, "postgres")
+	sqlDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		execTime := time.Since(startTime).Milliseconds()
+		exec := &models.QueryHistory{
+			DBInstanceID:    inst.ID,
+			UserID:          userID,
+			QueryText:       req.Query,
+			ExecutedAt:      time.Now().UTC(),
+			Success:         false,
+			ExecutionTimeMs: int(execTime),
+		}
+		_ = s.execRepo.Create(exec)
+		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
+	}
+
+	// Reasonable connection pool settings per request lifecycle
+	// sqlDB.SetConnMaxLifetime(time.Minute * 5)
+	// sqlDB.SetMaxOpenConns(10)
+	// sqlDB.SetMaxIdleConns(5)
+
+	result, err := s.executeSQLQuery(sqlDB, req.Query)
+	defer sqlDB.Close()
+	execTime := time.Since(startTime).Milliseconds()
+	result.ExecutionTime = execTime
+
+	exec := &models.QueryHistory{
+		DBInstanceID:    inst.ID,
+		UserID:          userID,
+		QueryText:       req.Query,
+		ExecutedAt:      time.Now().UTC(),
+		Success:         err == nil && result.Error == "",
+		ExecutionTimeMs: int(execTime),
+	}
+
+	if err != nil || result.Error != "" {
+		// exec.Success = false
+		if err != nil {
+			result.Error = err.Error()
+		}
+	}
+
+	_ = s.execRepo.Create(exec)
+	return result, exec, nil
+}
+
+// executeSQLQuery executes a SQL query and returns results
+func (s *QueryService) executeSQLQuery(db *sql.DB, query string) (*QueryResult, error) {
+	// Check if it's a SELECT query or other query type
+	normalized := strings.ToUpper(strings.TrimSpace(query))
+	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
+
+	if isSelect {
+		return s.executeSelectQuery(db, query)
+	}
+
+	// For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+	return s.executeNonSelectQuery(db, query)
+}
+
 // executeSelectQuery executes a SELECT query
 func (s *QueryService) executeSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
 	rows, err := db.Query(query)
