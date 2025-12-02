@@ -71,3 +71,36 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 
 	responses.Success(c, http.StatusOK, response, "Query executed successfully")
 }
+
+// GetQueryHistory returns query execution history for the authenticated user
+func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+
+	// query param for the limit
+	limitStr := c.DefaultQuery("limit", "10")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		limit = 10	// min
+	}
+	if limit > 30 {
+		limit = 30 	// max
+	}
+
+	userUUID, ok := userId.(uuid.UUID)
+	if !ok {
+		responses.Fail(c, http.StatusInternalServerError, nil, "Invalid user ID format")
+		return
+	}
+
+	history, err := h.queryService.GetQueryHistory(userUUID, limit)
+	if err != nil {
+		responses.Fail(c, http.StatusInternalServerError, err, "Failed to get query history")
+		return
+	}
+
+	responses.Success(c, http.StatusOK, history, "Query history retrieved successfully")
+}
