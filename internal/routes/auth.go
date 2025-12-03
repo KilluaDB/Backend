@@ -26,6 +26,6 @@ func (r *AuthRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		protected := auth.Group("/")
 		protected.Use(middlewares.Authenticate)
 		protected.POST("/logout", r.handler.Logout)
-		protected.POST("/refresh", r.handler.Refresh)
+		auth.POST("/refresh", r.handler.Refresh)
 	}
 }

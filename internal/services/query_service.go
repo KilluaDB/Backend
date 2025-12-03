@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"gorm.io/gorm"
 )
 
 type QueryService struct {
@@ -21,16 +20,14 @@ type QueryService struct {
 	instanceRepo *repositories.DatabaseInstanceRepository
 	credRepo     *repositories.DatabaseCredentialRepository
 	execRepo     *repositories.QueryHistoryRepository
-	db           *gorm.DB
 }
 
-func NewQueryService(projectRepo *repositories.ProjectRepository, instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, execRepo *repositories.QueryHistoryRepository, db *gorm.DB) *QueryService {
+func NewQueryService(projectRepo *repositories.ProjectRepository, instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, execRepo *repositories.QueryHistoryRepository) *QueryService {
 	return &QueryService{
 		projectRepo:  projectRepo,
 		instanceRepo: instanceRepo,
 		credRepo:     credRepo,
 		execRepo:     execRepo,
-		db:           db,
 	}
 }
 
@@ -109,7 +106,7 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	startTime := time.Now()
 
 	// Validate project ownership
-	project, err := s.projectRepo.FindByIDAndUserID(projectId, userID)
+	project, err := s.projectRepo.GetByIDAndUserID(projectId, userID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -118,7 +115,7 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	}
 
 	// Find running DB instance for this project
-	inst, err := s.instanceRepo.FindRunningByProjectID(projectId)
+	inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -127,7 +124,7 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	}
 
 	// Fetch credentials for the instance
-	cred, err := s.credRepo.FindByInstanceID(inst.ID)
+	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -138,57 +135,70 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	// Validate query
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
 		execTime := time.Since(startTime).Milliseconds()
+		success := false
 		exec := &models.QueryHistory{
 			DBInstanceID:    inst.ID,
 			UserID:          userID,
 			QueryText:       req.Query,
-			ExecutedAt:      time.Now().UTC(),
-			Success:         false,
-			ExecutionTimeMs: int(execTime),
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
 		}
 		_ = s.execRepo.Create(exec)
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
 	}
 
-	//TODO: 
+	// Build connection string
+	if inst.Endpoint == nil || inst.Port == nil {
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    inst.ID,
+			UserID:          userID,
+			QueryText:       req.Query,
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return &QueryResult{Error: "database instance endpoint or port not configured", ExecutionTime: execTime}, exec, nil
+	}
+
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		inst.Endpoint, inst.Port, cred.Username, cred.PasswordEncrypted, "postgres")
+		*inst.Endpoint, *inst.Port, cred.Username, cred.PasswordEncrypted, "postgres")
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		execTime := time.Since(startTime).Milliseconds()
+		success := false
 		exec := &models.QueryHistory{
 			DBInstanceID:    inst.ID,
 			UserID:          userID,
 			QueryText:       req.Query,
-			ExecutedAt:      time.Now().UTC(),
-			Success:         false,
-			ExecutionTimeMs: int(execTime),
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
 		}
 		_ = s.execRepo.Create(exec)
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
 	}
-
-	// Reasonable connection pool settings per request lifecycle
-	// sqlDB.SetConnMaxLifetime(time.Minute * 5)
-	// sqlDB.SetMaxOpenConns(10)
-	// sqlDB.SetMaxIdleConns(5)
+	defer sqlDB.Close()
 
 	result, err := s.executeSQLQuery(sqlDB, req.Query)
-	defer sqlDB.Close()
 	execTime := time.Since(startTime).Milliseconds()
 	result.ExecutionTime = execTime
 
+	success := err == nil && result.Error == ""
+	execTimeInt := int(execTime)
 	exec := &models.QueryHistory{
 		DBInstanceID:    inst.ID,
 		UserID:          userID,
 		QueryText:       req.Query,
-		ExecutedAt:      time.Now().UTC(),
-		Success:         err == nil && result.Error == "",
-		ExecutionTimeMs: int(execTime),
+		ExecutedAt:      time.Now(),
+		Success:         &success,
+		ExecutionTimeMs: &execTimeInt,
 	}
 
 	if err != nil || result.Error != "" {
-		// exec.Success = false
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -288,5 +298,5 @@ func (s *QueryService) executeNonSelectQuery(db *sql.DB, query string) (*QueryRe
 
 // GetQueryHistory returns query execution history for a user
 func (s *QueryService) GetQueryHistory(userID uuid.UUID, limit int) ([]models.QueryHistory, error) {
-	return s.execRepo.FindByUserID(userID, limit)
+	return s.execRepo.GetByUserID(userID, limit)
 }

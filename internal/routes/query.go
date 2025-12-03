@@ -16,7 +16,7 @@ func NewQueryRoutes(handler *handlers.QueryHandler) *QueryRoutes {
 }
 
 func (r *QueryRoutes) RegisterRoutes(router *gin.RouterGroup) {
-	query := router.Group("/projects/:project_id/query")
+	query := router.Group("/projects/:id/query")
 	query.Use(middlewares.Authenticate)
 	{
 		// Query execution endpoints

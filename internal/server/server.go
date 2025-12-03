@@ -1,7 +1,6 @@
 package server
 
 import (
-    "context"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 
+	"my_project/internal/database"
 	"my_project/internal/handlers"
 	"my_project/internal/repositories"
 	"my_project/internal/routes"
@@ -23,75 +22,80 @@ import (
 
 type Server struct {
 	port int
-	db   *gorm.DB
+	pool *pgxpool.Pool
 }
 
 func NewServer() *http.Server {
-	port, _ := strconv.Atoi(os.Getenv("PORT"))
+	// Validate required environment variables
+	if err := validateRequiredEnvVars(); err != nil {
+		log.Fatalf("Missing required environment variable: %v", err)
+	}
 
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_USERNAME"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_DATABASE"),
-		os.Getenv("DB_PORT"),
-	)
+	portStr := os.Getenv("PORT")
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		log.Fatalf("PORT must be a valid integer: %v", err)
+	}
+	if port <= 0 || port > 65535 {
+		log.Fatalf("PORT must be between 1 and 65535, got: %d", port)
+	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// Ensure database exists (create if it doesn't)
+	if err := database.EnsureDatabaseExists(); err != nil {
+		log.Fatalf("failed to ensure database exists: %v", err)
+	}
+
+	// Connect to database using pgxpool
+	pool, err := database.Connect()
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-
-	// Test Redis connection and fail fast with a clear message
-	{
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			log.Fatalf("failed to connect to Redis at %s:%s: %v", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT"), err)
-		}
-		log.Println("Connected to Redis successfully")
-	}
-
-	// Execute script.sql
-	sqlBytes, err := os.ReadFile("database/script.sql")
-	if err != nil {
-		log.Fatalf("failed to read SQL file: %v", err)
-	}
-	if err := db.Exec(string(sqlBytes)).Error; err != nil {
-		log.Fatalf("failed to execute SQL file: %v", err)
+	// Run migrations
+	if err := database.RunMigrations(pool); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
 	}
 
 	s := &Server{
 		port: port,
-		db:   db,
+		pool: pool,
 	}
 
 	// Dependency injection
-	userRepo := repositories.NewUserRepository(db)
-	// sessionRepo := repositories.NewSessionRepository(db)
-	redisRepo := repositories.NewRedisRepository(rdb)
-	userService := services.NewUserService(userRepo, redisRepo)
+	userRepo := repositories.NewUserRepository(pool)
+	sessionRepo := repositories.NewSessionRepository(pool)
+	userService := services.NewUserService(userRepo, sessionRepo)
 	authHandler := handlers.NewAuthHandler(userService)
 	userHandler := handlers.NewUserHandler(userService)
 
-	// Query service dependencies (project-bound connections execution)
-	projectRepo := repositories.NewProjectsRepository(db)
-	instanceRepo := repositories.NewDatabaseInstanceRepository(db)
-	credRepo := repositories.NewDatabaseCredentialRepository(db)
-	execRepo := repositories.NewQueryHistoryRepository(db)
-	queryService := services.NewQueryService(projectRepo, instanceRepo, credRepo, execRepo, db)
+	// Project dependencies
+	projectRepo := repositories.NewProjectRepository(pool)
+	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
+	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
+	orchestratorService, err := services.NewOrchestratorService()
+	if err != nil {
+		log.Fatalf("failed to initialize orchestrator: %v", err)
+	}
+	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
+	projectHandler := handlers.NewProjectHandler(projectService)
+
+	// Query dependencies
+	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
+	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
 	// Initialize Gin router
 	router := gin.Default()
-	// routes.RegisterRoutes(router, authHandler, userHandler) // register all routes
-	routes.RegisterRoutes(router, authHandler, userHandler, queryHandler) // register all routes
 
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: false,
+		MaxAge:           12 * time.Hour,
+	}))
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler) // register all routes
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -102,4 +106,32 @@ func NewServer() *http.Server {
 	}
 
 	return server
+}
+
+func validateRequiredEnvVars() error {
+	required := map[string]string{
+		"PORT":                          os.Getenv("PORT"),
+		"DB_HOST":                       os.Getenv("DB_HOST"),
+		"DB_PORT":                       os.Getenv("DB_PORT"),
+		"DB_USERNAME":                   os.Getenv("DB_USERNAME"),
+		"DB_PASSWORD":                   os.Getenv("DB_PASSWORD"),
+		"DB_DATABASE":                   os.Getenv("DB_DATABASE"),
+		"DB_ADMIN_USER":                 os.Getenv("DB_ADMIN_USER"),
+		"DB_ADMIN_PASSWORD":             os.Getenv("DB_ADMIN_PASSWORD"),
+		"ACCESS_TOKEN_SECRET":           os.Getenv("ACCESS_TOKEN_SECRET"),
+		"REFRESH_TOKEN_SECRET":          os.Getenv("REFRESH_TOKEN_SECRET"),
+		"REDIS_ADDR":                    os.Getenv("REDIS_ADDR"),
+		"ORCHESTRATOR_NETWORK_NAME":     os.Getenv("ORCHESTRATOR_NETWORK_NAME"),
+		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
+		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
+		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
+	}
+
+	for name, value := range required {
+		if value == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+
+	return nil
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	_ "log"
+	"my_project/internal/models"
 	"my_project/internal/responses"
 	"my_project/internal/services"
 	"net/http"
@@ -29,8 +30,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	// 2. Register user (and get tokens)
-	ctx := c.Request.Context()
-	accessToken, refreshToken, err := h.userService.Register(req.Email, req.Password, ctx)
+	user := &models.User{
+		Email:    req.Email,
+		Password: req.Password,
+	}
+	accessToken, refreshToken, _, err := h.userService.Register(user)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Could not register user")
 		return
@@ -60,9 +64,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid Format")
 		return
 	}
-
-	ctx := c.Request.Context()
-	accessToken, refreshToken, err := h.userService.Login(req.Email, req.Password, ctx)
+	accessToken, refreshToken, _, err := h.userService.Login(req.Email, req.Password)
 	if err != nil {
 		responses.Fail(c, http.StatusUnauthorized, err, "Failed to login")
 		return
@@ -71,7 +73,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
 
 	res := gin.H{
-		"access_token":             accessToken,
+		"access_token": accessToken,
 	}
 
 	responses.Success(c, http.StatusOK, res, "User Login Successfully!")
@@ -83,15 +85,14 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, nil, "Missing refresh token")
 		return
 	}
-	
+
 	_, exists := c.Get("userId") // Extracted from access token
 	if !exists {
 		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
-	ctx := c.Request.Context()
-	if err := h.userService.Logout(ctx, refreshToken); err != nil {
+	if err := h.userService.Logout(refreshToken); err != nil {
 		responses.Fail(c, http.StatusUnauthorized, err, "Could not revoke token")
 		return
 	}
@@ -101,7 +102,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
-func (h *AuthHandler) Refresh(c *gin.Context) {	
+func (h *AuthHandler) Refresh(c *gin.Context) {
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Missing refresh token")
@@ -109,14 +110,11 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	}
 
 	// 2. Ask the service layer to issue a new access token
-	ctx := c.Request.Context()
-	accessToken, refresToken, err := h.userService.Refresh(ctx, refreshToken)
+	accessToken, err := h.userService.Refresh(refreshToken)
 	if err != nil {
 		responses.Fail(c, http.StatusUnauthorized, err, "Invalid or expired refresh token")
 		return
 	}
-	
-	c.SetCookie("refresh_token", refresToken, 30*24*3600, "/", "", true, true)
 
 	// 3. Return the new access token
 	c.JSON(http.StatusOK, gin.H{

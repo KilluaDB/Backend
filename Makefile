@@ -1,64 +1,99 @@
-# Simple Makefile for a Go project
+.PHONY: help install deps build run test clean migrate setup cleanup-network docker-down
 
-# Build the application
-all: build test
+# Default target
+.DEFAULT_GOAL := help
 
-build:
-	@echo "Building..."
-	
-	
-	@go build -o main cmd/api/main.go
+# Variables
+BINARY_NAME=api
+BINARY_PATH=bin/$(BINARY_NAME)
+MAIN_PATH=cmd/api/main.go
 
-# Run the application
-run:
-	@go run cmd/api/main.go
-# Create DB container
-docker-run:
-	@if docker compose up --build 2>/dev/null; then \
-		: ; \
-	else \
-		echo "Falling back to Docker Compose V1"; \
-		docker-compose up --build; \
-	fi
+help: ## Show this help message
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Available targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# Shutdown DB container
-docker-down:
-	@if docker compose down 2>/dev/null; then \
-		: ; \
-	else \
-		echo "Falling back to Docker Compose V1"; \
-		docker-compose down; \
-	fi
+install: ## Install all dependencies (Go, PostgreSQL, Redis)
+	@echo "Checking dependencies..."
+	@./start.sh --check-only || echo "Please install missing dependencies manually"
 
-# Test the application
-test:
-	@echo "Testing..."
-	@go test ./... -v
-# Integrations Tests for the application
-itest:
-	@echo "Running integration tests..."
-	@go test ./internal/database -v
+deps: ## Install Go dependencies
+	@echo "Installing Go dependencies..."
+	@go mod download
+	@go mod tidy
 
-# Clean the binary
-clean:
+build: deps ## Build the application
+	@echo "Building application..."
+	@mkdir -p bin
+	@go build -o $(BINARY_PATH) $(MAIN_PATH)
+	@echo "Build complete: $(BINARY_PATH)"
+
+run: ## Run the application (development mode)
+	@echo "Starting application..."
+	@go run $(MAIN_PATH)
+
+start: build ## Build and run the application
+	@echo "Starting application..."
+	@./$(BINARY_PATH)
+
+test: ## Run tests
+	@echo "Running tests..."
+	@go test -v ./...
+
+clean: ## Clean build artifacts
 	@echo "Cleaning..."
-	@rm -f main
+	@rm -rf bin/
+	@go clean
 
-# Live Reload
-watch:
-	@if command -v air > /dev/null; then \
-            air; \
-            echo "Watching...";\
-        else \
-            read -p "Go's 'air' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
-            if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
-                go install github.com/air-verse/air@latest; \
-                air; \
-                echo "Watching...";\
-            else \
-                echo "You chose not to install air. Exiting..."; \
-                exit 1; \
-            fi; \
-        fi
+migrate: ## Run database migrations manually
+	@echo "Running migrations..."
+	@go run $(MAIN_PATH) --migrate-only || echo "Migrations run automatically on startup"
 
-.PHONY: all build run test clean watch docker-run docker-down itest
+setup: ## Initial setup (create .env, setup database)
+	@echo "Setting up project..."
+	@if [ ! -f .env ]; then \
+		echo "Creating .env file..."; \
+		./start.sh --setup-only; \
+	fi
+	@echo "Setup complete. Please review .env file and update as needed."
+
+check: ## Check if all dependencies are installed
+	@echo "Checking dependencies..."
+	@command -v go >/dev/null 2>&1 || { echo "Go is not installed"; exit 1; }
+	@command -v psql >/dev/null 2>&1 || { echo "PostgreSQL is not installed"; exit 1; }
+	@command -v redis-cli >/dev/null 2>&1 || { echo "Redis is not installed (optional)"; }
+	@echo "All required dependencies are installed"
+
+dev: deps run ## Install dependencies and run in development mode
+
+cleanup-network: ## Remove orchestrator Docker network (optional - network is reused by default)
+	@echo "Removing orchestrator network..."
+	@if [ -f .env ]; then \
+		export $$(cat .env | grep -v '^#' | xargs); \
+		NETWORK_NAME="$${ORCHESTRATOR_NETWORK_NAME:-dbaas-orchestrator-network}"; \
+		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
+			echo "Removing network: $$NETWORK_NAME"; \
+			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
+		else \
+			echo "Network $$NETWORK_NAME does not exist"; \
+		fi \
+	else \
+		NETWORK_NAME="dbaas-orchestrator-network"; \
+		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
+			echo "Removing network: $$NETWORK_NAME"; \
+			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
+		else \
+			echo "Network $$NETWORK_NAME does not exist"; \
+		fi \
+	fi
+
+docker-down: ## Stop and remove Docker containers (keeps orchestrator network)
+	@echo "Stopping Docker containers..."
+	@if command -v docker-compose >/dev/null 2>&1; then \
+		docker-compose down; \
+	elif docker compose version >/dev/null 2>&1; then \
+		docker compose down; \
+	else \
+		echo "Docker Compose not found"; \
+	fi

@@ -11,9 +11,3 @@ type UserHandler struct {
 func NewUserHandler(userService *services.UserService) *UserHandler {
 	return &UserHandler{userService: userService}
 }
-
-// GetUsers
-// GetUserById
-// CreateUser
-// UpdateUser
-// DeleteUser

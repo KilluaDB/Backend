@@ -22,7 +22,7 @@ func NewQueryHandler(queryService *services.QueryService) *QueryHandler {
 
 // ExecuteQuery executes a SQL query on the specified database connection
 func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
-	projectId := c.Param("project_id")
+	projectId := c.Param("id")
 	if projectId == "" {
 		responses.Fail(c, http.StatusBadRequest, nil, "Project id is required")
 		return
@@ -45,15 +45,20 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	// userId is set as a string in the auth middleware; parse to UUID
-	userIdStr, ok := userId.(string)
-	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-		return
-	}
-	userUUID, err := uuid.Parse(userIdStr)
-	if err != nil {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+	// Convert userID to UUID (handle both uuid.UUID and string types)
+	var userUUID uuid.UUID
+	switch v := userId.(type) {
+	case uuid.UUID:
+		userUUID = v
+	case string:
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
+			return
+		}
+		userUUID = parsed
+	default:
+		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
 		return
 	}
 
@@ -96,8 +101,19 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 		limit = 30 	// max
 	}
 
-	userUUID, ok := userId.(uuid.UUID)
-	if !ok {
+	// Convert userID to UUID (handle both uuid.UUID and string types)
+	var userUUID uuid.UUID
+	switch v := userId.(type) {
+	case uuid.UUID:
+		userUUID = v
+	case string:
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
+			return
+		}
+		userUUID = parsed
+	default:
 		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
 		return
 	}

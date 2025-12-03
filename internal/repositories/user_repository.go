@@ -1,63 +1,105 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"my_project/internal/models"
+	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type UserRepository struct {
-	db *gorm.DB
+	pool *pgxpool.Pool
 }
 
-func NewUserRepository(db *gorm.DB) *UserRepository {
-	return &UserRepository{db: db}
+func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
+	return &UserRepository{pool: pool}
 }
 
 func (r *UserRepository) Create(user *models.User) error {
-	return r.db.Debug().Create(user).Error
+	ctx := context.Background()
+	
+	user.Prepare()
+	
+	query := `
+		INSERT INTO users (id, email, password_hash, created_at)
+		VALUES ($1, $2, $3, $4)
+	`
+	
+	now := time.Now()
+	_, err := r.pool.Exec(ctx, query,
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		now,
+	)
+	
+	return err
 }
 
 func (r *UserRepository) FindUserByID(id uuid.UUID) (*models.User, error) {
+	ctx := context.Background()
+	
+	query := `SELECT id, email, password_hash, created_at, last_login_at
+		FROM users WHERE id = $1`
+	
 	var user models.User
-	err := r.db.Debug().Where("id = ?", id).First(&user).Error
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.CreatedAt,
+		&user.LastLoginAt,
+	)
+	
 	if err != nil {
-		return &models.User{}, err
-	}
-	return &user, nil
-}
-
-func (r *UserRepository) FindUserByEmail(email string) (*models.User, error) {
-	var user models.User
-	err := r.db.Debug().Where("email = ?", email).First(&user).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-
-	if err != nil {
-		return &models.User{}, err
-	}
-	return &user, nil
-}
-
-func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
-	var user models.User
-	if err := r.db.Debug().Where("name = ?", username).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	
 	return &user, nil
 }
 
-// func (r *UserRepository) CreateRefreshToken(token *models.RefreshToken) error {
-// 	return r.db.Debug().Create(token).Error
-// }
+func (r *UserRepository) FindUserByEmail(email string) (*models.User, error) {
+	ctx := context.Background()
+	
+	query := `SELECT id, email, password_hash, created_at, last_login_at
+		FROM users WHERE email = $1`
+	
+	var user models.User
+	err := r.pool.QueryRow(ctx, query, email).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.CreatedAt,
+		&user.LastLoginAt,
+	)
+	
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	
+	return &user, nil
+}
 
-func (r *UserRepository) DeleteRefreshTokensByUserID(userID uint) error {
-	return r.db.Where("user_id = ?", userID).Delete(&models.Session{}).Error
+func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
+	// This method is not used but kept for compatibility
+	// If you need it, you can implement it similar to FindUserByEmail
+	return nil, errors.New("not implemented")
+}
+
+func (r *UserRepository) DeleteRefreshTokensByUserID(userID uuid.UUID) error {
+	ctx := context.Background()
+	
+	query := `DELETE FROM sessions WHERE user_id = $1`
+	_, err := r.pool.Exec(ctx, query, userID)
+	return err
 }

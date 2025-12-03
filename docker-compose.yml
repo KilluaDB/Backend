@@ -1,59 +1,48 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: prod
-    restart: unless-stopped
-    ports:
-      - ${PORT}:${PORT}
-    environment:
-      APP_ENV: ${APP_ENV}
-      PORT: ${PORT}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_DATABASE: ${DB_DATABASE}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_SCHEMA: ${DB_SCHEMA}
-    depends_on:
-      psql_bp:
-        condition: service_healthy
-    networks:
-      - dbaas
-  swagger:
-    image: swaggerapi/swagger-ui:latest
+  postgres:
+    image: postgres:16-alpine
+    container_name: dbaas-postgres
     restart: unless-stopped
     environment:
-      SWAGGER_JSON: /spec/openapi.yaml
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dbaas
     ports:
-      - "8081:8080"
+      - "5432:5432"
     volumes:
-      - ./openapi.yaml:/spec/openapi.yaml:ro
-    depends_on: []
-    networks:
-      - dbaas
-  psql_bp:
-    image: postgres:latest
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${DB_DATABASE}
-      POSTGRES_USER: ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "${DB_PORT}:5432"
-    volumes:
-      - psql_volume_bp:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "sh -c 'pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}'"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
     networks:
-      - dbaas
+      - dbaas-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dbaas-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dbaas-network
+    command: redis-server --appendonly yes
 
 volumes:
-  psql_volume_bp:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
 networks:
-  dbaas:
+  dbaas-network:
+    driver: bridge
+

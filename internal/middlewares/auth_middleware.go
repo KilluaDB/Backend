@@ -33,7 +33,7 @@ func Authenticate(c *gin.Context) {
 	}
 
 	// Store the user ID in context for handlers
-	c.Set("userId", claims.RegisteredClaims.Subject)
+	c.Set("userId", claims.UserID)
 
 	c.Next()
 }

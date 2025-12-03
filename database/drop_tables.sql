@@ -1,9 +1,0 @@
-DROP TABLE api_keys;
-DROP TABLE audit_logs;
-DROP TABLE database_credentials;
-DROP TABLE query_history;
-DROP TABLE restore_jobs;
-DROP TABLE backups;
-DROP TABLE usage_metrics;
-DROP TABLE database_instances;
-DROP TABLE projects;

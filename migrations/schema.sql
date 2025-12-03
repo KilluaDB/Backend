@@ -1,11 +1,6 @@
--- CREATE TYPE IF NOT EXISTS db_type_t AS ENUM ('postgres', 'mongodb');
+-- Database Schema for Database-as-a-Service Platform
 
--- CREATE TYPE instance_status_t AS ENUM ('creating', 'running', 'failed', 'paused', 'deleted');
-
--- CREATE TYPE backup_type_t AS ENUM ('auto', 'manual');
-
--- CREATE TYPE restore_status_t AS ENUM ('pending', 'running', 'success', 'failed');
-
+-- Create ENUM types if they don't exist
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'db_type_t') THEN
@@ -20,20 +15,8 @@ BEGIN
     END IF;
 END$$;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'backup_type_t') THEN
-        CREATE TYPE backup_type_t AS ENUM ('auto', 'manual');
-    END IF;
-END$$;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'restore_status_t') THEN
-        CREATE TYPE restore_status_t AS ENUM ('pending', 'running', 'success', 'failed');
-    END IF;
-END$$;
-
+-- Users table
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT NOT NULL UNIQUE,
@@ -42,6 +25,23 @@ CREATE TABLE IF NOT EXISTS users (
   last_login_at TIMESTAMP WITH TIME ZONE
 );
 
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Sessions table (for authentication)
+CREATE TABLE IF NOT EXISTS sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    refresh_token TEXT NOT NULL,
+    is_revoked BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_refresh_token ON sessions(refresh_token);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
+-- Projects table
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -51,39 +51,59 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
+
+
+-- Database Instances table
 CREATE TABLE IF NOT EXISTS database_instances (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
---   version TEXT,                -- engine version (eg '16.1' or '7.0')
   cpu_cores INT,
   ram_mb INT,
   storage_gb INT,
   status instance_status_t NOT NULL DEFAULT 'creating',
   endpoint TEXT,
   port INT,
+  container_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
+CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
+CREATE INDEX IF NOT EXISTS idx_database_instances_container_id ON database_instances(container_id);
+
+-- Database Credentials table
 CREATE TABLE IF NOT EXISTS database_credentials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
   username TEXT NOT NULL,
-  password_encrypted TEXT NOT NULL,  -- store encrypted/hashed secrets (NOT plain)
---   is_readonly BOOLEAN NOT NULL DEFAULT FALSE,
+  password_encrypted TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_database_credentials_db_instance_id ON database_credentials(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_database_credentials_username ON database_credentials(username);
+
+
+-- API Keys table
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  key_hash TEXT NOT NULL,        -- store hash of key, never the plain key
+  key_hash TEXT NOT NULL,
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMP WITH TIME ZONE,
   revoked BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_revoked ON api_keys(revoked);
+CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at);
+
+
+-- Query History table
 CREATE TABLE IF NOT EXISTS query_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
@@ -94,26 +114,12 @@ CREATE TABLE IF NOT EXISTS query_history (
   execution_time_ms INT
 );
 
-CREATE TABLE IF NOT EXISTS backups (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
-  backup_type backup_type_t NOT NULL,
-  path TEXT NOT NULL,            -- object store path or URI
-  size_mb BIGINT,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMP WITH TIME ZONE
-);
+CREATE INDEX IF NOT EXISTS idx_query_history_db_instance_id ON query_history(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_query_history_executed_at ON query_history(executed_at);
 
-CREATE TABLE IF NOT EXISTS restore_jobs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  backup_id UUID NOT NULL REFERENCES backups(id) ON DELETE CASCADE,
-  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
-  status restore_status_t NOT NULL DEFAULT 'pending',
-  started_at TIMESTAMP WITH TIME ZONE,
-  finished_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
 
+-- Usage Metrics table
 CREATE TABLE IF NOT EXISTS usage_metrics (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
@@ -125,20 +131,5 @@ CREATE TABLE IF NOT EXISTS usage_metrics (
   bandwidth_out_gb REAL
 );
 
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-  action TEXT NOT NULL,       -- e.g., 'created db', 'deleted backup', 'ran query'
---   metadata JSONB,             -- structured extra info (IDs, diff, etc.)
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
--- CREATE TABLE firewall_rules (
---   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
---   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
---   cidr TEXT NOT NULL,        -- e.g., '203.0.113.0/24'
---   description TEXT,
---   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
--- );
-
+CREATE INDEX IF NOT EXISTS idx_usage_metrics_db_instance_id ON usage_metrics(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_usage_metrics_timestamp ON usage_metrics(timestamp);
