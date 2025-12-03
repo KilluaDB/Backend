@@ -10,6 +10,7 @@ import (
 
 	"my_project/internal/models"
 	"my_project/internal/repositories"
+	"my_project/internal/utils"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -164,8 +165,25 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 		return &QueryResult{Error: "database instance endpoint or port not configured", ExecutionTime: execTime}, exec, nil
 	}
 
+	// Decrypt password before building DSN
+	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
+	if err != nil {
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    inst.ID,
+			UserID:          userID,
+			QueryText:       req.Query,
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return &QueryResult{Error: "failed to decrypt database credentials", ExecutionTime: execTime}, exec, nil
+	}
+
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		*inst.Endpoint, *inst.Port, cred.Username, cred.PasswordEncrypted, "postgres")
+		*inst.Endpoint, *inst.Port, cred.Username, dbPassword, "postgres")
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		execTime := time.Since(startTime).Milliseconds()

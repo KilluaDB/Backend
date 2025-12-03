@@ -113,20 +113,20 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		return nil, fmt.Errorf("failed to update database instance status: %w", err)
 	}
 
-	// Store database credentials (encrypted)
-	hashedPassword, err := utils.Hash(orchestratorResp.ConnectionInfo.Password)
+	// Store database credentials: encrypt the password returned by the orchestrator
+	encryptedPassword, err := utils.EncryptString(orchestratorResp.ConnectionInfo.Password)
 	if err != nil {
-		// Log error but don't fail - credentials can be retrieved later
-		fmt.Printf("Warning: failed to hash database password: %v\n", err)
+		// Log error but don't fail - queries will fail until credentials are fixed
+		fmt.Printf("Warning: failed to encrypt database password: %v\n", err)
 	} else {
 		credential := &models.DatabaseCredential{
 			DBInstanceID:      dbInstance.ID,
 			Username:          orchestratorResp.ConnectionInfo.User,
-			PasswordEncrypted: string(hashedPassword),
+			PasswordEncrypted: encryptedPassword,
 		}
 
 		if err := s.dbCredentialRepo.Create(credential); err != nil {
-			// Log error but don't fail - credentials can be retrieved later
+			// Log error but don't fail - credentials can be recreated by recreating the instance
 			fmt.Printf("Warning: failed to save database credentials: %v\n", err)
 		}
 	}

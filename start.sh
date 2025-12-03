@@ -417,6 +417,11 @@ DB_ADMIN_PASSWORD=postgres
 ACCESS_TOKEN_SECRET=your-access-token-secret-change-this-in-production
 REFRESH_TOKEN_SECRET=your-refresh-token-secret-change-this-in-production
 
+# Database credential encryption key (used for AES-GCM in utils/crypto.go)
+# MUST be the same across restarts for existing credentials to remain usable.
+# Use a long, random string in production and keep it secret.
+DB_CRED_ENCRYPTION_KEY=change-this-to-a-long-random-secret
+
 # Redis Configuration (for Orchestrator)
 REDIS_ADDR=localhost:6379
 
