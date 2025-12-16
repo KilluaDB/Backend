@@ -44,3 +44,52 @@ func (h *GoogleAuthHandler) Login(c *gin.Context) {
 	c.Redirect(http.StatusTemporaryRedirect, authURL)
 }
 
+func (h *GoogleAuthHandler) Callback(c *gin.Context) {
+	// Validate state from query parameter against cookie
+	queryState := c.Query("state")
+	if queryState == "" {
+		responses.Fail(c, http.StatusBadRequest, nil, "Missing state parameter")
+		return
+	}
+
+	cookieState, err := c.Cookie("oauth_state")
+	if err != nil {
+		responses.Fail(c, http.StatusBadRequest, err, "Missing state cookie")
+		return
+	}
+
+	if queryState != cookieState {
+		responses.Fail(c, http.StatusForbidden, nil, "State mismatch - possible CSRF attack")
+		return
+	}
+
+	// Clear the state cookie
+	c.SetCookie("oauth_state", "", -1, "/", "", false, true)
+
+	// Get authorization code
+	code := c.Query("code")
+	if code == "" {
+		responses.Fail(c, http.StatusBadRequest, nil, "Missing code")
+		return
+	}
+
+	// Exchange code for token
+	token, err := h.googleOauthConfig.Exchange(c.Request.Context(), code)
+	if err != nil {
+		responses.Fail(c, http.StatusInternalServerError, err, "Token exchange failed")
+		return 
+	}
+
+	// Get user info and create/update user
+	accessToken, err := h.googleAuthService.Callback(c.Request.Context(), token)
+	if err != nil {
+		responses.Fail(c, http.StatusInternalServerError, err, "Failed to login")
+		return
+	}
+
+	res := gin.H{
+		"access_token": accessToken,
+	}
+
+	responses.Success(c, http.StatusOK, res, "User Login Successfully!")
+}
