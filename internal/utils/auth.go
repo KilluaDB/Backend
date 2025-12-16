@@ -80,3 +80,11 @@ func VerifyPassword(encodedHash, password string) error {
 	return errors.New("invalid password")
 }
 
+func GenerateStateOauthCookie() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	state := base64.URLEncoding.EncodeToString(b);
+	return state, nil
+}
