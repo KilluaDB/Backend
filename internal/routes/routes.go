@@ -7,10 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler) {
+func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, googleAuthHandler *handlers.GoogleAuthHandler) {
 	api := router.Group("/api/v1")
 
-	authRoutes := NewAuthRoutes(authHandler)
+	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)
 	authRoutes.RegisterRoutes(api)
 
 	userRoutes := NewUserRoutes(userHandler)
