@@ -105,7 +105,7 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 // ExecuteQuery executes a SQL query on the specified database connection
 func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
-
+	
 	// Validate project ownership
 	project, err := s.projectRepo.GetByIDAndUserID(projectId, userID)
 	if err != nil {
@@ -221,7 +221,6 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 			result.Error = err.Error()
 		}
 	}
-
 	_ = s.execRepo.Create(exec)
 	return result, exec, nil
 }
@@ -229,6 +228,7 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 // executeSQLQuery executes a SQL query and returns results
 func (s *QueryService) executeSQLQuery(db *sql.DB, query string) (*QueryResult, error) {
 	// Check if it's a SELECT query or other query type
+
 	normalized := strings.ToUpper(strings.TrimSpace(query))
 	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
 

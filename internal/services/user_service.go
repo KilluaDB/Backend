@@ -43,12 +43,23 @@ func (s *UserService) Register(user *models.User) (string, string, uuid.UUID, er
 	user.PasswordHash = string(hashedPassword)
 	user.Password = "" // Clear plain password
 
-	// 3. Save user in DB
+	// 3. Policy: First user becomes admin
+	userCount, err := s.userRepo.CountUsers()
+	if err != nil {
+		return "", "", uuid.Nil, err
+	}
+	if userCount == 0 {
+		user.Role = "admin"
+	} else if user.Role == "" {
+		user.Role = "user"
+	}
+
+	// 4. Save user in DB
 	if err := s.userRepo.Create(user); err != nil {
 		return "", "", uuid.Nil, err
 	}
 
-	// 4. Generate tokens
+	// 5. Generate tokens
 	accessToken, err := utils.GenerateJWT(user.ID, 15*time.Minute, utils.AccessTokenSecret)
 	if err != nil {
 		return "", "", uuid.Nil, err
@@ -59,7 +70,7 @@ func (s *UserService) Register(user *models.User) (string, string, uuid.UUID, er
 		return "", "", uuid.Nil, err
 	}
 
-	// 5. Create a session for the refresh token
+	// 6. Create a session for the refresh token
 	session := &models.Session{
 		UserID:       user.ID,
 		RefreshToken: refreshToken,
@@ -149,4 +160,131 @@ func (s *UserService) Refresh(refreshToken string) (string, error) {
 
 func (s *UserService) LogoutByUserID(userID uuid.UUID) error {
 	return s.userRepo.DeleteRefreshTokensByUserID(userID)
+}
+
+// GetUser retrieves a user by ID
+func (s *UserService) GetUser(userID uuid.UUID) (*models.User, error) {
+	user, err := s.userRepo.FindUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+	// Clear sensitive data before returning
+	user.PasswordHash = ""
+	return user, nil
+}
+
+// UpdateUserRequest represents the request body for updating a user
+type UpdateUserRequest struct {
+	Email *string `json:"email,omitempty"`
+	Role  *string `json:"role,omitempty"`
+}
+
+// UpdateUser updates a user's information
+// authenticatedUserID is the ID of the user making the request (for policy checks)
+func (s *UserService) UpdateUser(userID uuid.UUID, authenticatedUserID uuid.UUID, req UpdateUserRequest) (*models.User, error) {
+	// Get existing user
+	user, err := s.userRepo.FindUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+
+	// Get authenticated user to check their role
+	authenticatedUser, err := s.userRepo.FindUserByID(authenticatedUserID)
+	if err != nil {
+		return nil, err
+	}
+	if authenticatedUser == nil {
+		return nil, errors.New("authenticated user not found")
+	}
+
+	// Policy: Only admins can promote/demote others (change role)
+	if req.Role != nil && *req.Role != user.Role {
+		if authenticatedUser.Role != "admin" {
+			return nil, errors.New("only admins can change user roles")
+		}
+
+		// Policy: Admin cannot demote themselves
+		if authenticatedUserID == userID && *req.Role != "admin" {
+			return nil, errors.New("admin cannot demote themselves")
+		}
+	}
+
+	// Update fields if provided
+	if req.Email != nil {
+		user.Email = *req.Email
+	}
+	if req.Role != nil {
+		user.Role = *req.Role
+	}
+
+	// Save updated user
+	if err := s.userRepo.Update(user); err != nil {
+		return nil, err
+	}
+
+	// Clear sensitive data before returning
+	user.PasswordHash = ""
+	return user, nil
+}
+
+// DeleteUser deletes a user by ID
+// authenticatedUserID is the ID of the user making the request (for policy checks)
+func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID) error {
+	// Check if user exists
+	user, err := s.userRepo.FindUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("user not found")
+	}
+	// Get authenticated user to check their role
+	authenticatedUser, err := s.userRepo.FindUserByID(authenticatedUserID)
+	if err != nil {
+		return err
+	}
+	if authenticatedUser == nil {
+		return errors.New("authenticated user not found")
+	}
+	if err != nil {
+		return err
+	}
+	// Policy: Admins cannot delete admins
+	if user.Role == "admin" && authenticatedUser.Role == "admin" && user.ID != authenticatedUser.ID {
+		return errors.New("admins cannot delete other admins")
+	}
+	// Policy: Cannot delete last admin
+	if user.Role == "admin" {
+		adminCount, err := s.userRepo.CountAdmins()
+		if err != nil {
+			return err
+		}
+		if adminCount <= 1 {
+			return errors.New("cannot delete the last admin")
+		}
+	}
+
+	// Delete user (CASCADE will handle related records)
+	return s.userRepo.Delete(userID)
+}
+
+// GetAllUsers retrieves all users
+func (s *UserService) GetAllUsers() ([]models.User, error) {
+	users, err := s.userRepo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// Clear sensitive data before returning
+	for i := range users {
+		users[i].PasswordHash = ""
+	}
+
+	return users, nil
 }

@@ -45,4 +45,3 @@ volumes:
 networks:
   dbaas-network:
     driver: bridge
-

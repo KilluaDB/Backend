@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
 
+	"my_project/internal/config"
 	"my_project/internal/database"
 	"my_project/internal/handlers"
 	"my_project/internal/repositories"
@@ -61,12 +62,16 @@ func NewServer() *http.Server {
 		pool: pool,
 	}
 
+	cfg, _ := config.OAuthConfig()
+
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
 	sessionRepo := repositories.NewSessionRepository(pool)
 	userService := services.NewUserService(userRepo, sessionRepo)
+	googleAuthService := services.NewGoogleAuthService(userRepo)
 	authHandler := handlers.NewAuthHandler(userService)
 	userHandler := handlers.NewUserHandler(userService)
+	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, cfg)
 
 	// Project dependencies
 	projectRepo := repositories.NewProjectRepository(pool)
@@ -95,14 +100,27 @@ func NewServer() *http.Server {
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler) // register all routes
+<<<<<<< HEAD
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
+=======
+<<<<<<< HEAD
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
+=======
+<<<<<<< HEAD
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
+=======
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, userRepo) // register all routes
+>>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
+>>>>>>> 57f664a (Restering the new services & env variables)
+>>>>>>> dfb2dc5 (Restering the new services & env variables)
 	// Create and configure the HTTP server
+	// WriteTimeout is set to 5 minutes to accommodate long-running database queries
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
 		Handler:      router,
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 5 * time.Minute, // Increased to handle long-running queries
 	}
 
 	return server
@@ -125,6 +143,9 @@ func validateRequiredEnvVars() error {
 		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
 		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
 		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
+		"GOOGLE_CLIENT_ID":					os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_SECRET":				os.Getenv("GOOGLE_CLIENT_SECRET"),
+		"GOOGLE_REDIRECT_URL":				os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {

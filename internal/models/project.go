@@ -20,4 +20,3 @@ func (p *Project) Prepare() {
 		p.ID = uuid.New()
 	}
 }
-

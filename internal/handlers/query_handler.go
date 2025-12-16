@@ -44,7 +44,6 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, nil, "Query is required: Cannot be empty")
 		return
 	}
-
 	// Convert userID to UUID (handle both uuid.UUID and string types)
 	var userUUID uuid.UUID
 	switch v := userId.(type) {
@@ -61,19 +60,16 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
 		return
 	}
-
 	projectUUID, err := uuid.Parse(projectId)
 	if err != nil {
 		responses.Fail(c, http.StatusBadRequest, nil, "Invalid projectId format")
 		return
 	}
-
 	result, exec, err := h.queryService.ExecuteQuery(userUUID, &req, projectUUID)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to execute query")
 		return
 	}
-
 	response := gin.H{
 		"result":            result,
 		"execution_id":      exec.ID,

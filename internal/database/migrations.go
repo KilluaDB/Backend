@@ -14,13 +14,17 @@ func RunMigrations(pool *pgxpool.Pool) error {
 	migrations := []string{
 		createEnumTypes,
 		createUsersTable,
+		addRolesColumnToUsers,
+		addSoftDeleteToUsers,
 		createSessionsTable,
 		createProjectsTable,
 		createDatabaseInstancesTable,
 		createDatabaseCredentialsTable,
 		createAPIKeysTable,
 		createQueryHistoryTable,
+		fixQueryHistoryForeignKey,
 		createUsageMetricsTable,
+		preventHardDeleteUsers,
 	}
 
 	for i, migration := range migrations {
@@ -61,6 +65,43 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+`
+
+const addRolesColumnToUsers = `
+-- Add roles column to users table if it doesn't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'users' AND column_name = 'role'
+  ) THEN
+    ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
+    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+  END IF;
+END$$;
+`
+
+const addSoftDeleteToUsers = `
+-- Add soft-delete support to users table
+DO $$
+BEGIN
+  -- Add deleted_at column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'users' AND column_name = 'deleted_at'
+  ) THEN
+    ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+    CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at);
+  END IF;
+
+  -- Add status column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'users' AND column_name = 'status'
+  ) THEN
+    ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+  END IF;
+END$$;
 `
 
 const createSessionsTable = `
@@ -155,6 +196,56 @@ CREATE TABLE IF NOT EXISTS query_history (
 CREATE INDEX IF NOT EXISTS idx_query_history_db_instance_id ON query_history(db_instance_id);
 CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_query_history_executed_at ON query_history(executed_at);
+`
+
+const fixQueryHistoryForeignKey = `
+-- Fix query_history foreign key to use RESTRICT instead of SET NULL
+DO $$
+BEGIN
+  -- Drop existing constraint if it exists
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'query_history_user_id_fkey' 
+    AND table_name = 'query_history'
+  ) THEN
+    ALTER TABLE query_history DROP CONSTRAINT query_history_user_id_fkey;
+  END IF;
+
+  -- Ensure user_id is NOT NULL
+  ALTER TABLE query_history ALTER COLUMN user_id SET NOT NULL;
+
+  -- Add correct foreign key with RESTRICT
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'query_history_user_fk' 
+    AND table_name = 'query_history'
+  ) THEN
+    ALTER TABLE query_history
+    ADD CONSTRAINT query_history_user_fk
+    FOREIGN KEY (user_id)
+    REFERENCES users(id)
+    ON DELETE RESTRICT;
+  END IF;
+END$$;
+`
+
+const preventHardDeleteUsers = `
+-- Prevent hard delete of users (enforce soft-delete only)
+-- Create or replace function (safe to run multiple times)
+CREATE OR REPLACE FUNCTION prevent_hard_delete_users()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Hard delete of users is not allowed. Use soft-delete instead.';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate (safe to run multiple times)
+DROP TRIGGER IF EXISTS no_user_hard_delete ON users;
+
+CREATE TRIGGER no_user_hard_delete
+BEFORE DELETE ON users
+FOR EACH ROW
+EXECUTE FUNCTION prevent_hard_delete_users();
 `
 
 const createUsageMetricsTable = `

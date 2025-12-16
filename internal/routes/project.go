@@ -23,6 +23,13 @@ func (r *ProjectRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		projects.GET("", r.handler.ListProjects)
 		projects.GET("/:id", r.handler.GetProject)
 		projects.DELETE("/:id", r.handler.DeleteProject)
+
+		// Insert / Delete ROW(S)
+		projects.POST("/:id/rows", r.handler.InsertRow)
+		projects.DELETE("/:id/rows/:row_id", r.handler.DeleteRow)
+
+		// Insert / Delete COLUMN(S)
+		projects.POST("/:id/columns", r.handler.AddColumn)
+		projects.DELETE("/:id/columns/:column_name", r.handler.DeleteColumn)
 	}
 }
-
