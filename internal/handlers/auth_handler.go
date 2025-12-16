@@ -44,11 +44,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// 3. Return tokens
 	res := gin.H{
-		"message":                  "User registered successfully",
 		"access_token":             accessToken,
-		"refresh_token":            refreshToken,
-		"access_token_expires_in":  "15m",
-		"refresh_token_expires_in": "24h",
 	}
 
 	responses.Success(c, http.StatusCreated, res, "New user registered successfully!")
