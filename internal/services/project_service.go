@@ -29,9 +29,10 @@ func NewProjectService(
 }
 
 type CreateProjectRequest struct {
-	Name        string  `json:"name" binding:"required"`
-	Description *string `json:"description,omitempty"`
-	DBType      string  `json:"db_type" binding:"required"` // 'postgres' or 'mongodb'
+	Name         string  `json:"name" binding:"required"`
+	Description  *string `json:"description,omitempty"`
+	DBType       string  `json:"db_type" binding:"required"`        // 'postgres' or 'mongodb'
+	ResourceTier string  `json:"resource_tier" binding:"required"`  // 'free', 'basic', or 'premium'
 }
 
 func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, error) {
@@ -46,12 +47,18 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		return nil, fmt.Errorf("invalid db_type: must be 'postgres' or 'mongodb'")
 	}
 
+	// Validate resource tier
+	if req.ResourceTier != "free" && req.ResourceTier != "basic" && req.ResourceTier != "premium" {
+		return nil, fmt.Errorf("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+	}
+
 	// Create project record
 	project := &models.Project{
-		UserID:      userUUID,
-		Name:        req.Name,
-		Description: req.Description,
-		DBType:      req.DBType,
+		UserID:       userUUID,
+		Name:         req.Name,
+		Description:  req.Description,
+		DBType:       req.DBType,
+		ResourceTier: req.ResourceTier,
 	}
 
 	if err := s.projectRepo.Create(project); err != nil {
@@ -64,10 +71,22 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		dbTypeForOrchestrator = "postgresql"
 	}
 
-	// Create database instance record (status: creating)
+	// Map resource tier to resource limits
+	resourceConfig := s.getResourceConfigForTier(req.ResourceTier)
+	
+	// Get CPU and RAM values for database instance
+	cpuCores := int(resourceConfig["cpu"].(float64))
+	ramMB := int(resourceConfig["memory_mb"].(float64))
+	// Storage can be set based on tier as well, defaulting to 10GB for all tiers
+	storageGB := 10
+
+	// Create database instance record (status: creating) with resource information
 	dbInstance := &models.DatabaseInstance{
 		ProjectID: project.ID,
 		Status:    "creating",
+		CPUCores:  &cpuCores,
+		RAMMB:     &ramMB,
+		StorageGB: &storageGB,
 	}
 
 	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
@@ -80,10 +99,11 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	orchestratorReq := CreateContainerRequest{
 		SessionName:   project.ID.String(), // Use project ID as session name
 		DatabaseType:  dbTypeForOrchestrator,
-		Configuration: nil, // Can be extended later
+		Configuration: resourceConfig,
 	}
 
-	fmt.Printf("Creating container for project %s with database type %s\n", project.ID.String(), dbTypeForOrchestrator)
+	fmt.Printf("Creating container for project %s with database type %s and tier %s (CPU: %d, RAM: %dMB)\n", 
+		project.ID.String(), dbTypeForOrchestrator, req.ResourceTier, cpuCores, ramMB)
 	orchestratorResp, err := s.orchestrator.CreateContainer(orchestratorReq)
 	if err != nil {
 		// Update instance status to failed
@@ -241,4 +261,31 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	}
 
 	return nil
+}
+
+// getResourceConfigForTier maps resource tiers to resource configurations
+// Returns a map with cpu (in cores) and memory_mb (in MB) for the orchestrator
+func (s *ProjectService) getResourceConfigForTier(tier string) map[string]interface{} {
+	config := make(map[string]interface{})
+
+	switch tier {
+	case "free":
+		// Free tier: 0.5 CPU, 512 MB RAM
+		config["cpu"] = 0.5
+		config["memory_mb"] = 512.0
+	case "basic":
+		// Basic tier: 1 CPU, 1024 MB (1 GB) RAM
+		config["cpu"] = 1.0
+		config["memory_mb"] = 1024.0
+	case "premium":
+		// Premium tier: 2 CPU, 2048 MB (2 GB) RAM
+		config["cpu"] = 2.0
+		config["memory_mb"] = 2048.0
+	default:
+		// Default to free tier if invalid
+		config["cpu"] = 0.5
+		config["memory_mb"] = 512.0
+	}
+
+	return config
 }

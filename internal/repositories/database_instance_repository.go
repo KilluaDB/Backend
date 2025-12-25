@@ -154,6 +154,19 @@ func (r *DatabaseInstanceRepository) UpdateContainerID(id uuid.UUID, containerID
 	return err
 }
 
+func (r *DatabaseInstanceRepository) UpdateResources(id uuid.UUID, cpuCores int, ramMB int, storageGB int) error {
+	ctx := context.Background()
+
+	query := `
+		UPDATE database_instances 
+		SET cpu_cores = $2, ram_mb = $3, storage_gb = $4, updated_at = $5
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, id, cpuCores, ramMB, storageGB, time.Now())
+	return err
+}
+
 func (r *DatabaseInstanceRepository) GetRunningByProjectID(projectID uuid.UUID) (*models.DatabaseInstance, error) {
 	ctx := context.Background()
 
