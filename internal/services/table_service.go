@@ -81,6 +81,87 @@ type DeleteTableRequest struct {
 
 
 
+// isValidIdentifier checks if a string is a valid PostgreSQL identifier
+func isValidIdentifier(name string) bool {
+	if name == "" || len(name) > 63 {
+		return false
+	}
+	// PostgreSQL identifiers: start with letter or underscore, followed by letters, digits, underscores, or dollar signs
+	matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_$]*$`, name)
+	return matched
+}
+
+// validateCreateTableRequest validates the create table request
+func (s *TableService) validateCreateTableRequest(req *CreateTableRequest) error {
+	if req.Schema == "" {
+		req.Schema = "public"
+	}
+
+	if !isValidIdentifier(req.Schema) {
+		return errors.New("invalid schema name")
+	}
+	if !isValidIdentifier(req.Table) {
+		return errors.New("invalid table name")
+	}
+
+	if len(req.Columns) == 0 {
+		return errors.New("at least one column is required")
+	}
+
+	// Validate column names and types
+	for i, col := range req.Columns {
+		if !isValidIdentifier(col.Name) {
+			return fmt.Errorf("invalid column name at index %d: %s", i, col.Name)
+		}
+		if col.Type == "" {
+			return fmt.Errorf("column type is required for column: %s", col.Name)
+		}
+		// Validate column type (basic check)
+		if !isValidColumnType(col.Type) {
+			return fmt.Errorf("invalid column type for %s: %s", col.Name, col.Type)
+		}
+	}
+
+	// Validate foreign keys if present
+	if req.ForeignKeys != nil {
+		if !isValidIdentifier(req.ForeignKeys.Schema) {
+			return errors.New("invalid foreign key schema name")
+		}
+		if !isValidIdentifier(req.ForeignKeys.Table) {
+			return errors.New("invalid foreign key table name")
+		}
+		for _, ref := range req.ForeignKeys.References {
+			if !isValidIdentifier(ref.LocalColumn) || !isValidIdentifier(ref.ForeignColumn) {
+				return errors.New("invalid foreign key column name")
+			}
+		}
+	}
+
+	return nil
+}
+
+// isValidColumnType validates PostgreSQL column types
+func isValidColumnType(colType string) bool {
+	// Convert to uppercase for comparison
+	upper := strings.ToUpper(colType)
+	validTypes := []string{
+		"INT", "INTEGER", "BIGINT", "SMALLINT", "SERIAL", "BIGSERIAL",
+		"DECIMAL", "NUMERIC", "REAL", "DOUBLE PRECISION",
+		"BOOLEAN", "BOOL",
+		"CHAR", "VARCHAR", "TEXT",
+		"DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ", "INTERVAL",
+		"UUID", "JSON", "JSONB", "BYTEA",
+	}
+
+	// Check exact match or parameterized types like VARCHAR(50)
+	for _, valid := range validTypes {
+		if strings.HasPrefix(upper, valid) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *TableService) openDbConnection(userId uuid.UUID, projectId uuid.UUID) (*sql.DB, error) {
 	project, err := s.projectRepo.GetByIDAndUserID(projectId, userId)
 	if err != nil {
