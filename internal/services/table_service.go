@@ -78,3 +78,55 @@ type DeleteTableRequest struct {
 	Schema 		string			`json:"schema" binding:"required"`
 	Table 		string			`json:"table" binding:"required"`
 }
+
+
+
+func (s *TableService) openDbConnection(userId uuid.UUID, projectId uuid.UUID) (*sql.DB, error) {
+	project, err := s.projectRepo.GetByIDAndUserID(projectId, userId)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project not found or not accessible")
+	}
+
+	dbInstance, err := s.instanceRepo.GetRunningByProjectID(projectId)
+	if err != nil {
+		return nil, err
+	}
+	if dbInstance == nil {
+		return nil, errors.New("no running database instance for this project")
+	}
+
+	dbCred, err := s.credentialsRepo.GetLatestByInstanceID(dbInstance.ID)
+	if err != nil {
+		return nil, err
+	}
+	if dbCred == nil {
+		return nil, errors.New("no credentials configured for this database instance")
+	}
+
+	if dbInstance.Endpoint == nil || dbInstance.Port == nil {
+		return nil, errors.New("database instance endpoint or port not configured")
+	}
+
+	dbPassword, err := utils.DecryptString(dbCred.PasswordEncrypted)
+	if err != nil {
+		return nil, err
+	}	
+
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", 
+		*dbInstance.Endpoint,
+		*dbInstance.Port,
+		dbCred.Username,
+		dbPassword,
+		"postgres",
+	)
+
+	sqlDb, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	
+	return sqlDb, nil
+}
