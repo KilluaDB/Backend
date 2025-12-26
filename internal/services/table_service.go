@@ -79,7 +79,119 @@ type DeleteTableRequest struct {
 	Table 		string			`json:"table" binding:"required"`
 }
 
+func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error) {
+	if req.Schema == "" {
+		req.Schema = "public"
+	}
 
+	// Use quoted identifiers to prevent SQL injection
+	query := fmt.Sprintf("CREATE TABLE \"%s\".\"%s\" (\n", req.Schema, req.Table)
+	for i, col := range req.Columns {
+		columnDef := fmt.Sprintf("  \"%s\" %s", col.Name, col.Type)
+
+		if col.IsIdentity {
+			columnDef += " GENERATED ALWAYS AS IDENTITY"
+		}
+
+		if col.Primary {
+			columnDef += " PRIMARY KEY"
+		}
+
+		if col.IsUnique {
+			columnDef += " UNIQUE"
+		}
+
+		if !col.Nullable {
+			columnDef += " NOT NULL"
+		}
+
+		if col.Default != nil && *col.Default != "" {
+			columnDef += fmt.Sprintf(" DEFAULT %s", *col.Default)
+		}
+
+		// Add comma for all but last column, or if FK exists
+		if i < len(req.Columns)-1 || (req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0) {
+			columnDef += ","
+		}
+
+		query += columnDef + "\n"
+	}
+
+	if req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0 {
+		for i, fk := range req.ForeignKeys.References {
+			fkDef := fmt.Sprintf("  FOREIGN KEY (\"%s\") REFERENCES \"%s\".\"%s\"(\"%s\")", 
+				fk.LocalColumn,
+				req.ForeignKeys.Schema,
+				req.ForeignKeys.Table,
+				fk.ForeignColumn,
+			)
+
+			if fk.OnDelete != "" {
+				fkDef += " ON DELETE " + fk.OnDelete
+			}
+
+			if fk.OnUpdate != "" {
+				fkDef += " ON UPDATE " + fk.OnUpdate
+			}
+
+			// No comma on last FK
+			if i < len(req.ForeignKeys.References)-1 {
+				fkDef += ","
+			}
+
+			query += fkDef + "\n"
+		}
+	}
+	query += ");\n"
+
+	return query, nil;
+
+	/*
+	{
+		"schema": 	"public",
+		"table": 	"users",
+		"columns":	[
+			{
+				"name": 			"id",
+				"type": 			"INT",
+				"primary": 		true,
+				"is_unique": 	true,
+				"is_identity": true,
+				"nullable": 	false
+			}, 
+			{
+				"name": 			"first_name",
+				"type": 			"VARCHAR(50)",
+				"nullable": 	false
+			},
+			{
+				"name": 			"last_name",
+				"type": 			"VARCHAR(50)",
+				"nullable": 	false
+			},
+			{
+				"name": 			"department_id",
+				"type": 			"INT",
+				"nullable": 	false
+			}
+		],
+		"foreign_keys": [
+			{
+				"schema":	"public",
+				"table":		"users",
+				"references": [
+					{
+						"local_column": 	"department_id",
+						"foreign_column": "id",
+						"on_update": 		"CASCADE",
+						"on_delete": 		"SET NULL"
+					}
+				]
+			}
+		]
+	}
+	*/
+}
 
 // isValidIdentifier checks if a string is a valid PostgreSQL identifier
 func isValidIdentifier(name string) bool {
