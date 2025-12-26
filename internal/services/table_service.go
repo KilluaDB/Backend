@@ -115,6 +115,50 @@ func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, pr
 	return &result, nil
 }
 
+func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
+	// Validate identifiers
+	if !isValidIdentifier(req.Schema) {
+		return nil, errors.New("invalid schema name")
+	}
+	if !isValidIdentifier(req.Table) {
+		return nil, errors.New("invalid table name")
+	}
+
+	sqlDb, err := s.openDbConnection(userId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	defer sqlDb.Close()
+	
+	// Start transaction
+	tx, err := sqlDb.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := s.tableRepo.Delete(tx, req.Schema, req.Table)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete table: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &result, nil
+}
+
+// func (s *TableService) UpdateTable(req *UpdateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
+// 	sqlDb, err := s.openDbConnection(userId, projectId)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer sqlDb.Close()
+
+// 	return nil, nil
+// }
+
 func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error) {
 	if req.Schema == "" {
 		req.Schema = "public"
