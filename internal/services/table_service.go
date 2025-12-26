@@ -79,6 +79,42 @@ type DeleteTableRequest struct {
 	Table 		string			`json:"table" binding:"required"`
 }
 
+func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
+	// Validate request
+	if err := s.validateCreateTableRequest(req); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	sqlDb, err := s.openDbConnection(userId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	defer sqlDb.Close()
+
+	// Start transaction
+	tx, err := sqlDb.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query, err := s.parseCreateQuery(req)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := tx.Exec(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create table: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &result, nil
+}
+
 func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error) {
 	if req.Schema == "" {
 		req.Schema = "public"
