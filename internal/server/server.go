@@ -83,11 +83,17 @@ func NewServer() *http.Server {
 	}
 	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
 	projectHandler := handlers.NewProjectHandler(projectService)
+	
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
 	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
 	queryHandler := handlers.NewQueryHandler(queryService)
+
+	// 
+	tableRepo := repositories.NewTableRepository(pool)
+	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
+	tableHandler := handlers.NewTableHandler(tableService)
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -100,7 +106,7 @@ func NewServer() *http.Server {
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler) // register all routes
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
