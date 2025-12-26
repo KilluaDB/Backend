@@ -66,11 +66,10 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-	sessionRepo := repositories.NewSessionRepository(pool)
-	userService := services.NewUserService(userRepo, sessionRepo)
+	authService := services.NewAuthService(userRepo)
 	googleAuthService := services.NewGoogleAuthService(userRepo)
-	authHandler := handlers.NewAuthHandler(userService)
-	userHandler := handlers.NewUserHandler(userService)
+	authHandler := handlers.NewAuthHandler(authService)
+	userHandler := handlers.NewUserHandler(authService)
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, cfg)
 
 	// Project dependencies

@@ -5,9 +5,9 @@ import (
 )
 
 type UserHandler struct {
-	userService *services.UserService
+	authService *services.AuthService
 }
 
-func NewUserHandler(userService *services.UserService) *UserHandler {
-	return &UserHandler{userService: userService}
+func NewUserHandler(authService *services.AuthService) *UserHandler {
+	return &UserHandler{authService: authService}
 }
