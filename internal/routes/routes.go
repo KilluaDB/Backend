@@ -8,13 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, googleAuthHandler *handlers.GoogleAuthHandler) {
-=======
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, userRepo *repositories.UserRepository) {
->>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
-=======
+
 func RegisterRoutes(
 	router *gin.Engine, 
 	authHandler *handlers.AuthHandler, 
@@ -23,8 +17,9 @@ func RegisterRoutes(
 	queryHandler *handlers.QueryHandler, 
 	googleAuthHandler *handlers.GoogleAuthHandler,
 	tableHandler *handlers.TableHandler,
+	userRepo *repositories.UserRepository,
 ) {
->>>>>>> feature/oauth2.0
+
 	api := router.Group("/api/v1")
 
 	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)

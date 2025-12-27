@@ -66,18 +66,14 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-<<<<<<< HEAD
-	sessionRepo := repositories.NewSessionRepository(pool)
-	userService := services.NewUserService(userRepo, sessionRepo)
-	googleAuthService := services.NewGoogleAuthService(userRepo)
-	authHandler := handlers.NewAuthHandler(userService)
+
+	userService := services.NewUserService(userRepo)
 	userHandler := handlers.NewUserHandler(userService)
-=======
+
 	authService := services.NewAuthService(userRepo)
 	googleAuthService := services.NewGoogleAuthService(userRepo)
 	authHandler := handlers.NewAuthHandler(authService)
-	userHandler := handlers.NewUserHandler(authService)
->>>>>>> feature/oauth2.0
+
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, cfg)
 
 	// Project dependencies
@@ -113,23 +109,9 @@ func NewServer() *http.Server {
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
-<<<<<<< HEAD
-<<<<<<< HEAD
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
-<<<<<<< HEAD
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
-<<<<<<< HEAD
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, userRepo) // register all routes
->>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
->>>>>>> 57f664a (Restering the new services & env variables)
->>>>>>> dfb2dc5 (Restering the new services & env variables)
-=======
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler) // register all routes
->>>>>>> feature/oauth2.0
+
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler, userRepo) // register all routes
+
 	// Create and configure the HTTP server
 	// WriteTimeout is set to 5 minutes to accommodate long-running database queries
 	server := &http.Server{
