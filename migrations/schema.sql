@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS database_instances (
   ram_mb INT,
   storage_gb INT,
   status instance_status_t NOT NULL DEFAULT 'creating',
-  endpoint TEXT,
   port INT,
   container_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

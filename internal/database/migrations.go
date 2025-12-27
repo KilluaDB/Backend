@@ -21,6 +21,7 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		createAPIKeysTable,
 		createQueryHistoryTable,
 		createUsageMetricsTable,
+		dropEndpointColumn, // Migration to remove endpoint column if it exists
 	}
 
 	for i, migration := range migrations {
@@ -100,7 +101,6 @@ CREATE TABLE IF NOT EXISTS database_instances (
   ram_mb INT,
   storage_gb INT,
   status instance_status_t NOT NULL DEFAULT 'creating',
-  endpoint TEXT,
   port INT,
   container_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS database_instances (
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
 CREATE INDEX IF NOT EXISTS idx_database_instances_container_id ON database_instances(container_id);
+`
+
+const dropEndpointColumn = `
+-- Remove endpoint column if it exists (migration for existing databases)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'database_instances' AND column_name = 'endpoint'
+  ) THEN
+    ALTER TABLE database_instances DROP COLUMN endpoint;
+  END IF;
+END$$;
 `
 
 const createDatabaseCredentialsTable = `

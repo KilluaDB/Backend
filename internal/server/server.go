@@ -81,11 +81,11 @@ func NewServer() *http.Server {
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
+	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, orchestratorService)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
 	// Schema dependencies
-	schemaService := services.NewSchemaService(projectRepo, dbInstanceRepo, dbCredentialRepo)
+	schemaService := services.NewSchemaService(projectRepo, dbInstanceRepo, dbCredentialRepo, orchestratorService)
 	schemaHandler := handlers.NewSchemaHandler(schemaService)
 
 	// Initialize Gin router

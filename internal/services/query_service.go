@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -21,14 +22,16 @@ type QueryService struct {
 	instanceRepo *repositories.DatabaseInstanceRepository
 	credRepo     *repositories.DatabaseCredentialRepository
 	execRepo     *repositories.QueryHistoryRepository
+	orchestrator *OrchestratorService
 }
 
-func NewQueryService(projectRepo *repositories.ProjectRepository, instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, execRepo *repositories.QueryHistoryRepository) *QueryService {
+func NewQueryService(projectRepo *repositories.ProjectRepository, instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, execRepo *repositories.QueryHistoryRepository, orchestrator *OrchestratorService) *QueryService {
 	return &QueryService{
 		projectRepo:  projectRepo,
 		instanceRepo: instanceRepo,
 		credRepo:     credRepo,
 		execRepo:     execRepo,
+		orchestrator: orchestrator,
 	}
 }
 
@@ -149,8 +152,8 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
 	}
 
-	// Build connection string
-	if inst.Endpoint == nil || inst.Port == nil {
+	// Validate container_id exists
+	if inst.ContainerID == nil || *inst.ContainerID == "" {
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		exec := &models.QueryHistory{
@@ -162,7 +165,45 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 			ExecutionTimeMs: &[]int{int(execTime)}[0],
 		}
 		_ = s.execRepo.Create(exec)
-		return &QueryResult{Error: "database instance endpoint or port not configured", ExecutionTime: execTime}, exec, nil
+		return &QueryResult{Error: "database instance container ID not configured", ExecutionTime: execTime}, exec, nil
+	}
+
+	// Get current IP from orchestrator
+	ip, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
+	if !ok {
+		// Try Redis as fallback
+		var err error
+		ip, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
+		if err != nil {
+			execTime := time.Since(startTime).Milliseconds()
+			success := false
+			exec := &models.QueryHistory{
+				DBInstanceID:    inst.ID,
+				UserID:          userID,
+				QueryText:       req.Query,
+				ExecutedAt:      time.Now(),
+				Success:         &success,
+				ExecutionTimeMs: &[]int{int(execTime)}[0],
+			}
+			_ = s.execRepo.Create(exec)
+			return &QueryResult{Error: "failed to get container IP from orchestrator", ExecutionTime: execTime}, exec, nil
+		}
+	}
+
+	// Validate port
+	if inst.Port == nil {
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    inst.ID,
+			UserID:          userID,
+			QueryText:       req.Query,
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return &QueryResult{Error: "database instance port not configured", ExecutionTime: execTime}, exec, nil
 	}
 
 	// Decrypt password before building DSN
@@ -182,8 +223,9 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 		return &QueryResult{Error: "failed to decrypt database credentials", ExecutionTime: execTime}, exec, nil
 	}
 
+	// Build connection string using IP from orchestrator
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		*inst.Endpoint, *inst.Port, cred.Username, dbPassword, "postgres")
+		ip, *inst.Port, cred.Username, dbPassword, "postgres")
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		execTime := time.Since(startTime).Milliseconds()

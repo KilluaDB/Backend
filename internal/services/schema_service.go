@@ -23,6 +23,7 @@ type SchemaService struct {
 	projectRepo  *repositories.ProjectRepository
 	instanceRepo *repositories.DatabaseInstanceRepository
 	credRepo     *repositories.DatabaseCredentialRepository
+	orchestrator *OrchestratorService
 }
 
 // NewSchemaService creates a new SchemaService
@@ -30,11 +31,13 @@ func NewSchemaService(
 	projectRepo *repositories.ProjectRepository,
 	instanceRepo *repositories.DatabaseInstanceRepository,
 	credRepo *repositories.DatabaseCredentialRepository,
+	orchestrator *OrchestratorService,
 ) *SchemaService {
 	return &SchemaService{
 		projectRepo:  projectRepo,
 		instanceRepo: instanceRepo,
 		credRepo:     credRepo,
+		orchestrator: orchestrator,
 	}
 }
 
@@ -66,9 +69,24 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 		return "", errors.New("no credentials configured for this database instance")
 	}
 
-	// Validate endpoint and port
-	if inst.Endpoint == nil || inst.Port == nil {
-		return "", errors.New("database instance endpoint or port not configured")
+	// Validate container_id
+	if inst.ContainerID == nil || *inst.ContainerID == "" {
+		return "", errors.New("database instance container ID not configured")
+	}
+
+	// Get current IP from orchestrator
+	ip, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
+	if !ok {
+		var err error
+		ip, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get container IP from orchestrator: %w", err)
+		}
+	}
+
+	// Validate port
+	if inst.Port == nil {
+		return "", errors.New("database instance port not configured")
 	}
 
 	// Decrypt password
@@ -77,8 +95,8 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 		return "", fmt.Errorf("failed to decrypt database credentials: %w", err)
 	}
 
-	// Connect to the project database using metadata stored in the main database
-	pool, err := database.ConnectToProjectDatabase(*inst.Endpoint, *inst.Port, cred.Username, dbPassword, "postgres")
+	// Connect to the project database using IP from orchestrator
+	pool, err := database.ConnectToProjectDatabase(ip, *inst.Port, cred.Username, dbPassword, "postgres")
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to project database: %w", err)
 	}

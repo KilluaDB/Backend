@@ -25,8 +25,8 @@ func (r *DatabaseInstanceRepository) Create(instance *models.DatabaseInstance) e
 	instance.Prepare()
 
 	query := `
-		INSERT INTO database_instances (id, project_id, cpu_cores, ram_mb, storage_gb, status, endpoint, port, container_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO database_instances (id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	now := time.Now()
@@ -37,7 +37,6 @@ func (r *DatabaseInstanceRepository) Create(instance *models.DatabaseInstance) e
 		instance.RAMMB,
 		instance.StorageGB,
 		instance.Status,
-		instance.Endpoint,
 		instance.Port,
 		instance.ContainerID,
 		now,
@@ -51,7 +50,7 @@ func (r *DatabaseInstanceRepository) GetByID(id uuid.UUID) (*models.DatabaseInst
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, endpoint, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
 		FROM database_instances WHERE id = $1
 	`
 
@@ -63,7 +62,6 @@ func (r *DatabaseInstanceRepository) GetByID(id uuid.UUID) (*models.DatabaseInst
 		&instance.RAMMB,
 		&instance.StorageGB,
 		&instance.Status,
-		&instance.Endpoint,
 		&instance.Port,
 		&instance.ContainerID,
 		&instance.CreatedAt,
@@ -84,7 +82,7 @@ func (r *DatabaseInstanceRepository) GetByProjectID(projectID uuid.UUID) (*model
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, endpoint, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
 		FROM database_instances WHERE project_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -98,7 +96,6 @@ func (r *DatabaseInstanceRepository) GetByProjectID(projectID uuid.UUID) (*model
 		&instance.RAMMB,
 		&instance.StorageGB,
 		&instance.Status,
-		&instance.Endpoint,
 		&instance.Port,
 		&instance.ContainerID,
 		&instance.CreatedAt,
@@ -125,19 +122,6 @@ func (r *DatabaseInstanceRepository) UpdateStatus(id uuid.UUID, status string) e
 	`
 
 	_, err := r.pool.Exec(ctx, query, id, status, time.Now())
-	return err
-}
-
-func (r *DatabaseInstanceRepository) UpdateEndpoint(id uuid.UUID, endpoint string, port int) error {
-	ctx := context.Background()
-
-	query := `
-		UPDATE database_instances 
-		SET endpoint = $2, port = $3, updated_at = $4
-		WHERE id = $1
-	`
-
-	_, err := r.pool.Exec(ctx, query, id, endpoint, port, time.Now())
 	return err
 }
 
@@ -171,7 +155,7 @@ func (r *DatabaseInstanceRepository) GetRunningByProjectID(projectID uuid.UUID) 
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, endpoint, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
 		FROM database_instances WHERE project_id = $1 AND status = 'running'
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -185,7 +169,6 @@ func (r *DatabaseInstanceRepository) GetRunningByProjectID(projectID uuid.UUID) 
 		&instance.RAMMB,
 		&instance.StorageGB,
 		&instance.Status,
-		&instance.Endpoint,
 		&instance.Port,
 		&instance.ContainerID,
 		&instance.CreatedAt,

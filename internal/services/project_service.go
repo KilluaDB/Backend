@@ -80,6 +80,16 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	// Storage can be set based on tier as well, defaulting to 10GB for all tiers
 	storageGB := 10
 
+	// Get default port for database type
+	var port int
+	if req.DBType == "postgres" {
+		port = 5432
+	} else if req.DBType == "mongodb" {
+		port = 27017
+	} else {
+		port = 5432 // Default to postgres port
+	}
+
 	// Create database instance record (status: creating) with resource information
 	dbInstance := &models.DatabaseInstance{
 		ProjectID: project.ID,
@@ -87,6 +97,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		CPUCores:  &cpuCores,
 		RAMMB:     &ramMB,
 		StorageGB: &storageGB,
+		Port:      &port,
 	}
 
 	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
@@ -114,18 +125,11 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	fmt.Printf("Container created successfully: %s\n", orchestratorResp.ContainerID)
 
 	// Update database instance with container details
-	endpoint := orchestratorResp.ConnectionInfo.Host
-	port := orchestratorResp.ConnectionInfo.Port
 	containerID := orchestratorResp.ContainerID
 
-	// Store container ID
+	// Store container ID (IP will be retrieved from orchestrator when needed)
 	if err := s.dbInstanceRepo.UpdateContainerID(dbInstance.ID, containerID); err != nil {
 		return nil, fmt.Errorf("failed to update database instance container ID: %w", err)
-	}
-
-	// Update endpoint and port
-	if err := s.dbInstanceRepo.UpdateEndpoint(dbInstance.ID, endpoint, port); err != nil {
-		return nil, fmt.Errorf("failed to update database instance endpoint: %w", err)
 	}
 
 	// Update status to running
