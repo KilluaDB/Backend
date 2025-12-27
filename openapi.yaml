@@ -12,9 +12,12 @@ servers:
 
 tags:
   - name: Auth
+  - name: Users
   - name: Projects
   - name: Queries
   - name: Schema
+  - name: Tables
+  - name: Misc
 
 components:
   securitySchemes:
@@ -192,6 +195,177 @@ components:
           type: string
           description: "Schema name (default: \"public\")"
 
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, deleted]
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin]
+
+    CreateTableRequest:
+      type: object
+      required: [schema, table, columns]
+      properties:
+        schema:
+          type: string
+          default: "public"
+        table:
+          type: string
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableColumn'
+        foreign_keys:
+          $ref: '#/components/schemas/ForeignKey'
+          nullable: true
+
+    TableColumn:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: PostgreSQL column type (e.g., VARCHAR(50), INTEGER, TEXT, etc.)
+        default:
+          type: string
+          nullable: true
+        primary:
+          type: boolean
+          default: false
+        is_unique:
+          type: boolean
+          default: false
+        is_identity:
+          type: boolean
+          default: false
+        nullable:
+          type: boolean
+          default: true
+
+    ForeignKeyRef:
+      type: object
+      required: [local_column, foreign_column]
+      properties:
+        local_column:
+          type: string
+        foreign_column:
+          type: string
+        on_update:
+          type: string
+          enum: [CASCADE, RESTRICT, NO ACTION]
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, NO ACTION, SET NULL, SET DEFAULT]
+
+    ForeignKey:
+      type: object
+      required: [schema, table, references]
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForeignKeyRef'
+          minItems: 1
+
+    DeleteTableRequest:
+      type: object
+      required: [schema, table]
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+
+    InsertRowRequest:
+      type: object
+      required: [table, values]
+      properties:
+        table:
+          type: string
+        values:
+          type: object
+          additionalProperties: true
+          description: Key-value pairs where keys are column names and values are the data to insert
+
+    InsertRowResponse:
+      type: object
+      properties:
+        row_id:
+          type: integer
+          format: int64
+
+    DeleteRowRequest:
+      type: object
+      required: [table_name]
+      properties:
+        table_name:
+          type: string
+
+    AddColumnRequest:
+      type: object
+      required: [table_name, name, type]
+      properties:
+        table_name:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          description: PostgreSQL column type (e.g., VARCHAR(50), INTEGER, TEXT, etc.)
+        default:
+          description: Default value for the column (can be any type)
+          nullable: true
+
+    AddColumnResponse:
+      type: object
+      properties:
+        column_id:
+          type: integer
+          format: int64
+
+    DeleteColumnRequest:
+      type: object
+      required: [table_name]
+      properties:
+        table_name:
+          type: string
+
 paths:
   /:
     get:
@@ -332,6 +506,78 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/google/login:
+    get:
+      tags: [Auth]
+      summary: Initiate Google OAuth login flow
+      description: |
+        Redirects the user to Google's OAuth consent screen.
+        Sets an oauth_state cookie for CSRF protection.
+      responses:
+        '302':
+          description: Redirect to Google OAuth consent screen
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+            Set-Cookie:
+              schema:
+                type: string
+                description: Sets oauth_state cookie (HTTP-only, secure)
+
+  /api/v1/auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Handle Google OAuth callback
+      description: |
+        Processes the OAuth callback from Google after user consent.
+        Validates the state parameter against the cookie to prevent CSRF attacks.
+        Exchanges the authorization code for tokens and creates/updates the user.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Authorization code from Google
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: State parameter for CSRF protection
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User Login Successfully!
+                data:
+                  access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          description: Missing code or state parameter, or state mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: State mismatch - possible CSRF attack
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Token exchange or user creation failed
           content:
             application/json:
               schema:
@@ -660,6 +906,703 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Failed to generate schema visualization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current authenticated user's information
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User retrieved successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  email: "user@example.com"
+                  role: "user"
+                  status: "active"
+                  created_at: "2024-01-01T00:00:00Z"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to retrieve user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      tags: [Users]
+      summary: Update current authenticated user's information
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User updated successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  email: "updated@example.com"
+                  role: "user"
+                  status: "active"
+                  created_at: "2024-01-01T00:00:00Z"
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (e.g., trying to change role without admin privileges)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to update user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Users]
+      summary: Delete current authenticated user's account
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User deleted successfully
+                data:
+                  access_token: ""
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (e.g., cannot delete the last admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to delete user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List all users (Admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of users retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Users retrieved successfully
+                data:
+                  - id: "123e4567-e89b-12d3-a456-426614174000"
+                    email: "user1@example.com"
+                    role: "user"
+                    status: "active"
+                    created_at: "2024-01-01T00:00:00Z"
+                  - id: "123e4567-e89b-12d3-a456-426614174001"
+                    email: "admin@example.com"
+                    role: "admin"
+                    status: "active"
+                    created_at: "2024-01-01T00:00:00Z"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to retrieve users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/{user_id}:
+    get:
+      tags: [Users]
+      summary: Get a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User retrieved successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  email: "user@example.com"
+                  role: "user"
+                  status: "active"
+                  created_at: "2024-01-01T00:00:00Z"
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to retrieve user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      tags: [Users]
+      summary: Update a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User updated successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  email: "updated@example.com"
+                  role: "admin"
+                  status: "active"
+                  created_at: "2024-01-01T00:00:00Z"
+        '400':
+          description: Invalid request body or user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required or policy violation (e.g., admin cannot demote themselves)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to update user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Users]
+      summary: Delete a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: User deleted successfully
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required or policy violation (e.g., admins cannot delete other admins, cannot delete the last admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to delete user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/rows:
+    post:
+      tags: [Projects]
+      summary: Insert a row into a table
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsertRowRequest'
+            example:
+              table: "users"
+              values:
+                name: "John Doe"
+                email: "john@example.com"
+                age: 30
+      responses:
+        '201':
+          description: Row inserted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Row inserted successfully
+                data:
+                  row_id: 1
+        '400':
+          description: Invalid request body or project ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to insert row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/rows/{row_id}:
+    delete:
+      tags: [Projects]
+      summary: Delete a row from a table by ID
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: row_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Row ID to delete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRowRequest'
+            example:
+              table_name: "users"
+      responses:
+        '204':
+          description: Row deleted successfully
+        '400':
+          description: Invalid request body or project ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Row not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to delete row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/columns:
+    post:
+      tags: [Projects]
+      summary: Add a column to a table
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddColumnRequest'
+            example:
+              table_name: "users"
+              name: "phone"
+              type: "VARCHAR(20)"
+              default: null
+      responses:
+        '200':
+          description: Column added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Column added successfully
+                data:
+                  column_id: 1
+        '400':
+          description: Invalid request body or project ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to add column
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/columns/{column_name}:
+    delete:
+      tags: [Projects]
+      summary: Delete a column from a table
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: column_name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Name of the column to delete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteColumnRequest'
+            example:
+              table_name: "users"
+      responses:
+        '204':
+          description: Column deleted successfully
+        '400':
+          description: Invalid request body or project ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to delete column
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/tables:
+    post:
+      tags: [Tables]
+      summary: Create a new table in the project database
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTableRequest'
+            example:
+              schema: "public"
+              table: "products"
+              columns:
+                - name: "id"
+                  type: "SERIAL"
+                  primary: true
+                  nullable: false
+                - name: "name"
+                  type: "VARCHAR(255)"
+                  nullable: false
+                - name: "price"
+                  type: "DECIMAL(10,2)"
+                  nullable: false
+              foreign_keys:
+                schema: "public"
+                table: "categories"
+                references:
+                  - local_column: "category_id"
+                    foreign_column: "id"
+                    on_update: "CASCADE"
+                    on_delete: "RESTRICT"
+      responses:
+        '200':
+          description: Table created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Table created successfully
+                data:
+                  result: {}
+        '400':
+          description: Invalid request body, project ID format, or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to create table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Tables]
+      summary: Delete a table from the project database
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteTableRequest'
+            example:
+              schema: "public"
+              table: "products"
+      responses:
+        '200':
+          description: Table deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Table deleted successfully
+                data:
+                  result: {}
+        '400':
+          description: Invalid request body, project ID format, or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to delete table
           content:
             application/json:
               schema:
