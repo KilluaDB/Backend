@@ -1,6 +1,9 @@
 package services
 
 import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/utils"
 	"context"
 	"database/sql"
 	"errors"
@@ -8,10 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"my_project/internal/models"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -108,7 +107,7 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 // ExecuteQuery executes a SQL query on the specified database connection
 func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
-	
+
 	// Validate project ownership
 	project, err := s.projectRepo.GetByIDAndUserID(projectId, userID)
 	if err != nil {

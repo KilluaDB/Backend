@@ -1,9 +1,9 @@
 package repositories
 
 import (
+	"backend/internal/models"
 	"context"
 	"errors"
-	"my_project/internal/models"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,4 +138,3 @@ func (r *DatabaseCredentialRepository) Delete(id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, query, id)
 	return err
 }
-

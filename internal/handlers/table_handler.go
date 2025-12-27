@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	"backend/internal/responses"
+	"backend/internal/services"
 	"fmt"
 	_ "log"
-	"my_project/internal/responses"
-	"my_project/internal/services"
+
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -102,7 +103,7 @@ func (h *TableHandler) DeleteTable(c *gin.Context) {
 		return
 	}
 
-	response := gin.H {
+	response := gin.H{
 		"result": result,
 	}
 
@@ -155,15 +156,15 @@ func (h *TableHandler) DeleteTable(c *gin.Context) {
 
 func (h *TableHandler) toUUID(userId any) (uuid.UUID, error) {
 	switch v := userId.(type) {
-		case uuid.UUID:
-			return v, nil
-		case string:
-			parsed, err := uuid.Parse(v)
-			if err != nil {
-				return uuid.Nil, err
-			}
-			return parsed, nil
-		default:
-			return uuid.Nil, fmt.Errorf("invalid user Id type: %T", v)
+	case uuid.UUID:
+		return v, nil
+	case string:
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return parsed, nil
+	default:
+		return uuid.Nil, fmt.Errorf("invalid user Id type: %T", v)
 	}
 }

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"my_project/internal/responses"
-	"my_project/internal/services"
+	"backend/internal/responses"
+	"backend/internal/services"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,11 +10,11 @@ import (
 )
 
 type UserHandler struct {
-	authService *services.AuthService
+	userService *services.UserService
 }
 
-func NewUserHandler(authService *services.AuthService) *UserHandler {
-	return &UserHandler{authService: authService}
+func NewUserHandler(userService *services.UserService) *UserHandler {
+	return &UserHandler{userService: userService}
 }
 
 // GetMe handles GET /api/v1/users/me

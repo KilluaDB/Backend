@@ -1,9 +1,9 @@
 package routes
 
 import (
-	"my_project/internal/handlers"
-	"my_project/internal/middlewares"
-	"my_project/internal/repositories"
+	"backend/internal/handlers"
+	"backend/internal/middlewares"
+	"backend/internal/repositories"
 
 	"github.com/gin-gonic/gin"
 )

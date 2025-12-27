@@ -1,9 +1,9 @@
 package repositories
 
 import (
+	"backend/internal/models"
 	"context"
 	"errors"
-	"my_project/internal/models"
 	"time"
 
 	"github.com/google/uuid"

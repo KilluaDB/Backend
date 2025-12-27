@@ -1,8 +1,8 @@
 package routes
 
 import (
-	"my_project/internal/handlers"
-	"my_project/internal/middlewares"
+	"backend/internal/handlers"
+	"backend/internal/middlewares"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,7 +12,7 @@ type TableRoutes struct {
 }
 
 func NewTableRoutes(tableHandler *handlers.TableHandler) *TableRoutes {
-	return &TableRoutes {
+	return &TableRoutes{
 		tableHandler: tableHandler,
 	}
 }

@@ -1,9 +1,9 @@
 package repositories
 
 import (
+	"backend/internal/models"
 	"context"
 	"errors"
-	"my_project/internal/models"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,11 +173,11 @@ func (r *ProjectRepository) DeleteByIDAndUserID(id uuid.UUID, userID uuid.UUID) 
 	if err != nil {
 		return err
 	}
-	
+
 	// Check if any rows were affected
 	if result.RowsAffected() == 0 {
 		return errors.New("project not found or access denied")
 	}
-	
+
 	return nil
 }

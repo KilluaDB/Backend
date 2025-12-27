@@ -1,37 +1,20 @@
 package routes
 
 import (
-	"my_project/internal/handlers"
-	"my_project/internal/repositories"
+	"backend/internal/handlers"
+	"backend/internal/repositories"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, googleAuthHandler *handlers.GoogleAuthHandler) {
-=======
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, userRepo *repositories.UserRepository) {
->>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
-=======
-func RegisterRoutes(
-	router *gin.Engine,
-	authHandler *handlers.AuthHandler,
-	userHandler *handlers.UserHandler,
-	projectHandler *handlers.ProjectHandler,
-	queryHandler *handlers.QueryHandler,
-	googleAuthHandler *handlers.GoogleAuthHandler,
-	tableHandler *handlers.TableHandler,
-) {
->>>>>>> feature/oauth2.0
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, schemaHandler *handlers.SchemaHandler) {
+func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, googleAuthHandler *handlers.GoogleAuthHandler, userHandler *handlers.UserHandler, userRepo *repositories.UserRepository, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, schemaHandler *handlers.SchemaHandler, tableHandler *handlers.TableHandler) {
 	api := router.Group("/api/v1")
 
-	authRoutes := NewAuthRoutes(authHandler)
+	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)
 	authRoutes.RegisterRoutes(api)
 
-	userRoutes := NewUserRoutes(userHandler)
+	userRoutes := NewUserRoutes(userHandler, userRepo)
 	userRoutes.RegisterRoutes(api)
 
 	queryRoutes := NewQueryRoutes(queryHandler)

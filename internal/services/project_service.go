@@ -1,12 +1,14 @@
 package services
 
 import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/utils"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"my_project/internal/models"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
+
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,8 +42,8 @@ func NewProjectService(
 type CreateProjectRequest struct {
 	Name         string  `json:"name" binding:"required"`
 	Description  *string `json:"description,omitempty"`
-	DBType       string  `json:"db_type" binding:"required"`        // 'postgres' or 'mongodb'
-	ResourceTier string  `json:"resource_tier" binding:"required"`  // 'free', 'basic', or 'premium'
+	DBType       string  `json:"db_type" binding:"required"`       // 'postgres' or 'mongodb'
+	ResourceTier string  `json:"resource_tier" binding:"required"` // 'free', 'basic', or 'premium'
 }
 
 func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, error) {
@@ -333,8 +335,22 @@ func (s *ProjectService) getDBConnection(userID uuid.UUID, projectID uuid.UUID) 
 	}
 
 	// Build connection string
-	if inst.Endpoint == nil || inst.Port == nil {
-		return nil, errors.New("database instance endpoint or port not configured")
+	if inst.ContainerID == nil || *inst.ContainerID == "" {
+		return nil, errors.New("database instance container ID not configured")
+	}
+	if inst.Port == nil {
+		return nil, errors.New("database instance port not configured")
+	}
+
+	// Get container IP from orchestrator
+	containerIP, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
+	if !ok {
+		// Try to get from Redis as fallback
+		var err error
+		containerIP, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get container IP: %w", err)
+		}
 	}
 
 	// Decrypt password before building DSN
@@ -344,7 +360,7 @@ func (s *ProjectService) getDBConnection(userID uuid.UUID, projectID uuid.UUID) 
 	}
 
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		*inst.Endpoint, *inst.Port, cred.Username, dbPassword, "postgres")
+		containerIP, *inst.Port, cred.Username, dbPassword, "postgres")
 
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {

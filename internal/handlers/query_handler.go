@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"my_project/internal/responses"
-	"my_project/internal/services"
+	"backend/internal/responses"
+	"backend/internal/services"
 	"net/http"
 	"strconv"
 
@@ -34,7 +34,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	var req services.ExecuteQueryRequest 
+	var req services.ExecuteQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
 		return
@@ -91,10 +91,10 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "10")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 {
-		limit = 10	// min
+		limit = 10 // min
 	}
 	if limit > 30 {
-		limit = 30 	// max
+		limit = 30 // max
 	}
 
 	// Convert userID to UUID (handle both uuid.UUID and string types)

@@ -1,9 +1,10 @@
 package handlers
 
 import (
+	"backend/internal/responses"
+	"backend/internal/services"
 	"fmt"
-	"my_project/internal/responses"
-	"my_project/internal/services"
+
 	"net/http"
 
 	"github.com/gin-gonic/gin"

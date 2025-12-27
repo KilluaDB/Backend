@@ -1,6 +1,12 @@
 package server
 
 import (
+	"backend/internal/config"
+	"backend/internal/database"
+	"backend/internal/handlers"
+	"backend/internal/repositories"
+	"backend/internal/routes"
+	"backend/internal/services"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,13 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
-
-	"my_project/internal/config"
-	"my_project/internal/database"
-	"my_project/internal/handlers"
-	"my_project/internal/repositories"
-	"my_project/internal/routes"
-	"my_project/internal/services"
 )
 
 type Server struct {
@@ -66,8 +65,17 @@ func NewServer() *http.Server {
 	userRepo := repositories.NewUserRepository(pool)
 	sessionRepo := repositories.NewSessionRepository(pool)
 	userService := services.NewUserService(userRepo, sessionRepo)
-	authHandler := handlers.NewAuthHandler(userService)
+	authService := services.NewAuthService(userRepo)
+	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
+
+	// Google Auth dependencies
+	googleAuthService := services.NewGoogleAuthService(userRepo)
+	oauthConfig, err := config.OAuthConfig()
+	if err != nil {
+		log.Fatalf("failed to initialize OAuth config: %v", err)
+	}
+	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies
 	projectRepo := repositories.NewProjectRepository(pool)
@@ -80,7 +88,6 @@ func NewServer() *http.Server {
 	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
-
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
 	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, orchestratorService)
@@ -88,7 +95,7 @@ func NewServer() *http.Server {
 
 	//
 	tableRepo := repositories.NewTableRepository(pool)
-	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
+	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo, orchestratorService)
 	tableHandler := handlers.NewTableHandler(tableService)
 
 	// Schema dependencies
@@ -106,13 +113,9 @@ func NewServer() *http.Server {
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, schemaHandler) // register all routes
 
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, userRepo) // register all routes
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler) // register all routes
+	// Register all routes
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -142,9 +145,9 @@ func validateRequiredEnvVars() error {
 		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
 		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
 		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
-		"GOOGLE_CLIENT_ID":					os.Getenv("GOOGLE_CLIENT_ID"),
-		"GOOGLE_CLIENT_SECRET":				os.Getenv("GOOGLE_CLIENT_SECRET"),
-		"GOOGLE_REDIRECT_URL":				os.Getenv("GOOGLE_REDIRECT_URL"),
+		"GOOGLE_CLIENT_ID":              os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_SECRET":          os.Getenv("GOOGLE_CLIENT_SECRET"),
+		"GOOGLE_REDIRECT_URL":           os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {

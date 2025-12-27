@@ -1,4 +1,4 @@
-module my_project
+module backend
 
 go 1.24.0
 
@@ -13,10 +13,13 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	golang.org/x/crypto v0.43.0
+	golang.org/x/oauth2 v0.34.0
 )
 
+require cloud.google.com/go/compute/metadata v0.3.0 // indirect
+
 require (
-	github.com/KilluaDB/Orchestrator v0.0.0-20251203024526-dfd416e1e35f
+	github.com/KilluaDB/Orchestrator v1.0.1
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.14.1 // indirect

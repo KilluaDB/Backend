@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	"backend/internal/responses"
+	"backend/internal/services"
+	"backend/internal/utils"
 	_ "log"
-	"my_project/internal/responses"
-	"my_project/internal/services"
-	"my_project/internal/utils"
+
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,7 +27,7 @@ func NewGoogleAuthHandler(googleAuthService *services.GoogleAuthService, oauthCo
 func (h *GoogleAuthHandler) Login(c *gin.Context) {
 	/*
 		You generate a state value but never validate it on callback. Store state in a cookie/session and compare in
-		Callback before exchanging the code; reject if it doesn’t match.		
+		Callback before exchanging the code; reject if it doesn’t match.
 	*/
 	oauthState, err := utils.GenerateStateOauthCookie()
 	if err != nil {
@@ -34,8 +35,7 @@ func (h *GoogleAuthHandler) Login(c *gin.Context) {
 	}
 	c.SetCookie("oauth_state", oauthState, 3600, "/", "", false, true)
 
-
-	authURL := 	h.googleOauthConfig.AuthCodeURL(
+	authURL := h.googleOauthConfig.AuthCodeURL(
 		oauthState,
 		// oauth2.AccessTypeOffline,
 		// oauth2.ApprovalForce,
@@ -77,7 +77,7 @@ func (h *GoogleAuthHandler) Callback(c *gin.Context) {
 	token, err := h.googleOauthConfig.Exchange(c.Request.Context(), code)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Token exchange failed")
-		return 
+		return
 	}
 
 	// Get user info and create/update user

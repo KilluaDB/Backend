@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	"backend/internal/models"
+	"backend/internal/responses"
+	"backend/internal/services"
 	_ "log"
-	"my_project/internal/models"
-	"my_project/internal/responses"
-	"my_project/internal/services"
+
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -66,7 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid Format")
 		return
 	}
-	
+
 	accessToken, refreshToken, err := h.authService.Login(req.Email, req.Password)
 	if err != nil {
 		responses.Fail(c, http.StatusUnauthorized, err, "Failed to login")

@@ -1,12 +1,13 @@
 package services
 
 import (
+	"backend/internal/repositories"
+	"backend/internal/utils"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	_ "log"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
 	"regexp"
 	"strings"
 
@@ -14,11 +15,12 @@ import (
 )
 
 type TableService struct {
-	projectRepo *repositories.ProjectRepository
-	instanceRepo *repositories.DatabaseInstanceRepository
+	projectRepo     *repositories.ProjectRepository
+	instanceRepo    *repositories.DatabaseInstanceRepository
 	credentialsRepo *repositories.DatabaseCredentialRepository
-	executeRepo *repositories.QueryHistoryRepository
-	tableRepo *repositories.TableRepository
+	executeRepo     *repositories.QueryHistoryRepository
+	tableRepo       *repositories.TableRepository
+	orchestrator    *OrchestratorService
 }
 
 func NewTableService(
@@ -27,56 +29,58 @@ func NewTableService(
 	credentialsRepo *repositories.DatabaseCredentialRepository,
 	executeRepo *repositories.QueryHistoryRepository,
 	tableRepo *repositories.TableRepository,
+	orchestrator *OrchestratorService,
 ) *TableService {
-	return &TableService {
-		projectRepo: projectRepo,
-		instanceRepo: instanceRepo,
+	return &TableService{
+		projectRepo:     projectRepo,
+		instanceRepo:    instanceRepo,
 		credentialsRepo: credentialsRepo,
-		executeRepo: executeRepo,
-		tableRepo: tableRepo,
+		executeRepo:     executeRepo,
+		tableRepo:       tableRepo,
+		orchestrator:    orchestrator,
 	}
 }
 
 type Column struct {
-	Name			string	`json:"name" binding:"required"`
-	Type 			string	`json:"type" binding:"required"`
-	Default		*string	`json:"default"`
-	Primary		bool		`json:"primary"`
-	IsUnique 	bool		`json:"is_unique"`
-	IsIdentity	bool		`json:"is_identity"`
-	Nullable		bool		`json:"nullable"`
+	Name       string  `json:"name" binding:"required"`
+	Type       string  `json:"type" binding:"required"`
+	Default    *string `json:"default"`
+	Primary    bool    `json:"primary"`
+	IsUnique   bool    `json:"is_unique"`
+	IsIdentity bool    `json:"is_identity"`
+	Nullable   bool    `json:"nullable"`
 }
 
 type ForeignKeyRef struct {
-	LocalColumn		string	`json:"local_column" binding:"required"`
-	ForeignColumn	string	`json:"foreign_column" binding:"required"`
-	OnUpdate			string	`json:"on_update" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION"`
-	OnDelete			string	`json:"on_delete" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION SET NULL SET DEFAULT"`
+	LocalColumn   string `json:"local_column" binding:"required"`
+	ForeignColumn string `json:"foreign_column" binding:"required"`
+	OnUpdate      string `json:"on_update" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION"`
+	OnDelete      string `json:"on_delete" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION SET NULL SET DEFAULT"`
 }
 
 type ForeignKey struct {
-	Schema 		string				`json:"schema" binding:"required"`
-	Table 		string				`json:"table" binding:"required"`
-	References	[]ForeignKeyRef	`json:"references" binding:"required, min=1"`
+	Schema     string          `json:"schema" binding:"required"`
+	Table      string          `json:"table" binding:"required"`
+	References []ForeignKeyRef `json:"references" binding:"required, min=1"`
 }
 
 type CreateTableRequest struct {
-	Schema 		string			`json:"schema" binding:"required"`
-	Table 		string			`json:"table" binding:"required"`
-	Columns 		[]Column			`json:"columns" binding:"required"`
-	ForeignKeys *ForeignKey		`json:"foreign_keys"`
+	Schema      string      `json:"schema" binding:"required"`
+	Table       string      `json:"table" binding:"required"`
+	Columns     []Column    `json:"columns" binding:"required"`
+	ForeignKeys *ForeignKey `json:"foreign_keys"`
 }
 
 type UpdateTableRequest struct {
-	Schema 		string			`json:"schema"`
-	Table 		string			`json:"table"`
-	Columns 		[]Column			`json:"columns"`
-	ForeignKeys *ForeignKey		`json:"foreign_keys"`
+	Schema      string      `json:"schema"`
+	Table       string      `json:"table"`
+	Columns     []Column    `json:"columns"`
+	ForeignKeys *ForeignKey `json:"foreign_keys"`
 }
 
 type DeleteTableRequest struct {
-	Schema 		string			`json:"schema" binding:"required"`
-	Table 		string			`json:"table" binding:"required"`
+	Schema string `json:"schema" binding:"required"`
+	Table  string `json:"table" binding:"required"`
 }
 
 func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
@@ -129,7 +133,7 @@ func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, pr
 		return nil, err
 	}
 	defer sqlDb.Close()
-	
+
 	// Start transaction
 	tx, err := sqlDb.Begin()
 	if err != nil {
@@ -199,7 +203,7 @@ func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error)
 
 	if req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0 {
 		for i, fk := range req.ForeignKeys.References {
-			fkDef := fmt.Sprintf("  FOREIGN KEY (\"%s\") REFERENCES \"%s\".\"%s\"(\"%s\")", 
+			fkDef := fmt.Sprintf("  FOREIGN KEY (\"%s\") REFERENCES \"%s\".\"%s\"(\"%s\")",
 				fk.LocalColumn,
 				req.ForeignKeys.Schema,
 				req.ForeignKeys.Table,
@@ -224,52 +228,52 @@ func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error)
 	}
 	query += ");\n"
 
-	return query, nil;
+	return query, nil
 
 	/*
-	{
-		"schema": 	"public",
-		"table": 	"users",
-		"columns":	[
-			{
-				"name": 			"id",
-				"type": 			"INT",
-				"primary": 		true,
-				"is_unique": 	true,
-				"is_identity": true,
-				"nullable": 	false
-			}, 
-			{
-				"name": 			"first_name",
-				"type": 			"VARCHAR(50)",
-				"nullable": 	false
-			},
-			{
-				"name": 			"last_name",
-				"type": 			"VARCHAR(50)",
-				"nullable": 	false
-			},
-			{
-				"name": 			"department_id",
-				"type": 			"INT",
-				"nullable": 	false
-			}
-		],
-		"foreign_keys": [
-			{
-				"schema":	"public",
-				"table":		"users",
-				"references": [
-					{
-						"local_column": 	"department_id",
-						"foreign_column": "id",
-						"on_update": 		"CASCADE",
-						"on_delete": 		"SET NULL"
-					}
-				]
-			}
-		]
-	}
+		{
+			"schema": 	"public",
+			"table": 	"users",
+			"columns":	[
+				{
+					"name": 			"id",
+					"type": 			"INT",
+					"primary": 		true,
+					"is_unique": 	true,
+					"is_identity": true,
+					"nullable": 	false
+				},
+				{
+					"name": 			"first_name",
+					"type": 			"VARCHAR(50)",
+					"nullable": 	false
+				},
+				{
+					"name": 			"last_name",
+					"type": 			"VARCHAR(50)",
+					"nullable": 	false
+				},
+				{
+					"name": 			"department_id",
+					"type": 			"INT",
+					"nullable": 	false
+				}
+			],
+			"foreign_keys": [
+				{
+					"schema":	"public",
+					"table":		"users",
+					"references": [
+						{
+							"local_column": 	"department_id",
+							"foreign_column": "id",
+							"on_update": 		"CASCADE",
+							"on_delete": 		"SET NULL"
+						}
+					]
+				}
+			]
+		}
 	*/
 }
 
@@ -379,17 +383,31 @@ func (s *TableService) openDbConnection(userId uuid.UUID, projectId uuid.UUID) (
 		return nil, errors.New("no credentials configured for this database instance")
 	}
 
-	if dbInstance.Endpoint == nil || dbInstance.Port == nil {
-		return nil, errors.New("database instance endpoint or port not configured")
+	if dbInstance.ContainerID == nil || *dbInstance.ContainerID == "" {
+		return nil, errors.New("database instance container ID not configured")
+	}
+	if dbInstance.Port == nil {
+		return nil, errors.New("database instance port not configured")
+	}
+
+	// Get container IP from orchestrator
+	containerIP, ok := s.orchestrator.GetContainerIP(*dbInstance.ContainerID)
+	if !ok {
+		// Try to get from Redis as fallback
+		var err error
+		containerIP, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *dbInstance.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get container IP: %w", err)
+		}
 	}
 
 	dbPassword, err := utils.DecryptString(dbCred.PasswordEncrypted)
 	if err != nil {
 		return nil, err
-	}	
+	}
 
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", 
-		*dbInstance.Endpoint,
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		containerIP,
 		*dbInstance.Port,
 		dbCred.Username,
 		dbPassword,
@@ -400,6 +418,6 @@ func (s *TableService) openDbConnection(userId uuid.UUID, projectId uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return sqlDb, nil
 }

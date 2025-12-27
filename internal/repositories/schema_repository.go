@@ -1,9 +1,9 @@
 package repositories
 
 import (
+	"backend/internal/models"
 	"context"
 	"fmt"
-	"my_project/internal/models"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -218,4 +218,3 @@ func (r *SchemaRepository) GetUniqueConstraintsBatch(ctx context.Context, schema
 
 	return uniqueMap, nil
 }
-

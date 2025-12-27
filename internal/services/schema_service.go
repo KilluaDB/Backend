@@ -1,13 +1,14 @@
 package services
 
 import (
+	"backend/internal/database"
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/utils"
 	"context"
 	"errors"
 	"fmt"
-	"my_project/internal/database"
-	"my_project/internal/models"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
+
 	"strings"
 	"time"
 

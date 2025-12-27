@@ -1,12 +1,11 @@
 package services
 
 import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/utils"
 	"errors"
 	"time"
-
-	"my_project/internal/models"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
 
 	"github.com/google/uuid"
 )
