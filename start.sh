@@ -417,7 +417,6 @@ DB_ADMIN_PASSWORD=postgres
 ACCESS_TOKEN_SECRET=your-access-token-secret-change-this-in-production
 REFRESH_TOKEN_SECRET=your-refresh-token-secret-change-this-in-production
 
-# Oauth Secrets
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/google/callback

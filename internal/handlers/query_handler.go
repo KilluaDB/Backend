@@ -52,7 +52,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	case string:
 		parsed, err := uuid.Parse(v)
 		if err != nil {
-			responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
+			responses.Fail(c, http.StatusUnauthorized, err, "Invalid user ID format")
 			return
 		}
 		userUUID = parsed
@@ -62,7 +62,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	}
 	projectUUID, err := uuid.Parse(projectId)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, nil, "Invalid projectId format")
+		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 	result, exec, err := h.queryService.ExecuteQuery(userUUID, &req, projectUUID)

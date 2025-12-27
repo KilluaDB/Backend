@@ -10,12 +10,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Cookie configuration
+const (
+	RefreshTokenCookieName = "refresh_token"
+	RefreshTokenMaxAge     = 30 * 24 * 3600 // 30 days in seconds
+)
+
 type AuthHandler struct {
-	userService *services.UserService
+	authService *services.AuthService
 }
 
-func NewAuthHandler(userService *services.UserService) *AuthHandler {
-	return &AuthHandler{userService: userService}
+func NewAuthHandler(authService *services.AuthService) *AuthHandler {
+	return &AuthHandler{authService: authService}
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -34,7 +40,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:    req.Email,
 		Password: req.Password,
 	}
-	accessToken, refreshToken, _, err := h.userService.Register(user)
+	accessToken, refreshToken, err := h.authService.Register(user)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Could not register user")
 		return
@@ -42,13 +48,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
 
-	// 3. Return tokens
+	// 4. Return only access token in response body
 	res := gin.H{
-		"message":                  "User registered successfully",
-		"access_token":             accessToken,
-		"refresh_token":            refreshToken,
-		"access_token_expires_in":  "15m",
-		"refresh_token_expires_in": "24h",
+		"access_token": accessToken,
 	}
 
 	responses.Success(c, http.StatusCreated, res, "New user registered successfully!")
@@ -64,7 +66,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid Format")
 		return
 	}
-	accessToken, refreshToken, _, err := h.userService.Login(req.Email, req.Password)
+	
+	accessToken, refreshToken, err := h.authService.Login(req.Email, req.Password)
 	if err != nil {
 		responses.Fail(c, http.StatusUnauthorized, err, "Failed to login")
 		return
@@ -80,45 +83,49 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	refreshToken, err := c.Cookie("refresh_token")
-	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, nil, "Missing refresh token")
-		return
-	}
+	// refreshToken, err := c.Cookie("refresh_token")
+	// if err != nil {
+	// 	responses.Fail(c, http.StatusBadRequest, nil, "Missing refresh token")
+	// 	return
+	// }
 
-	_, exists := c.Get("userId") // Extracted from access token
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-		return
-	}
+	// _, exists := c.Get("userId") // Extracted from access token
+	// if !exists {
+	// 	responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+	// 	return
+	// }
 
-	if err := h.userService.Logout(refreshToken); err != nil {
-		responses.Fail(c, http.StatusUnauthorized, err, "Could not revoke token")
-		return
-	}
+	// if err := h.userService.Logout(refreshToken); err != nil {
+	// 	responses.Fail(c, http.StatusUnauthorized, err, "Could not revoke token")
+	// 	return
+	// }
 
 	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	responses.Success(c, http.StatusOK, nil, "Logged out successfully")
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	refreshToken, err := c.Cookie("refresh_token")
+	// 1. Get refresh token from HttpOnly cookie
+	refreshToken, err := c.Cookie(RefreshTokenCookieName)
 	if err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Missing refresh token")
 		return
 	}
 
-	// 2. Ask the service layer to issue a new access token
-	accessToken, err := h.userService.Refresh(refreshToken)
+	// 2. Validate and generate new tokens (with rotation)
+	accessToken, newRefreshToken, err := h.authService.Refresh(refreshToken)
 	if err != nil {
+		c.SetCookie("refresh_token", "", -1, "/", "", true, true)
 		responses.Fail(c, http.StatusUnauthorized, err, "Invalid or expired refresh token")
 		return
 	}
 
-	// 3. Return the new access token
-	c.JSON(http.StatusOK, gin.H{
+	c.SetCookie("refresh_token", newRefreshToken, 30*24*3600, "/", "", true, true)
+
+	res := gin.H{
 		"access_token": accessToken,
-		"message":      "Access token refreshed successfully",
-	})
+	}
+
+	responses.Success(c, http.StatusOK, res, "Access token refreshed successfully")
 }
