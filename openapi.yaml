@@ -14,6 +14,7 @@ tags:
   - name: Auth
   - name: Projects
   - name: Queries
+  - name: Schema
 
 components:
   securitySchemes:
@@ -23,9 +24,27 @@ components:
       bearerFormat: JWT
 
   schemas:
+    APIResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+        message:
+          type: string
+        data:
+          type: object
+          nullable: true
+        error:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
       properties:
+        status:
+          type: string
+          enum: [error]
         message:
           type: string
         error:
@@ -84,13 +103,17 @@ components:
         db_type:
           type: string
           enum: [postgres, mongodb]
+        resource_tier:
+          type: string
+          enum: [free, basic, premium]
+          description: "Resource tier for the project (free: 0.5 CPU, 512MB RAM; basic: 1 CPU, 1GB RAM; premium: 2 CPU, 2GB RAM)"
         created_at:
           type: string
           format: date-time
 
     CreateProjectRequest:
       type: object
-      required: [name, db_type]
+      required: [name, db_type, resource_tier]
       properties:
         name:
           type: string
@@ -101,6 +124,10 @@ components:
           type: string
           description: "'postgres' or 'mongodb'"
           enum: [postgres, mongodb]
+        resource_tier:
+          type: string
+          description: "Resource tier for the project (free: 0.5 CPU, 512MB RAM; basic: 1 CPU, 1GB RAM; premium: 2 CPU, 2GB RAM)"
+          enum: [free, basic, premium]
 
     ExecuteQueryRequest:
       type: object
@@ -155,6 +182,16 @@ components:
           type: integer
           nullable: true
 
+    SchemaVisualizeResponse:
+      type: object
+      properties:
+        mermaid:
+          type: string
+          description: Mermaid ER diagram code
+        schema:
+          type: string
+          description: "Schema name (default: \"public\")"
+
 paths:
   /:
     get:
@@ -188,7 +225,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthTokensResponse'
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: New user registered successfully!
+                data:
+                  message: User registered successfully
+                  access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  access_token_expires_in: "15m"
+                  refresh_token_expires_in: "24h"
         '400':
           description: Invalid input
           content:
@@ -212,10 +258,12 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: User Login Successfully!
+                data:
+                  access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
         '400':
           description: Invalid input
           content:
@@ -238,6 +286,14 @@ paths:
       responses:
         '200':
           description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Logged out successfully
         '400':
           description: Missing refresh token
           content:
@@ -267,6 +323,7 @@ paths:
                     type: string
                   message:
                     type: string
+                    example: Access token refreshed successfully
         '400':
           description: Missing refresh token
           content:
@@ -298,7 +355,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Project created successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  user_id: "123e4567-e89b-12d3-a456-426614174001"
+                  name: "My Project"
+                  description: "Project description"
+                  db_type: "postgres"
+                  resource_tier: "basic"
+                  created_at: "2024-01-01T00:00:00Z"
         '400':
           description: Invalid request body
           content:
@@ -329,9 +397,18 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Projects retrieved successfully
+                data:
+                  - id: "123e4567-e89b-12d3-a456-426614174000"
+                    user_id: "123e4567-e89b-12d3-a456-426614174001"
+                    name: "My Project"
+                    description: "Project description"
+                    db_type: "postgres"
+                    resource_tier: "basic"
+                    created_at: "2024-01-01T00:00:00Z"
         '401':
           description: Unauthorized
           content:
@@ -358,7 +435,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Project retrieved successfully
+                data:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  user_id: "123e4567-e89b-12d3-a456-426614174001"
+                  name: "My Project"
+                  description: "Project description"
+                  db_type: "postgres"
+                  resource_tier: "basic"
+                  created_at: "2024-01-01T00:00:00Z"
         '401':
           description: Unauthorized
           content:
@@ -387,6 +475,13 @@ paths:
       responses:
         '200':
           description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Project deleted successfully
         '401':
           description: Unauthorized
           content:
@@ -425,15 +520,21 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Query executed successfully
+                data:
                   result:
-                    $ref: '#/components/schemas/QueryResult'
-                  execution_id:
-                    type: string
-                    format: uuid
-                  execution_time_ms:
-                    type: integer
+                    columns: ["id", "name"]
+                    rows:
+                      - id: 1
+                        name: "Test"
+                    row_count: 1
+                    rows_affected: 0
+                    execution_time_ms: 10
+                  execution_id: "123e4567-e89b-12d3-a456-426614174000"
+                  execution_time_ms: 10
         '400':
           description: Invalid input (missing query or invalid project ID)
           content:
@@ -480,9 +581,18 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/QueryHistoryItem'
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Query history retrieved successfully
+                data:
+                  - id: "123e4567-e89b-12d3-a456-426614174000"
+                    db_instance_id: "123e4567-e89b-12d3-a456-426614174001"
+                    user_id: "123e4567-e89b-12d3-a456-426614174002"
+                    query_text: "SELECT * FROM users"
+                    executed_at: "2024-01-01T00:00:00Z"
+                    success: true
+                    execution_time_ms: 10
         '401':
           description: Unauthorized
           content:
@@ -496,4 +606,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-
+  /api/v1/projects/{id}/schema/visualize:
+    get:
+      tags: [Schema]
+      summary: Generate a Mermaid ER diagram visualization of the database schema
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Project ID
+        - name: schema
+          in: query
+          required: false
+          schema:
+            type: string
+            default: "public"
+          description: "Schema name to visualize (default: \"public\")"
+      responses:
+        '200':
+          description: Schema visualization generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+              example:
+                status: success
+                message: Schema visualization generated successfully
+                data:
+                  mermaid: "erDiagram\n    users ||--o{ sessions : has\n    users ||--o{ projects : owns"
+                  schema: "public"
+        '400':
+          description: Invalid project ID or schema name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not found or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to generate schema visualization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'

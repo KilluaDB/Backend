@@ -16,21 +16,22 @@ func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userH
 >>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
 =======
 func RegisterRoutes(
-	router *gin.Engine, 
-	authHandler *handlers.AuthHandler, 
-	userHandler *handlers.UserHandler, 
-	projectHandler *handlers.ProjectHandler, 
-	queryHandler *handlers.QueryHandler, 
+	router *gin.Engine,
+	authHandler *handlers.AuthHandler,
+	userHandler *handlers.UserHandler,
+	projectHandler *handlers.ProjectHandler,
+	queryHandler *handlers.QueryHandler,
 	googleAuthHandler *handlers.GoogleAuthHandler,
 	tableHandler *handlers.TableHandler,
 ) {
 >>>>>>> feature/oauth2.0
+func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, userHandler *handlers.UserHandler, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, schemaHandler *handlers.SchemaHandler) {
 	api := router.Group("/api/v1")
 
-	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)
+	authRoutes := NewAuthRoutes(authHandler)
 	authRoutes.RegisterRoutes(api)
 
-	userRoutes := NewUserRoutes(userHandler, userRepo)
+	userRoutes := NewUserRoutes(userHandler)
 	userRoutes.RegisterRoutes(api)
 
 	queryRoutes := NewQueryRoutes(queryHandler)
@@ -38,6 +39,9 @@ func RegisterRoutes(
 
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
+
+	schemaRoutes := NewSchemaRoutes(schemaHandler)
+	schemaRoutes.RegisterRoutes(api)
 
 	tableRoutes := NewTableRoutes(tableHandler)
 	tableRoutes.RegisterRoutes(api)

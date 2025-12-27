@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KilluaDB/Orchestrator/orchestr"
+	orchestrator "github.com/KilluaDB/Orchestrator"
 	"github.com/google/uuid"
 )
 
 type OrchestratorService struct {
-	orchestrator *orchestr.Orchestrator
+	orchestrator *orchestrator.Orchestrator
 	ctx          context.Context
 }
 
@@ -75,7 +75,7 @@ func NewOrchestratorService() (*OrchestratorService, error) {
 	}
 
 	// Create orchestrator config
-	config := &orchestr.Config{
+	config := &orchestrator.Config{
 		RedisAddr:       redisAddr,
 		NetworkName:     networkName,
 		SubnetCIDR:      subnetCIDR,
@@ -84,7 +84,7 @@ func NewOrchestratorService() (*OrchestratorService, error) {
 	}
 
 	// Create orchestrator instance
-	orch, err := orchestr.New(config)
+	orch, err := orchestrator.New(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
@@ -159,7 +159,7 @@ func (s *OrchestratorService) CreateContainer(req CreateContainerRequest) (*Crea
 	port := s.getDefaultPort(req.DatabaseType)
 
 	// Set resource limits from configuration if provided
-	resourceLimits := orchestr.ResourceLimits{
+	resourceLimits := orchestrator.ResourceLimits{
 		Memory:   512 * 1024 * 1024, // Default 512MiB
 		CPUQuota: 100000,            // Default 1 CPU
 	}
@@ -177,7 +177,7 @@ func (s *OrchestratorService) CreateContainer(req CreateContainerRequest) (*Crea
 	volumeMountPath := s.getVolumeMountPath(req.DatabaseType)
 
 	// Create container options
-	opts := orchestr.ContainerOptions{
+	opts := orchestrator.ContainerOptions{
 		Name:            containerName,
 		Image:           image,
 		Env:             env,
@@ -269,6 +269,18 @@ func (s *OrchestratorService) DeleteContainer(containerID string) error {
 	return s.orchestrator.StopContainer(ctx, containerID)
 }
 
+// GetContainerIP gets the container IP address from the orchestrator
+// Returns the IP and true if found, or empty string and false if not found
+func (s *OrchestratorService) GetContainerIP(containerID string) (string, bool) {
+	return s.orchestrator.GetContainerIP(containerID)
+}
+
+// GetContainerIPFromRedis gets the container IP address from Redis
+// This is a fallback when the IP is not in memory
+func (s *OrchestratorService) GetContainerIPFromRedis(ctx context.Context, containerID string) (string, error) {
+	return s.orchestrator.GetContainerIPFromRedis(ctx, containerID)
+}
+
 // Helper functions
 
 func (s *OrchestratorService) getDatabaseImage(databaseType string) string {
@@ -323,9 +335,4 @@ func (s *OrchestratorService) Close() error {
 		return s.orchestrator.Close()
 	}
 	return nil
-}
-
-// contains checks if a string contains a substring (case-insensitive)
-func contains(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

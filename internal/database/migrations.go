@@ -25,6 +25,7 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		fixQueryHistoryForeignKey,
 		createUsageMetricsTable,
 		preventHardDeleteUsers,
+		dropEndpointColumn, // Migration to remove endpoint column if it exists
 	}
 
 	for i, migration := range migrations {

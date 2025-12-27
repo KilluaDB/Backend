@@ -15,6 +15,13 @@ BEGIN
     END IF;
 END$$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resource_tier_t') THEN
+        CREATE TYPE resource_tier_t AS ENUM ('free', 'basic', 'premium');
+    END IF;
+END$$;
+
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -48,11 +55,13 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL,
   description TEXT,
   db_type db_type_t NOT NULL,
+  resource_tier resource_tier_t NOT NULL DEFAULT 'free',
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
+CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
 
 
 -- Database Instances table
@@ -63,7 +72,6 @@ CREATE TABLE IF NOT EXISTS database_instances (
   ram_mb INT,
   storage_gb INT,
   status instance_status_t NOT NULL DEFAULT 'creating',
-  endpoint TEXT,
   port INT,
   container_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

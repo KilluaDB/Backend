@@ -25,8 +25,8 @@ func (r *ProjectRepository) Create(project *models.Project) error {
 	project.Prepare()
 
 	query := `
-		INSERT INTO projects (id, user_id, name, description, db_type, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO projects (id, user_id, name, description, db_type, resource_tier, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
 	now := time.Now()
@@ -36,6 +36,7 @@ func (r *ProjectRepository) Create(project *models.Project) error {
 		project.Name,
 		project.Description,
 		project.DBType,
+		project.ResourceTier,
 		now,
 	)
 
@@ -46,7 +47,7 @@ func (r *ProjectRepository) GetByID(id uuid.UUID) (*models.Project, error) {
 	ctx := context.Background()
 
 	query := `
-		SELECT id, user_id, name, description, db_type, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at
 		FROM projects WHERE id = $1
 	`
 
@@ -57,6 +58,7 @@ func (r *ProjectRepository) GetByID(id uuid.UUID) (*models.Project, error) {
 		&project.Name,
 		&project.Description,
 		&project.DBType,
+		&project.ResourceTier,
 		&project.CreatedAt,
 	)
 
@@ -74,7 +76,7 @@ func (r *ProjectRepository) GetByIDAndUserID(id uuid.UUID, userID uuid.UUID) (*m
 	ctx := context.Background()
 
 	query := `
-		SELECT id, user_id, name, description, db_type, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at
 		FROM projects WHERE id = $1 AND user_id = $2
 	`
 
@@ -85,6 +87,7 @@ func (r *ProjectRepository) GetByIDAndUserID(id uuid.UUID, userID uuid.UUID) (*m
 		&project.Name,
 		&project.Description,
 		&project.DBType,
+		&project.ResourceTier,
 		&project.CreatedAt,
 	)
 
@@ -102,7 +105,7 @@ func (r *ProjectRepository) GetByUserID(userID uuid.UUID) ([]models.Project, err
 	ctx := context.Background()
 
 	query := `
-		SELECT id, user_id, name, description, db_type, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at
 		FROM projects WHERE user_id = $1
 		ORDER BY created_at DESC
 	`
@@ -122,6 +125,7 @@ func (r *ProjectRepository) GetByUserID(userID uuid.UUID) ([]models.Project, err
 			&project.Name,
 			&project.Description,
 			&project.DBType,
+			&project.ResourceTier,
 			&project.CreatedAt,
 		)
 		if err != nil {
@@ -138,7 +142,7 @@ func (r *ProjectRepository) Update(project *models.Project) error {
 
 	query := `
 		UPDATE projects SET
-			name = $2, description = $3, db_type = $4
+			name = $2, description = $3, db_type = $4, resource_tier = $5
 		WHERE id = $1
 	`
 
@@ -147,6 +151,7 @@ func (r *ProjectRepository) Update(project *models.Project) error {
 		project.Name,
 		project.Description,
 		project.DBType,
+		project.ResourceTier,
 	)
 
 	return err

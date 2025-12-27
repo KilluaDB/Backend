@@ -13,7 +13,6 @@ type DatabaseInstance struct {
 	RAMMB       *int      `json:"ram_mb,omitempty"`
 	StorageGB   *int      `json:"storage_gb,omitempty"`
 	Status      string    `json:"status"` // 'creating', 'running', 'failed', 'paused', 'deleted'
-	Endpoint    *string   `json:"endpoint,omitempty"`
 	Port        *int      `json:"port,omitempty"`
 	ContainerID *string   `json:"container_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`

@@ -62,23 +62,12 @@ func NewServer() *http.Server {
 		pool: pool,
 	}
 
-	cfg, _ := config.OAuthConfig()
-
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-<<<<<<< HEAD
 	sessionRepo := repositories.NewSessionRepository(pool)
 	userService := services.NewUserService(userRepo, sessionRepo)
-	googleAuthService := services.NewGoogleAuthService(userRepo)
 	authHandler := handlers.NewAuthHandler(userService)
 	userHandler := handlers.NewUserHandler(userService)
-=======
-	authService := services.NewAuthService(userRepo)
-	googleAuthService := services.NewGoogleAuthService(userRepo)
-	authHandler := handlers.NewAuthHandler(authService)
-	userHandler := handlers.NewUserHandler(authService)
->>>>>>> feature/oauth2.0
-	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, cfg)
 
 	// Project dependencies
 	projectRepo := repositories.NewProjectRepository(pool)
@@ -90,17 +79,21 @@ func NewServer() *http.Server {
 	}
 	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
 	projectHandler := handlers.NewProjectHandler(projectService)
-	
+
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
+	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, orchestratorService)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
-	// 
+	//
 	tableRepo := repositories.NewTableRepository(pool)
 	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
 	tableHandler := handlers.NewTableHandler(tableService)
+
+	// Schema dependencies
+	schemaService := services.NewSchemaService(projectRepo, dbInstanceRepo, dbCredentialRepo, orchestratorService)
+	schemaHandler := handlers.NewSchemaHandler(schemaService)
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -113,25 +106,14 @@ func NewServer() *http.Server {
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
-<<<<<<< HEAD
-<<<<<<< HEAD
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, schemaHandler) // register all routes
+
 	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
-<<<<<<< HEAD
 	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
-<<<<<<< HEAD
 	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler) // register all routes
-=======
 	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, userRepo) // register all routes
->>>>>>> 0b8cb02 (Add Insert / Delete Row or Column and GET / Update / Delete user / me)
->>>>>>> 57f664a (Restering the new services & env variables)
->>>>>>> dfb2dc5 (Restering the new services & env variables)
-=======
 	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler) // register all routes
->>>>>>> feature/oauth2.0
 	// Create and configure the HTTP server
-	// WriteTimeout is set to 5 minutes to accommodate long-running database queries
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
 		Handler:      router,
