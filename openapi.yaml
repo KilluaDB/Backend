@@ -105,11 +105,11 @@ components:
           nullable: true
         db_type:
           type: string
-          enum: [postgres, mongodb]
+          enum: [postgresql, mongodb]
         resource_tier:
           type: string
           enum: [free, basic, premium]
-          description: "Resource tier for the project (free: 0.5 CPU, 512MB RAM; basic: 1 CPU, 1GB RAM; premium: 2 CPU, 2GB RAM)"
+          description: "Resource tier for the project (free: 0.5 CPU, 512 MB RAM, 5 GB storage; basic: 1 CPU, 1 GB RAM, 10 GB storage; premium: 2 CPU, 2 GB RAM, 20 GB storage)"
         created_at:
           type: string
           format: date-time
@@ -125,11 +125,11 @@ components:
           nullable: true
         db_type:
           type: string
-          description: "'postgres' or 'mongodb'"
-          enum: [postgres, mongodb]
+          description: "'postgresql' or 'mongodb'"
+          enum: [postgresql, mongodb]
         resource_tier:
           type: string
-          description: "Resource tier for the project (free: 0.5 CPU, 512MB RAM; basic: 1 CPU, 1GB RAM; premium: 2 CPU, 2GB RAM)"
+          description: "Resource tier for the project (free: 0.5 CPU, 512 MB RAM, 5 GB storage; basic: 1 CPU, 1 GB RAM, 10 GB storage; premium: 2 CPU, 2 GB RAM, 20 GB storage)"
           enum: [free, basic, premium]
 
     ExecuteQueryRequest:
@@ -606,13 +606,15 @@ paths:
                 status: success
                 message: Project created successfully
                 data:
-                  id: "123e4567-e89b-12d3-a456-426614174000"
-                  user_id: "123e4567-e89b-12d3-a456-426614174001"
-                  name: "My Project"
-                  description: "Project description"
-                  db_type: "postgres"
-                  resource_tier: "basic"
-                  created_at: "2024-01-01T00:00:00Z"
+                  project:
+                    id: "123e4567-e89b-12d3-a456-426614174000"
+                    user_id: "123e4567-e89b-12d3-a456-426614174001"
+                    name: "My Project"
+                    description: "Project description"
+                    db_type: "postgresql"
+                    resource_tier: "basic"
+                    created_at: "2024-01-01T00:00:00Z"
+                    status: "creating"
         '400':
           description: Invalid request body
           content:
@@ -652,7 +654,7 @@ paths:
                     user_id: "123e4567-e89b-12d3-a456-426614174001"
                     name: "My Project"
                     description: "Project description"
-                    db_type: "postgres"
+                    db_type: "postgresql"
                     resource_tier: "basic"
                     created_at: "2024-01-01T00:00:00Z"
         '401':
@@ -690,7 +692,7 @@ paths:
                   user_id: "123e4567-e89b-12d3-a456-426614174001"
                   name: "My Project"
                   description: "Project description"
-                  db_type: "postgres"
+                  db_type: "postgresql"
                   resource_tier: "basic"
                   created_at: "2024-01-01T00:00:00Z"
         '401':

@@ -25,7 +25,7 @@ func (r *DatabaseInstanceRepository) Create(instance *models.DatabaseInstance) e
 	instance.Prepare()
 
 	query := `
-		INSERT INTO database_instances (id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at)
+		INSERT INTO database_instances (id, project_id, cpu_cores, ram_mb, storage_gb, status, port, host, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
@@ -38,7 +38,7 @@ func (r *DatabaseInstanceRepository) Create(instance *models.DatabaseInstance) e
 		instance.StorageGB,
 		instance.Status,
 		instance.Port,
-		instance.ContainerID,
+		instance.Host,
 		now,
 		now,
 	)
@@ -50,7 +50,7 @@ func (r *DatabaseInstanceRepository) GetByID(id uuid.UUID) (*models.DatabaseInst
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, host, created_at, updated_at
 		FROM database_instances WHERE id = $1
 	`
 
@@ -63,7 +63,7 @@ func (r *DatabaseInstanceRepository) GetByID(id uuid.UUID) (*models.DatabaseInst
 		&instance.StorageGB,
 		&instance.Status,
 		&instance.Port,
-		&instance.ContainerID,
+		&instance.Host,
 		&instance.CreatedAt,
 		&instance.UpdatedAt,
 	)
@@ -82,7 +82,7 @@ func (r *DatabaseInstanceRepository) GetByProjectID(projectID uuid.UUID) (*model
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, host, created_at, updated_at
 		FROM database_instances WHERE project_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -97,7 +97,7 @@ func (r *DatabaseInstanceRepository) GetByProjectID(projectID uuid.UUID) (*model
 		&instance.StorageGB,
 		&instance.Status,
 		&instance.Port,
-		&instance.ContainerID,
+		&instance.Host,
 		&instance.CreatedAt,
 		&instance.UpdatedAt,
 	)
@@ -125,16 +125,46 @@ func (r *DatabaseInstanceRepository) UpdateStatus(id uuid.UUID, status string) e
 	return err
 }
 
-func (r *DatabaseInstanceRepository) UpdateContainerID(id uuid.UUID, containerID string) error {
+// UpdateHost sets the host for the database instance (e.g. after K8s provisioning).
+func (r *DatabaseInstanceRepository) UpdateHost(id uuid.UUID, host string) error {
 	ctx := context.Background()
 
 	query := `
 		UPDATE database_instances 
-		SET container_id = $2, updated_at = $3
+		SET host = $2, updated_at = $3
 		WHERE id = $1
 	`
 
-	_, err := r.pool.Exec(ctx, query, id, containerID, time.Now())
+	_, err := r.pool.Exec(ctx, query, id, host, time.Now())
+	return err
+}
+
+// UpdateAfterProvision sets host, port, and status to running after successful provisioning.
+// K8s resource is discovered by project_id (ResourceRefForProject) when needed.
+func (r *DatabaseInstanceRepository) UpdateAfterProvision(id uuid.UUID, host string, port int) error {
+	ctx := context.Background()
+
+	query := `
+		UPDATE database_instances 
+		SET host = $2, port = $3, status = 'running', updated_at = $4
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, id, host, port, time.Now())
+	return err
+}
+
+// UpdateConnectionInfo sets host, port, and status to running (e.g. after healing from operator).
+func (r *DatabaseInstanceRepository) UpdateConnectionInfo(id uuid.UUID, host string, port int) error {
+	ctx := context.Background()
+
+	query := `
+		UPDATE database_instances 
+		SET host = $2, port = $3, status = 'running', updated_at = $4
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, id, host, port, time.Now())
 	return err
 }
 
@@ -155,7 +185,7 @@ func (r *DatabaseInstanceRepository) GetRunningByProjectID(projectID uuid.UUID) 
 	ctx := context.Background()
 
 	query := `
-		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, container_id, created_at, updated_at
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, host, created_at, updated_at
 		FROM database_instances WHERE project_id = $1 AND status = 'running'
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -170,7 +200,46 @@ func (r *DatabaseInstanceRepository) GetRunningByProjectID(projectID uuid.UUID) 
 		&instance.StorageGB,
 		&instance.Status,
 		&instance.Port,
-		&instance.ContainerID,
+		&instance.Host,
+		&instance.CreatedAt,
+		&instance.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &instance, nil
+}
+
+// GetConnectableByProjectID returns an instance that can be used to connect.
+// Requires host and port. K8s resource is discovered by project_id when needed.
+func (r *DatabaseInstanceRepository) GetConnectableByProjectID(projectID uuid.UUID) (*models.DatabaseInstance, error) {
+	ctx := context.Background()
+
+	query := `
+		SELECT id, project_id, cpu_cores, ram_mb, storage_gb, status, port, host, created_at, updated_at
+		FROM database_instances
+		WHERE project_id = $1
+		  AND host IS NOT NULL AND host != ''
+		  AND port IS NOT NULL
+		ORDER BY CASE WHEN status = 'running' THEN 0 ELSE 1 END, created_at DESC
+		LIMIT 1
+	`
+
+	var instance models.DatabaseInstance
+	err := r.pool.QueryRow(ctx, query, projectID).Scan(
+		&instance.ID,
+		&instance.ProjectID,
+		&instance.CPUCores,
+		&instance.RAMMB,
+		&instance.StorageGB,
+		&instance.Status,
+		&instance.Port,
+		&instance.Host,
 		&instance.CreatedAt,
 		&instance.UpdatedAt,
 	)

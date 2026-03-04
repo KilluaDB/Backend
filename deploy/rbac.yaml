@@ -1,0 +1,41 @@
+# ServiceAccount for the backend (used by Deployment).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend
+  namespace: default
+---
+# Role: manage DB instance resources in the same namespace (DB_INSTANCES_NAMESPACE=default).
+# When using a different namespace for DB instances, duplicate this Role and RoleBinding in that namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-db-instances
+  namespace: default
+rules:
+  # CloudNativePG Cluster CR
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # MongoDB Community Operator CR
+  - apiGroups: ["mongodbcommunity.mongodb.com"]
+    resources: ["mongodbcommunity"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Secrets: read CNPG superuser secret, create/read Mongo admin password secret
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-db-instances
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: backend
+    namespace: default
+roleRef:
+  kind: Role
+  name: backend-db-instances
+  apiGroup: rbac.authorization.k8s.io

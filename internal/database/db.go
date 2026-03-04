@@ -39,7 +39,7 @@ func EnsureDatabaseExists() error {
 
 	userInfo := url.UserPassword(adminUser, adminPassword)
 	dsn := fmt.Sprintf(
-		"postgres://%s@%s:%s/postgres?sslmode=disable",
+		"postgresql://%s@%s:%s/postgres?sslmode=disable",
 		userInfo.String(),
 		host,
 		port,
@@ -110,20 +110,20 @@ func Connect() (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("DB_DATABASE environment variable is required")
 	}
 
-	// Build connection string using postgres:// URL format
+	// Build connection string using postgresql:// URL format
 	// Use url.UserPassword to properly encode username and password
 	userInfo := url.UserPassword(user, password)
 	encodedDatabase := url.PathEscape(database)
 
 	dsn := fmt.Sprintf(
-		"postgres://%s@%s:%s/%s?sslmode=disable",
+		"postgresql://%s@%s:%s/%s?sslmode=disable",
 		userInfo.String(),
 		host,
 		port,
 		encodedDatabase,
 	)
 
-	log.Printf("Connecting to database: postgres://%s:***@%s:%s/%s", user, host, port, database)
+	log.Printf("Connecting to database: postgresql://%s:***@%s:%s/%s", user, host, port, database)
 
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -163,12 +163,12 @@ func Close() {
 // ConnectToProjectDatabase creates a connection pool to a project's database instance
 // This is used to connect to project databases whose metadata is stored in the main database
 func ConnectToProjectDatabase(endpoint string, port int, username, password, database string) (*pgxpool.Pool, error) {
-	// Build connection string using postgres:// URL format
+	// Build connection string using postgresql:// URL format
 	userInfo := url.UserPassword(username, password)
 	encodedDatabase := url.PathEscape(database)
 
 	dsn := fmt.Sprintf(
-		"postgres://%s@%s:%d/%s?sslmode=disable",
+		"postgresql://%s@%s:%d/%s?sslmode=disable",
 		userInfo.String(),
 		endpoint,
 		port,

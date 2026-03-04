@@ -5,65 +5,68 @@ import (
 	"backend/internal/repositories"
 	"backend/internal/utils"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
-	_ "github.com/lib/pq"
 )
 
 type ProjectService struct {
 	projectRepo      *repositories.ProjectRepository
-	orchestrator     *OrchestratorService
+	provisioner      *OperatorProvisioner
 	dbInstanceRepo   *repositories.DatabaseInstanceRepository
 	dbCredentialRepo *repositories.DatabaseCredentialRepository
+	instanceConn     *InstanceConnectionService
 }
 
 func NewProjectService(
 	projectRepo *repositories.ProjectRepository,
-	orchestrator *OrchestratorService,
+	provisioner *OperatorProvisioner,
 	dbInstanceRepo *repositories.DatabaseInstanceRepository,
 	dbCredentialRepo *repositories.DatabaseCredentialRepository,
+	instanceConn *InstanceConnectionService,
 ) *ProjectService {
 	return &ProjectService{
 		projectRepo:      projectRepo,
-		orchestrator:     orchestrator,
+		provisioner:      provisioner,
 		dbInstanceRepo:   dbInstanceRepo,
 		dbCredentialRepo: dbCredentialRepo,
+		instanceConn:     instanceConn,
 	}
 }
 
 type CreateProjectRequest struct {
 	Name         string  `json:"name" binding:"required"`
 	Description  *string `json:"description,omitempty"`
-	DBType       string  `json:"db_type" binding:"required"`       // 'postgres' or 'mongodb'
+	DBType       string  `json:"db_type" binding:"required"`       // 'postgresql' or 'mongodb'
 	ResourceTier string  `json:"resource_tier" binding:"required"` // 'free', 'basic', or 'premium'
 }
 
-func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, error) {
+func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, *models.DatabaseInstance, error) {
 	// Parse user ID
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
+		return nil, nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
 	// Validate DB type
-	if req.DBType != "postgres" && req.DBType != "mongodb" {
-		return nil, fmt.Errorf("invalid db_type: must be 'postgres' or 'mongodb'")
+	if req.DBType != "postgresql" && req.DBType != "mongodb" {
+		return nil, nil, fmt.Errorf("invalid db_type: must be 'postgresql' or 'mongodb'")
 	}
 
 	// Validate resource tier
 	if req.ResourceTier != "free" && req.ResourceTier != "basic" && req.ResourceTier != "premium" {
-		return nil, fmt.Errorf("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+		return nil, nil, fmt.Errorf("invalid resource_tier: must be 'free', 'basic', or 'premium'")
 	}
 
-	// Create project record
+	// Build project and instance; project and instance are persisted before
+	// provisioning so that the API can return immediately with status "creating".
 	project := &models.Project{
 		UserID:       userUUID,
 		Name:         req.Name,
@@ -71,37 +74,18 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		DBType:       req.DBType,
 		ResourceTier: req.ResourceTier,
 	}
+	project.Prepare()
 
-	if err := s.projectRepo.Create(project); err != nil {
-		return nil, fmt.Errorf("failed to save project to database: %w", err)
-	}
-
-	// Map DB type for orchestrator (postgres -> postgresql)
-	dbTypeForOrchestrator := req.DBType
-	if req.DBType == "postgres" {
-		dbTypeForOrchestrator = "postgresql"
-	}
-
-	// Map resource tier to resource limits
-	resourceConfig := s.getResourceConfigForTier(req.ResourceTier)
-
-	// Get CPU and RAM values for database instance
-	cpuCores := int(resourceConfig["cpu"].(float64))
-	ramMB := int(resourceConfig["memory_mb"].(float64))
-	// Storage can be set based on tier as well, defaulting to 10GB for all tiers
-	storageGB := 10
-
-	// Get default port for database type
+	cpu, memoryMB, storageGB := s.provisioner.GetTierResources(req.ResourceTier)
+	cpuCores := int(cpu)
+	ramMB := int(memoryMB)
 	var port int
-	if req.DBType == "postgres" {
+	if req.DBType == "postgresql" {
 		port = 5432
-	} else if req.DBType == "mongodb" {
-		port = 27017
 	} else {
-		port = 5432 // Default to postgres port
+		port = 27017
 	}
 
-	// Create database instance record (status: creating) with resource information
 	dbInstance := &models.DatabaseInstance{
 		ProjectID: project.ID,
 		Status:    "creating",
@@ -109,64 +93,77 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		RAMMB:     &ramMB,
 		StorageGB: &storageGB,
 		Port:      &port,
+		Host:      nil, // set after provision
 	}
+	dbInstance.Prepare()
 
+	// Persist project and instance with status "creating" before kicking off
+	// background provisioning.
+	if err := s.projectRepo.Create(project); err != nil {
+		return nil, nil, fmt.Errorf("failed to save project to database: %w", err)
+	}
 	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
-		// If instance creation fails, delete the project (rollback)
 		s.projectRepo.Delete(project.ID)
-		return nil, fmt.Errorf("failed to create database instance: %w", err)
+		return nil, nil, fmt.Errorf("failed to save database instance: %w", err)
 	}
 
-	// Create container via orchestrator
-	orchestratorReq := CreateContainerRequest{
-		SessionName:   project.ID.String(), // Use project ID as session name
-		DatabaseType:  dbTypeForOrchestrator,
-		Configuration: resourceConfig,
+	// Start provisioning asynchronously; status will be updated to "running"
+	// or "failed" once provisioning completes.
+	go s.provisionInstanceAsync(project.ID, dbInstance.ID, req.DBType, req.ResourceTier)
+
+	// Reload project and instance to ensure timestamps and other DB-managed
+	// fields are populated in the API response.
+	persistedProject, err := s.projectRepo.GetByID(project.ID)
+	if err == nil && persistedProject != nil {
+		project = persistedProject
+	}
+	persistedInstance, err := s.dbInstanceRepo.GetByID(dbInstance.ID)
+	if err == nil && persistedInstance != nil {
+		dbInstance = persistedInstance
 	}
 
-	fmt.Printf("Creating container for project %s with database type %s and tier %s (CPU: %d, RAM: %dMB)\n",
-		project.ID.String(), dbTypeForOrchestrator, req.ResourceTier, cpuCores, ramMB)
-	orchestratorResp, err := s.orchestrator.CreateContainer(orchestratorReq)
+	return project, dbInstance, nil
+}
+
+// provisionInstanceAsync provisions the database instance via the operator and
+// updates instance status and credentials when ready.
+func (s *ProjectService) provisionInstanceAsync(projectID, instanceID uuid.UUID, dbType, resourceTier string) {
+	fmt.Printf("Provisioning DB instance for project %s (type %s, tier %s)\n", projectID.String(), dbType, resourceTier)
+
+	provCtx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+
+	result, err := s.provisioner.CreateInstance(provCtx, projectID, dbType, resourceTier)
 	if err != nil {
-		// Update instance status to failed
-		s.dbInstanceRepo.UpdateStatus(dbInstance.ID, "failed")
-		fmt.Printf("ERROR: Failed to create container: %v\n", err)
-		return nil, fmt.Errorf("failed to create container: %w", err)
-	}
-	fmt.Printf("Container created successfully: %s\n", orchestratorResp.ContainerID)
-
-	// Update database instance with container details
-	containerID := orchestratorResp.ContainerID
-
-	// Store container ID (IP will be retrieved from orchestrator when needed)
-	if err := s.dbInstanceRepo.UpdateContainerID(dbInstance.ID, containerID); err != nil {
-		return nil, fmt.Errorf("failed to update database instance container ID: %w", err)
+		fmt.Printf("ERROR: Failed to provision DB instance for project %s: %v\n", projectID.String(), err)
+		if statusErr := s.dbInstanceRepo.UpdateStatus(instanceID, "failed"); statusErr != nil {
+			fmt.Printf("ERROR: Failed to mark instance %s as failed: %v\n", instanceID.String(), statusErr)
+		}
+		return
 	}
 
-	// Update status to running
-	if err := s.dbInstanceRepo.UpdateStatus(dbInstance.ID, "running"); err != nil {
-		return nil, fmt.Errorf("failed to update database instance status: %w", err)
+	if err := s.dbInstanceRepo.UpdateAfterProvision(instanceID, result.Host, result.Port); err != nil {
+		fmt.Printf("ERROR: Failed to update instance %s after provision: %v\n", instanceID.String(), err)
+		return
 	}
 
-	// Store database credentials: encrypt the password returned by the orchestrator
-	encryptedPassword, err := utils.EncryptString(orchestratorResp.ConnectionInfo.Password)
+	encryptedPassword, err := utils.EncryptString(result.Password)
 	if err != nil {
-		// Log error but don't fail - queries will fail until credentials are fixed
-		fmt.Printf("Warning: failed to encrypt database password: %v\n", err)
-	} else {
-		credential := &models.DatabaseCredential{
-			DBInstanceID:      dbInstance.ID,
-			Username:          orchestratorResp.ConnectionInfo.User,
-			PasswordEncrypted: encryptedPassword,
-		}
-
-		if err := s.dbCredentialRepo.Create(credential); err != nil {
-			// Log error but don't fail - credentials can be recreated by recreating the instance
-			fmt.Printf("Warning: failed to save database credentials: %v\n", err)
-		}
+		fmt.Printf("Warning: failed to encrypt database password for project %s: %v\n", projectID.String(), err)
+		return
 	}
 
-	return project, nil
+	credential := &models.DatabaseCredential{
+		DBInstanceID:      instanceID,
+		Username:          "admin",
+		PasswordEncrypted: encryptedPassword,
+	}
+	if err := s.dbCredentialRepo.Upsert(credential); err != nil {
+		fmt.Printf("Warning: failed to save database credentials for project %s: %v\n", projectID.String(), err)
+		return
+	}
+
+	fmt.Printf("DB instance provisioned for project %s\n", projectID.String())
 }
 
 func (s *ProjectService) GetProjectByID(projectID string) (*models.Project, error) {
@@ -198,6 +195,11 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID string, userID string
 		return nil, fmt.Errorf("project not found or access denied")
 	}
 
+	// Populate status from the project's database instance
+	if inst, _ := s.dbInstanceRepo.GetByProjectID(project.ID); inst != nil {
+		project.Status = inst.Status
+	}
+
 	return project, nil
 }
 
@@ -207,7 +209,19 @@ func (s *ProjectService) GetProjectsByUserID(userID string) ([]models.Project, e
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	return s.projectRepo.GetByUserID(userUUID)
+	projects, err := s.projectRepo.GetByUserID(userUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate status from each project's database instance
+	for i := range projects {
+		if inst, _ := s.dbInstanceRepo.GetByProjectID(projects[i].ID); inst != nil {
+			projects[i].Status = inst.Status
+		}
+	}
+
+	return projects, nil
 }
 
 func (s *ProjectService) DeleteProject(projectID string) error {
@@ -252,21 +266,14 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 		return fmt.Errorf("project not found or access denied")
 	}
 
-	// Get database instance for this project
-	dbInstance, err := s.dbInstanceRepo.GetByProjectID(projectUUID)
-	if err != nil {
-		return fmt.Errorf("failed to get database instance: %w", err)
-	}
-
-	// If database instance exists and has a container ID, stop the container
-	if dbInstance != nil && dbInstance.ContainerID != nil && *dbInstance.ContainerID != "" {
-		// Try to stop container via orchestrator (best effort, don't fail if it fails)
-		if err := s.orchestrator.DeleteContainer(*dbInstance.ContainerID); err != nil {
-			// Log error but don't fail - container might already be stopped or deleted
-			fmt.Printf("Warning: Failed to stop container %s for project %s: %v\n", *dbInstance.ContainerID, projectID, err)
-		} else {
-			fmt.Printf("Successfully stopped container %s for project %s\n", *dbInstance.ContainerID, projectID)
-		}
+	// Delete K8s DB resource by project ID (discover resource ref from cluster name convention)
+	resourceRef := s.provisioner.ResourceRefForProject(projectUUID)
+	delCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.provisioner.DeleteInstance(delCtx, resourceRef); err != nil {
+		fmt.Printf("Warning: Failed to delete K8s DB resource %s for project %s: %v\n", resourceRef, projectID, err)
+	} else {
+		fmt.Printf("Successfully deleted K8s DB resource %s for project %s\n", resourceRef, projectID)
 	}
 
 	// Delete project from database (CASCADE will handle database_instances and credentials)
@@ -276,98 +283,6 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	}
 
 	return nil
-}
-
-// getResourceConfigForTier maps resource tiers to resource configurations
-// Returns a map with cpu (in cores) and memory_mb (in MB) for the orchestrator
-func (s *ProjectService) getResourceConfigForTier(tier string) map[string]interface{} {
-	config := make(map[string]interface{})
-
-	switch tier {
-	case "free":
-		// Free tier: 0.5 CPU, 512 MB RAM
-		config["cpu"] = 0.5
-		config["memory_mb"] = 512.0
-	case "basic":
-		// Basic tier: 1 CPU, 1024 MB (1 GB) RAM
-		config["cpu"] = 1.0
-		config["memory_mb"] = 1024.0
-	case "premium":
-		// Premium tier: 2 CPU, 2048 MB (2 GB) RAM
-		config["cpu"] = 2.0
-		config["memory_mb"] = 2048.0
-	default:
-		// Default to free tier if invalid
-		config["cpu"] = 0.5
-		config["memory_mb"] = 512.0
-	}
-
-	return config
-}
-
-// getDBConnection gets a database connection for a project's database instance
-func (s *ProjectService) getDBConnection(userID uuid.UUID, projectID uuid.UUID) (*sql.DB, error) {
-	// Validate project ownership
-	project, err := s.projectRepo.GetByIDAndUserID(projectID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if project == nil {
-		return nil, errors.New("project not found or not accessible")
-	}
-
-	// Find running DB instance for this project
-	inst, err := s.dbInstanceRepo.GetRunningByProjectID(projectID)
-	if err != nil {
-		return nil, err
-	}
-	if inst == nil {
-		return nil, errors.New("no running database instance for this project")
-	}
-
-	// Fetch credentials for the instance
-	cred, err := s.dbCredentialRepo.GetLatestByInstanceID(inst.ID)
-	if err != nil {
-		return nil, err
-	}
-	if cred == nil {
-		return nil, errors.New("no credentials configured for this database instance")
-	}
-
-	// Build connection string
-	if inst.ContainerID == nil || *inst.ContainerID == "" {
-		return nil, errors.New("database instance container ID not configured")
-	}
-	if inst.Port == nil {
-		return nil, errors.New("database instance port not configured")
-	}
-
-	// Get container IP from orchestrator
-	containerIP, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
-	if !ok {
-		// Try to get from Redis as fallback
-		var err error
-		containerIP, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get container IP: %w", err)
-		}
-	}
-
-	// Decrypt password before building DSN
-	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt database credentials: %w", err)
-	}
-
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		containerIP, *inst.Port, cred.Username, dbPassword, "postgres")
-
-	sqlDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database connection: %w", err)
-	}
-
-	return sqlDB, nil
 }
 
 // validateIdentifier validates SQL identifiers (table names, column names) to prevent SQL injection
@@ -416,19 +331,19 @@ func (s *ProjectService) InsertRow(userID uuid.UUID, projectID uuid.UUID, req In
 		}
 	}
 
-	// Get database connection
-	db, err := s.getDBConnection(userID, projectID)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer pool.Close()
 
 	// Check if the table has an 'id' column before attempting RETURNING id
 	// PostgreSQL stores identifiers in lowercase in information_schema unless quoted
 	// So we compare using LOWER() to handle case-insensitive matching
 	// Also check the 'public' schema (default schema)
 	var hasIDColumn bool
-	err = db.QueryRow(`
+	err = pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 
 			FROM information_schema.columns 
@@ -484,14 +399,15 @@ func (s *ProjectService) InsertRow(userID uuid.UUID, projectID uuid.UUID, req In
 			tableName, columnsStr, placeholdersStr)
 
 		var rowID int64
-		err = db.QueryRow(queryWithReturning, values...).Scan(&rowID)
+		err = pool.QueryRow(ctx, queryWithReturning, values...).Scan(&rowID)
 		if err == nil {
 			// Successfully got the id
 			return &InsertRowResponse{RowID: rowID}, nil
 		}
 
 		// If QueryRow failed, check if it's a column not found error
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "42703" {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42703" {
 			// Column doesn't actually exist (maybe the check was wrong), fall through to Exec
 			// This handles edge cases where information_schema check was incorrect
 		} else {
@@ -506,16 +422,13 @@ func (s *ProjectService) InsertRow(userID uuid.UUID, projectID uuid.UUID, req In
 	queryWithoutReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		tableName, columnsStr, placeholdersStr)
 
-	result, execErr := db.Exec(queryWithoutReturning, values...)
+	cmdTag, execErr := pool.Exec(ctx, queryWithoutReturning, values...)
 	if execErr != nil {
 		return nil, fmt.Errorf("failed to insert row into table %s: %w", req.Table, execErr)
 	}
 
 	// Check if any rows were affected
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
-	}
+	rowsAffected := cmdTag.RowsAffected()
 
 	if rowsAffected == 0 {
 		return nil, errors.New("no rows were inserted")
@@ -542,11 +455,12 @@ func (s *ProjectService) DeleteRow(
 		return fmt.Errorf("invalid table name: %w", err)
 	}
 
-	db, err := s.getDBConnection(userID, projectID)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer pool.Close()
 
 	rowIDInt, err := strconv.ParseInt(rowID, 10, 64)
 	if err != nil {
@@ -558,15 +472,12 @@ func (s *ProjectService) DeleteRow(
 		pq.QuoteIdentifier(req.TableName),
 	)
 
-	result, err := db.Exec(query, rowIDInt)
+	cmdTag, err := pool.Exec(ctx, query, rowIDInt)
 	if err != nil {
 		return fmt.Errorf("failed to delete row: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
+	rowsAffected := cmdTag.RowsAffected()
 
 	if rowsAffected == 0 {
 		return errors.New("row not found")
@@ -605,12 +516,12 @@ func (s *ProjectService) AddColumn(userID uuid.UUID, projectID uuid.UUID, req Ad
 		return nil, errors.New("column type cannot be empty")
 	}
 
-	// Get database connection
-	db, err := s.getDBConnection(userID, projectID)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer pool.Close()
 
 	// Build ALTER TABLE query
 	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
@@ -644,7 +555,7 @@ func (s *ProjectService) AddColumn(userID uuid.UUID, projectID uuid.UUID, req Ad
 	}
 
 	// Execute query
-	_, err = db.Exec(query)
+	_, err = pool.Exec(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add column: %w", err)
 	}
@@ -652,7 +563,7 @@ func (s *ProjectService) AddColumn(userID uuid.UUID, projectID uuid.UUID, req Ad
 	// Get the column's ordinal position as column_id
 	// PostgreSQL stores column information in information_schema.columns
 	var columnID int64
-	err = db.QueryRow(`
+	err = pool.QueryRow(ctx, `
 		SELECT ordinal_position 
 		FROM information_schema.columns 
 		WHERE table_name = $1 AND column_name = $2
@@ -682,12 +593,12 @@ func (s *ProjectService) DeleteColumn(userID uuid.UUID, projectID uuid.UUID, req
 		return fmt.Errorf("invalid column name: %w", err)
 	}
 
-	// Get database connection
-	db, err := s.getDBConnection(userID, projectID)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer pool.Close()
 
 	// Build ALTER TABLE DROP COLUMN query
 	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
@@ -695,7 +606,7 @@ func (s *ProjectService) DeleteColumn(userID uuid.UUID, projectID uuid.UUID, req
 	query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", tableNameQuoted, columnNameQuoted)
 
 	// Execute query
-	_, err = db.Exec(query)
+	_, err = pool.Exec(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to delete column: %w", err)
 	}

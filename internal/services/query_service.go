@@ -3,34 +3,28 @@ package services
 import (
 	"backend/internal/models"
 	"backend/internal/repositories"
-	"backend/internal/utils"
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type QueryService struct {
-	projectRepo  *repositories.ProjectRepository
-	instanceRepo *repositories.DatabaseInstanceRepository
-	credRepo     *repositories.DatabaseCredentialRepository
+	instanceConn *InstanceConnectionService
 	execRepo     *repositories.QueryHistoryRepository
-	orchestrator *OrchestratorService
 }
 
-func NewQueryService(projectRepo *repositories.ProjectRepository, instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, execRepo *repositories.QueryHistoryRepository, orchestrator *OrchestratorService) *QueryService {
+func NewQueryService(
+	instanceConn *InstanceConnectionService,
+	execRepo *repositories.QueryHistoryRepository,
+) *QueryService {
 	return &QueryService{
-		projectRepo:  projectRepo,
-		instanceRepo: instanceRepo,
-		credRepo:     credRepo,
+		instanceConn: instanceConn,
 		execRepo:     execRepo,
-		orchestrator: orchestrator,
 	}
 }
 
@@ -49,10 +43,8 @@ type ExecuteQueryRequest struct {
 
 // ValidateSQLQuery validates SQL queries to prevent dangerous operations
 func (s *QueryService) ValidateSQLQuery(query string) error {
-	// Trim + uppercase
 	normalized := strings.ToUpper(strings.TrimSpace(query))
 
-	// Remove comments
 	commentPattern := regexp.MustCompile(`--.*|/\*[\s\S]*?\*/`)
 	normalized = commentPattern.ReplaceAllString(normalized, "")
 	normalized = strings.TrimSpace(normalized)
@@ -61,12 +53,11 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 		return errors.New("query cannot be empty")
 	}
 
-	// Block dangerous operations
 	dangerousKeywords := []string{
 		"DROP DATABASE",
 		"DROP SCHEMA",
 		"TRUNCATE",
-		"DELETE FROM", // Allow DELETE but require WHERE clause
+		"DELETE FROM",
 		"ALTER DATABASE",
 		"CREATE DATABASE",
 		"CREATE SCHEMA",
@@ -74,21 +65,17 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 
 	for _, keyword := range dangerousKeywords {
 		if strings.Contains(normalized, keyword) {
-			// Special handling for DELETE - allow if it has WHERE clause
 			if keyword == "DELETE FROM" {
 				if !strings.Contains(normalized, "WHERE") {
 					return errors.New("DELETE statements must include a WHERE clause for safety")
 				}
 				continue
 			}
-			return fmt.Errorf("operation '%s' is not allowed for security reasons", keyword)
+			return errors.New("operation '" + keyword + "' is not allowed for security reasons")
 		}
 	}
 
-	// Check for multiple statements (prevent SQL injection via multiple statements)
-	// TODO: Single statements with multiple semicolons are allowed
 	if strings.Contains(normalized, ";") && len(strings.Split(normalized, ";")) > 2 {
-		// Allow single semicolon at the end
 		parts := strings.Split(normalized, ";")
 		nonEmptyParts := 0
 		for _, part := range parts {
@@ -104,43 +91,16 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
-// ExecuteQuery executes a SQL query on the specified database connection
+// ExecuteQuery executes a SQL query on the project's database instance.
 func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
+	ctx := context.Background()
 
-	// Validate project ownership
-	project, err := s.projectRepo.GetByIDAndUserID(projectId, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if project == nil {
-		return nil, nil, errors.New("project not found or not accessible")
-	}
-
-	// Find running DB instance for this project
-	inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
-	if err != nil {
-		return nil, nil, err
-	}
-	if inst == nil {
-		return nil, nil, errors.New("no running database instance for this project")
-	}
-
-	// Fetch credentials for the instance
-	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if cred == nil {
-		return nil, nil, errors.New("no credentials configured for this database instance")
-	}
-
-	// Validate query
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		exec := &models.QueryHistory{
-			DBInstanceID:    inst.ID,
+			DBInstanceID:    uuid.Nil,
 			UserID:          userID,
 			QueryText:       req.Query,
 			ExecutedAt:      time.Now(),
@@ -151,86 +111,12 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
 	}
 
-	// Validate container_id exists
-	if inst.ContainerID == nil || *inst.ContainerID == "" {
-		execTime := time.Since(startTime).Milliseconds()
-		success := false
-		exec := &models.QueryHistory{
-			DBInstanceID:    inst.ID,
-			UserID:          userID,
-			QueryText:       req.Query,
-			ExecutedAt:      time.Now(),
-			Success:         &success,
-			ExecutionTimeMs: &[]int{int(execTime)}[0],
-		}
-		_ = s.execRepo.Create(exec)
-		return &QueryResult{Error: "database instance container ID not configured", ExecutionTime: execTime}, exec, nil
-	}
-
-	// Get current IP from orchestrator
-	ip, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
-	if !ok {
-		// Try Redis as fallback
-		var err error
-		ip, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
-		if err != nil {
-			execTime := time.Since(startTime).Milliseconds()
-			success := false
-			exec := &models.QueryHistory{
-				DBInstanceID:    inst.ID,
-				UserID:          userID,
-				QueryText:       req.Query,
-				ExecutedAt:      time.Now(),
-				Success:         &success,
-				ExecutionTimeMs: &[]int{int(execTime)}[0],
-			}
-			_ = s.execRepo.Create(exec)
-			return &QueryResult{Error: "failed to get container IP from orchestrator", ExecutionTime: execTime}, exec, nil
-		}
-	}
-
-	// Validate port
-	if inst.Port == nil {
-		execTime := time.Since(startTime).Milliseconds()
-		success := false
-		exec := &models.QueryHistory{
-			DBInstanceID:    inst.ID,
-			UserID:          userID,
-			QueryText:       req.Query,
-			ExecutedAt:      time.Now(),
-			Success:         &success,
-			ExecutionTimeMs: &[]int{int(execTime)}[0],
-		}
-		_ = s.execRepo.Create(exec)
-		return &QueryResult{Error: "database instance port not configured", ExecutionTime: execTime}, exec, nil
-	}
-
-	// Decrypt password before building DSN
-	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
+	pool, instanceID, err := s.instanceConn.GetPoolWithMeta(ctx, userID, projectId)
 	if err != nil {
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		exec := &models.QueryHistory{
-			DBInstanceID:    inst.ID,
-			UserID:          userID,
-			QueryText:       req.Query,
-			ExecutedAt:      time.Now(),
-			Success:         &success,
-			ExecutionTimeMs: &[]int{int(execTime)}[0],
-		}
-		_ = s.execRepo.Create(exec)
-		return &QueryResult{Error: "failed to decrypt database credentials", ExecutionTime: execTime}, exec, nil
-	}
-
-	// Build connection string using IP from orchestrator
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		ip, *inst.Port, cred.Username, dbPassword, "postgres")
-	sqlDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		execTime := time.Since(startTime).Milliseconds()
-		success := false
-		exec := &models.QueryHistory{
-			DBInstanceID:    inst.ID,
+			DBInstanceID:    instanceID,
 			UserID:          userID,
 			QueryText:       req.Query,
 			ExecutedAt:      time.Now(),
@@ -240,16 +126,16 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 		_ = s.execRepo.Create(exec)
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
 	}
-	defer sqlDB.Close()
+	defer pool.Close()
 
-	result, err := s.executeSQLQuery(sqlDB, req.Query)
+	result, err := s.executeSQLQuery(ctx, pool, req.Query)
 	execTime := time.Since(startTime).Milliseconds()
 	result.ExecutionTime = execTime
 
 	success := err == nil && result.Error == ""
 	execTimeInt := int(execTime)
 	exec := &models.QueryHistory{
-		DBInstanceID:    inst.ID,
+		DBInstanceID:    instanceID,
 		UserID:          userID,
 		QueryText:       req.Query,
 		ExecutedAt:      time.Now(),
@@ -266,49 +152,38 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	return result, exec, nil
 }
 
-// executeSQLQuery executes a SQL query and returns results
-func (s *QueryService) executeSQLQuery(db *sql.DB, query string) (*QueryResult, error) {
-	// Check if it's a SELECT query or other query type
-
+func (s *QueryService) executeSQLQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(query))
 	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
 
 	if isSelect {
-		return s.executeSelectQuery(db, query)
+		return s.executeSelectQuery(ctx, pool, query)
 	}
-
-	// For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
-	return s.executeNonSelectQuery(db, query)
+	return s.executeNonSelectQuery(ctx, pool, query)
 }
 
-// executeSelectQuery executes a SELECT query
-func (s *QueryService) executeSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
-	rows, err := db.Query(query)
+func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+	rows, err := pool.Query(ctx, query)
 	if err != nil {
 		return &QueryResult{Error: err.Error()}, nil
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
-	if err != nil {
-		return &QueryResult{Error: err.Error()}, nil
+	fieldDescs := rows.FieldDescriptions()
+	columns := make([]string, len(fieldDescs))
+	for i, fd := range fieldDescs {
+		columns[i] = string(fd.Name)
 	}
 
 	var resultRows []map[string]interface{}
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
+		vals, err := rows.Values()
+		if err != nil {
 			return &QueryResult{Error: err.Error()}, nil
 		}
-
 		rowMap := make(map[string]interface{})
 		for i, col := range columns {
-			val := values[i]
+			val := vals[i]
 			if val != nil {
 				switch v := val.(type) {
 				case []byte:
@@ -337,20 +212,14 @@ func (s *QueryService) executeSelectQuery(db *sql.DB, query string) (*QueryResul
 	}, nil
 }
 
-// executeNonSelectQuery executes non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
-func (s *QueryService) executeNonSelectQuery(db *sql.DB, query string) (*QueryResult, error) {
-	result, err := db.Exec(query)
-	if err != nil {
-		return &QueryResult{Error: err.Error()}, nil
-	}
-
-	rowsAffected, err := result.RowsAffected()
+func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+	cmdTag, err := pool.Exec(ctx, query)
 	if err != nil {
 		return &QueryResult{Error: err.Error()}, nil
 	}
 
 	return &QueryResult{
-		RowsAffected: rowsAffected,
+		RowsAffected: cmdTag.RowsAffected(),
 		RowCount:     0,
 	}, nil
 }

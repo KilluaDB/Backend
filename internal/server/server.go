@@ -77,29 +77,29 @@ func NewServer() *http.Server {
 	}
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
-	// Project dependencies
+	// Project dependencies (provisioner uses K8s operators for DB instances)
 	projectRepo := repositories.NewProjectRepository(pool)
 	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
 	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
-	orchestratorService, err := services.NewOrchestratorService()
+	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
-		log.Fatalf("failed to initialize orchestrator: %v", err)
+		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
-	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
+	instanceConn := services.NewInstanceConnectionService(projectRepo, dbInstanceRepo, dbCredentialRepo, provisioner)
+	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, orchestratorService)
+	queryService := services.NewQueryService(instanceConn, queryHistoryRepo)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
-	//
-	tableRepo := repositories.NewTableRepository(pool)
-	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo, orchestratorService)
+	tableRepo := repositories.NewTableRepository()
+	tableService := services.NewTableService(instanceConn, queryHistoryRepo, tableRepo)
 	tableHandler := handlers.NewTableHandler(tableService)
 
 	// Schema dependencies
-	schemaService := services.NewSchemaService(projectRepo, dbInstanceRepo, dbCredentialRepo, orchestratorService)
+	schemaService := services.NewSchemaService(instanceConn)
 	schemaHandler := handlers.NewSchemaHandler(schemaService)
 
 	// Initialize Gin router
@@ -139,13 +139,8 @@ func validateRequiredEnvVars() error {
 		"DB_ADMIN_USER":                 os.Getenv("DB_ADMIN_USER"),
 		"DB_ADMIN_PASSWORD":             os.Getenv("DB_ADMIN_PASSWORD"),
 		"ACCESS_TOKEN_SECRET":           os.Getenv("ACCESS_TOKEN_SECRET"),
-		"REFRESH_TOKEN_SECRET":          os.Getenv("REFRESH_TOKEN_SECRET"),
-		"REDIS_ADDR":                    os.Getenv("REDIS_ADDR"),
-		"ORCHESTRATOR_NETWORK_NAME":     os.Getenv("ORCHESTRATOR_NETWORK_NAME"),
-		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
-		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
-		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
-		"GOOGLE_CLIENT_ID":              os.Getenv("GOOGLE_CLIENT_ID"),
+		"REFRESH_TOKEN_SECRET":    os.Getenv("REFRESH_TOKEN_SECRET"),
+		"GOOGLE_CLIENT_ID":        os.Getenv("GOOGLE_CLIENT_ID"),
 		"GOOGLE_CLIENT_SECRET":          os.Getenv("GOOGLE_CLIENT_SECRET"),
 		"GOOGLE_REDIRECT_URL":           os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
@@ -155,6 +150,6 @@ func validateRequiredEnvVars() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-
+	// K8s provisioner: DB_INSTANCES_NAMESPACE (optional), KUBECONFIG (optional)
 	return nil
 }

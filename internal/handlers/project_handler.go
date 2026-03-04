@@ -47,14 +47,29 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	project, err := h.projectService.CreateProject(userIDStr, req)
+	project, instance, err := h.projectService.CreateProject(userIDStr, req)
 	if err != nil {
 		fmt.Printf("ERROR in CreateProject handler: %v\n", err)
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project")
 		return
 	}
 
-	responses.Success(c, http.StatusCreated, project, "Project created successfully")
+	projectData := gin.H{
+		"id":            project.ID,
+		"user_id":       project.UserID,
+		"name":          project.Name,
+		"description":   project.Description,
+		"db_type":       project.DBType,
+		"resource_tier": project.ResourceTier,
+		"created_at":    project.CreatedAt,
+		"status":        instance.Status,
+	}
+
+	responseData := gin.H{
+		"project": projectData,
+	}
+
+	responses.Success(c, http.StatusCreated, responseData, "Project created successfully")
 }
 
 // GetProject handles GET /api/v1/projects/:id

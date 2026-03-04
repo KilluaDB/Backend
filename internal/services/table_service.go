@@ -2,12 +2,9 @@ package services
 
 import (
 	"backend/internal/repositories"
-	"backend/internal/utils"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	_ "log"
 	"regexp"
 	"strings"
 
@@ -15,30 +12,26 @@ import (
 )
 
 type TableService struct {
-	projectRepo     *repositories.ProjectRepository
-	instanceRepo    *repositories.DatabaseInstanceRepository
-	credentialsRepo *repositories.DatabaseCredentialRepository
-	executeRepo     *repositories.QueryHistoryRepository
-	tableRepo       *repositories.TableRepository
-	orchestrator    *OrchestratorService
+	instanceConn *InstanceConnectionService
+	executeRepo  *repositories.QueryHistoryRepository
+	tableRepo    *repositories.TableRepository
 }
 
 func NewTableService(
-	projectRepo *repositories.ProjectRepository,
-	instanceRepo *repositories.DatabaseInstanceRepository,
-	credentialsRepo *repositories.DatabaseCredentialRepository,
+	instanceConn *InstanceConnectionService,
 	executeRepo *repositories.QueryHistoryRepository,
 	tableRepo *repositories.TableRepository,
-	orchestrator *OrchestratorService,
 ) *TableService {
 	return &TableService{
-		projectRepo:     projectRepo,
-		instanceRepo:    instanceRepo,
-		credentialsRepo: credentialsRepo,
-		executeRepo:     executeRepo,
-		tableRepo:       tableRepo,
-		orchestrator:    orchestrator,
+		instanceConn: instanceConn,
+		executeRepo:  executeRepo,
+		tableRepo:    tableRepo,
 	}
+}
+
+// TableOpResult is returned by CreateTable and DeleteTable for API response.
+type TableOpResult struct {
+	RowsAffected int64 `json:"rows_affected"`
 }
 
 type Column struct {
@@ -83,44 +76,42 @@ type DeleteTableRequest struct {
 	Table  string `json:"table" binding:"required"`
 }
 
-func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
-	// Validate request
+func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
 	if err := s.validateCreateTableRequest(req); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	sqlDb, err := s.openDbConnection(userId, projectId)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userId, projectId)
 	if err != nil {
 		return nil, err
 	}
-	defer sqlDb.Close()
+	defer pool.Close()
 
-	// Start transaction
-	tx, err := sqlDb.Begin()
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
 	query, err := s.parseCreateQuery(req)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := tx.Exec(query)
+	cmdTag, err := tx.Exec(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return &result, nil
+	return &TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
 }
 
-func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
-	// Validate identifiers
+func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
 	if !isValidIdentifier(req.Schema) {
 		return nil, errors.New("invalid schema name")
 	}
@@ -128,29 +119,29 @@ func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, pr
 		return nil, errors.New("invalid table name")
 	}
 
-	sqlDb, err := s.openDbConnection(userId, projectId)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userId, projectId)
 	if err != nil {
 		return nil, err
 	}
-	defer sqlDb.Close()
+	defer pool.Close()
 
-	// Start transaction
-	tx, err := sqlDb.Begin()
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
-	result, err := s.tableRepo.Delete(tx, req.Schema, req.Table)
+	cmdTag, err := s.tableRepo.Delete(ctx, tx, req.Schema, req.Table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete table: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return &result, nil
+	return &TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
 }
 
 // func (s *TableService) UpdateTable(req *UpdateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
@@ -358,66 +349,3 @@ func isValidColumnType(colType string) bool {
 	return false
 }
 
-func (s *TableService) openDbConnection(userId uuid.UUID, projectId uuid.UUID) (*sql.DB, error) {
-	project, err := s.projectRepo.GetByIDAndUserID(projectId, userId)
-	if err != nil {
-		return nil, err
-	}
-	if project == nil {
-		return nil, errors.New("project not found or not accessible")
-	}
-
-	dbInstance, err := s.instanceRepo.GetRunningByProjectID(projectId)
-	if err != nil {
-		return nil, err
-	}
-	if dbInstance == nil {
-		return nil, errors.New("no running database instance for this project")
-	}
-
-	dbCred, err := s.credentialsRepo.GetLatestByInstanceID(dbInstance.ID)
-	if err != nil {
-		return nil, err
-	}
-	if dbCred == nil {
-		return nil, errors.New("no credentials configured for this database instance")
-	}
-
-	if dbInstance.ContainerID == nil || *dbInstance.ContainerID == "" {
-		return nil, errors.New("database instance container ID not configured")
-	}
-	if dbInstance.Port == nil {
-		return nil, errors.New("database instance port not configured")
-	}
-
-	// Get container IP from orchestrator
-	containerIP, ok := s.orchestrator.GetContainerIP(*dbInstance.ContainerID)
-	if !ok {
-		// Try to get from Redis as fallback
-		var err error
-		containerIP, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *dbInstance.ContainerID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get container IP: %w", err)
-		}
-	}
-
-	dbPassword, err := utils.DecryptString(dbCred.PasswordEncrypted)
-	if err != nil {
-		return nil, err
-	}
-
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		containerIP,
-		*dbInstance.Port,
-		dbCred.Username,
-		dbPassword,
-		"postgres",
-	)
-
-	sqlDb, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	return sqlDb, nil
-}

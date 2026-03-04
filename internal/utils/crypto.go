@@ -94,4 +94,15 @@ func DecryptString(ciphertextB64 string) (string, error) {
 	return string(plaintext), nil
 }
 
-
+// GeneratePasswordBase64 returns a URL-safe base64 password generated from numBytes random bytes.
+// If numBytes <= 0, 32 is used.
+func GeneratePasswordBase64(numBytes int) (string, error) {
+	if numBytes <= 0 {
+		numBytes = 32
+	}
+	b := make([]byte, numBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}

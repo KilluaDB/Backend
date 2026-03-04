@@ -1,38 +1,20 @@
 package repositories
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-type TableRepository struct {
-	pool *pgxpool.Pool
+type TableRepository struct{}
+
+func NewTableRepository() *TableRepository {
+	return &TableRepository{}
 }
 
-func NewTableRepository(pool *pgxpool.Pool) *TableRepository {
-	return &TableRepository {
-		pool: pool,
-	}
-}
-
-func (r *TableRepository) Delete(tx *sql.Tx, schema string, table string) (sql.Result, error) {
-	// Use quoted identifiers to prevent SQL injection
+func (r *TableRepository) Delete(ctx context.Context, tx pgx.Tx, schema string, table string) (pgconn.CommandTag, error) {
 	query := fmt.Sprintf("DROP TABLE \"%s\".\"%s\" CASCADE", schema, table)
-
-	result, err := tx.Exec(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to drop table: %w", err)
-	}
-	
-	return result, nil
+	return tx.Exec(ctx, query)
 }
-
-// func (r *TableRepository) UpdateTableName(userDb *sql.DB, schema string, oldTable string, newtable string) (sql.Result, error) {
-// 	query := fmt.Sprintf("ALTER TABLE %s.%s RENAME TO %s", schema, oldTable, newtable)
-
-// 	result, err := userDb.Exec(query)
-	
-// 	return result, err
-// }

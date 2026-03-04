@@ -1,4 +1,4 @@
-.PHONY: help install deps build run test clean migrate setup cleanup-network docker-down
+.PHONY: help install deps build run test clean migrate setup cleanup-network docker-down k8s-local
 
 # Default target
 .DEFAULT_GOAL := help
@@ -33,9 +33,8 @@ run: ## Run the application (development mode)
 	@echo "Starting application..."
 	@go run $(MAIN_PATH)
 
-start: build ## Build and run the application
-	@echo "Starting application..."
-	@./$(BINARY_PATH)
+start: ## Start backend in k3d (meta-DB, build image, deploy, port-forward, logs)
+	@./start.sh
 
 test: ## Run tests
 	@echo "Running tests..."
@@ -65,30 +64,12 @@ check: ## Check if all dependencies are installed
 	@command -v redis-cli >/dev/null 2>&1 || { echo "Redis is not installed (optional)"; }
 	@echo "All required dependencies are installed"
 
+k8s-local: ## Start local K3s cluster (k3d) and install CloudNativePG + MongoDB operators
+	@./scripts/k3s-local-setup.sh
+
 dev: deps run ## Install dependencies and run in development mode
 
-cleanup-network: ## Remove orchestrator Docker network (optional - network is reused by default)
-	@echo "Removing orchestrator network..."
-	@if [ -f .env ]; then \
-		export $$(cat .env | grep -v '^#' | xargs); \
-		NETWORK_NAME="$${ORCHESTRATOR_NETWORK_NAME:-dbaas-orchestrator-network}"; \
-		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
-			echo "Removing network: $$NETWORK_NAME"; \
-			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
-		else \
-			echo "Network $$NETWORK_NAME does not exist"; \
-		fi \
-	else \
-		NETWORK_NAME="dbaas-orchestrator-network"; \
-		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
-			echo "Removing network: $$NETWORK_NAME"; \
-			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
-		else \
-			echo "Network $$NETWORK_NAME does not exist"; \
-		fi \
-	fi
-
-docker-down: ## Stop and remove Docker containers (keeps orchestrator network)
+docker-down: ## Stop and remove Docker containers
 	@echo "Stopping Docker containers..."
 	@if command -v docker-compose >/dev/null 2>&1; then \
 		docker-compose down; \
