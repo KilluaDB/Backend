@@ -4,7 +4,7 @@
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'db_type_t') THEN
-    CREATE TYPE db_type_t AS ENUM ('postgres', 'mongodb');
+    CREATE TYPE db_type_t AS ENUM ('postgresql', 'mongodb');
   END IF;
 END$$;
 
@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
 CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
 
 
--- Database Instances table
+-- Database Instances table (K8s resource discovered by project_id via cluster name convention)
 CREATE TABLE IF NOT EXISTS database_instances (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -73,14 +73,13 @@ CREATE TABLE IF NOT EXISTS database_instances (
   storage_gb INT,
   status instance_status_t NOT NULL DEFAULT 'creating',
   port INT,
-  container_id TEXT,
+  host TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
-CREATE INDEX IF NOT EXISTS idx_database_instances_container_id ON database_instances(container_id);
 
 -- Database Credentials table
 CREATE TABLE IF NOT EXISTS database_credentials (
@@ -93,6 +92,7 @@ CREATE TABLE IF NOT EXISTS database_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_database_credentials_db_instance_id ON database_credentials(db_instance_id);
 CREATE INDEX IF NOT EXISTS idx_database_credentials_username ON database_credentials(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_database_credentials_instance_username ON database_credentials(db_instance_id, username);
 
 
 -- API Keys table

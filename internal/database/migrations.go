@@ -22,9 +22,10 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		createDatabaseCredentialsTable,
 		createAPIKeysTable,
 		createQueryHistoryTable,
-		fixQueryHistoryForeignKey,
 		createUsageMetricsTable,
 		preventHardDeleteUsers,
+		addHostToDatabaseInstances,
+		addResourceTierToProjects,
 	}
 
 	for i, migration := range migrations {
@@ -43,7 +44,7 @@ const createEnumTypes = `
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'db_type_t') THEN
-    CREATE TYPE db_type_t AS ENUM ('postgres', 'mongodb');
+    CREATE TYPE db_type_t AS ENUM ('postgresql', 'mongodb');
   END IF;
 END$$;
 
@@ -143,14 +144,13 @@ CREATE TABLE IF NOT EXISTS database_instances (
   status instance_status_t NOT NULL DEFAULT 'creating',
   endpoint TEXT,
   port INT,
-  container_id TEXT,
+  host TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
-CREATE INDEX IF NOT EXISTS idx_database_instances_container_id ON database_instances(container_id);
 `
 
 const createDatabaseCredentialsTable = `
@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS database_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_database_credentials_db_instance_id ON database_credentials(db_instance_id);
 CREATE INDEX IF NOT EXISTS idx_database_credentials_username ON database_credentials(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_database_credentials_instance_username ON database_credentials(db_instance_id, username);
 `
 
 const createAPIKeysTable = `
@@ -198,37 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_query_history_executed_at ON query_history(executed_at);
 `
 
-const fixQueryHistoryForeignKey = `
--- Fix query_history foreign key to use RESTRICT instead of SET NULL
-DO $$
-BEGIN
-  -- Drop existing constraint if it exists
-  IF EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'query_history_user_id_fkey' 
-    AND table_name = 'query_history'
-  ) THEN
-    ALTER TABLE query_history DROP CONSTRAINT query_history_user_id_fkey;
-  END IF;
-
-  -- Ensure user_id is NOT NULL
-  ALTER TABLE query_history ALTER COLUMN user_id SET NOT NULL;
-
-  -- Add correct foreign key with RESTRICT
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'query_history_user_fk' 
-    AND table_name = 'query_history'
-  ) THEN
-    ALTER TABLE query_history
-    ADD CONSTRAINT query_history_user_fk
-    FOREIGN KEY (user_id)
-    REFERENCES users(id)
-    ON DELETE RESTRICT;
-  END IF;
-END$$;
-`
-
 const preventHardDeleteUsers = `
 -- Prevent hard delete of users (enforce soft-delete only)
 -- Create or replace function (safe to run multiple times)
@@ -246,6 +216,28 @@ CREATE TRIGGER no_user_hard_delete
 BEFORE DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION prevent_hard_delete_users();
+`
+
+const addHostToDatabaseInstances = `
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'database_instances' AND column_name = 'host'
+  ) THEN
+    ALTER TABLE database_instances ADD COLUMN host TEXT;
+    CREATE INDEX IF NOT EXISTS idx_database_instances_host ON database_instances(host);
+  END IF;
+END$$;
+`
+
+const addResourceTierToProjects = `
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resource_tier_t') THEN
+    CREATE TYPE resource_tier_t AS ENUM ('free', 'basic', 'premium');
+  END IF;
+END$$;
 `
 
 const createUsageMetricsTable = `

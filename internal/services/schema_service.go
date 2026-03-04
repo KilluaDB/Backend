@@ -1,14 +1,11 @@
 package services
 
 import (
-	"backend/internal/database"
 	"backend/internal/models"
 	"backend/internal/repositories"
 	"backend/internal/utils"
 	"context"
-	"errors"
 	"fmt"
-
 	"strings"
 	"time"
 
@@ -21,85 +18,22 @@ const (
 )
 
 type SchemaService struct {
-	projectRepo  *repositories.ProjectRepository
-	instanceRepo *repositories.DatabaseInstanceRepository
-	credRepo     *repositories.DatabaseCredentialRepository
-	orchestrator *OrchestratorService
+	instanceConn *InstanceConnectionService
 }
 
 // NewSchemaService creates a new SchemaService
-func NewSchemaService(
-	projectRepo *repositories.ProjectRepository,
-	instanceRepo *repositories.DatabaseInstanceRepository,
-	credRepo *repositories.DatabaseCredentialRepository,
-	orchestrator *OrchestratorService,
-) *SchemaService {
+func NewSchemaService(instanceConn *InstanceConnectionService) *SchemaService {
 	return &SchemaService{
-		projectRepo:  projectRepo,
-		instanceRepo: instanceRepo,
-		credRepo:     credRepo,
-		orchestrator: orchestrator,
+		instanceConn: instanceConn,
 	}
 }
 
 // VisualizeSchema generates a Mermaid ER diagram for a project's database schema
 func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, schema string) (string, error) {
-	// Validate project ownership
-	project, err := s.projectRepo.GetByIDAndUserID(projectID, userID)
+	ctx := context.Background()
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return "", err
-	}
-	if project == nil {
-		return "", errors.New("project not found or not accessible")
-	}
-
-	inst, err := s.instanceRepo.GetRunningByProjectID(projectID)
-	if err != nil {
-		return "", err
-	}
-	if inst == nil {
-		return "", errors.New("no running database instance for this project")
-	}
-
-	// Fetch credentials for the instance
-	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
-	if err != nil {
-		return "", err
-	}
-	if cred == nil {
-		return "", errors.New("no credentials configured for this database instance")
-	}
-
-	// Validate container_id
-	if inst.ContainerID == nil || *inst.ContainerID == "" {
-		return "", errors.New("database instance container ID not configured")
-	}
-
-	// Get current IP from orchestrator
-	ip, ok := s.orchestrator.GetContainerIP(*inst.ContainerID)
-	if !ok {
-		var err error
-		ip, err = s.orchestrator.GetContainerIPFromRedis(context.Background(), *inst.ContainerID)
-		if err != nil {
-			return "", fmt.Errorf("failed to get container IP from orchestrator: %w", err)
-		}
-	}
-
-	// Validate port
-	if inst.Port == nil {
-		return "", errors.New("database instance port not configured")
-	}
-
-	// Decrypt password
-	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
-	if err != nil {
-		return "", fmt.Errorf("failed to decrypt database credentials: %w", err)
-	}
-
-	// Connect to the project database using IP from orchestrator
-	pool, err := database.ConnectToProjectDatabase(ip, *inst.Port, cred.Username, dbPassword, "postgres")
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to project database: %w", err)
 	}
 	defer pool.Close()
 
