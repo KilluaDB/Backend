@@ -238,6 +238,19 @@ BEGIN
     CREATE TYPE resource_tier_t AS ENUM ('free', 'basic', 'premium');
   END IF;
 END$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'projects' AND column_name = 'resource_tier'
+  ) THEN
+    ALTER TABLE projects
+    ADD COLUMN resource_tier resource_tier_t NOT NULL DEFAULT 'free';
+  END IF;
+END$$;
+
+CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
 `
 
 const createUsageMetricsTable = `

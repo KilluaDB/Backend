@@ -38,21 +38,27 @@ type ProvisionResult struct {
 
 // OperatorProvisioner creates and deletes DB instances via Kubernetes operators (CloudNativePG, MongoDB).
 type OperatorProvisioner struct {
-	namespace  string
-	dynamic    dynamic.Interface
-	core       kubernetes.Interface
-	cnpgGVR    schema.GroupVersionResource
-	mongoGVR   schema.GroupVersionResource
-	tierConfig func(string) (cpu float64, memoryMB float64, storageGB int)
-	inCluster  bool
+	postgresNamespace string
+	mongoNamespace    string
+	dynamic           dynamic.Interface
+	core              kubernetes.Interface
+	cnpgGVR           schema.GroupVersionResource
+	mongoGVR          schema.GroupVersionResource
+	tierConfig        func(string) (cpu float64, memoryMB float64, storageGB int)
+	inCluster         bool
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
 // or kubeconfig (KUBECONFIG env or ~/.kube/config) when running locally.
+// Postgres and MongoDB instances use separate namespaces (env: DB_INSTANCES_NAMESPACE_POSTGRES, DB_INSTANCES_NAMESPACE_MONGO).
 func NewOperatorProvisioner() (*OperatorProvisioner, error) {
-	namespace := os.Getenv("DB_INSTANCES_NAMESPACE")
-	if namespace == "" {
-		namespace = "default"
+	postgresNS := os.Getenv("DB_INSTANCES_NAMESPACE_POSTGRES")
+	if postgresNS == "" {
+		postgresNS = "postgres-instances"
+	}
+	mongoNS := os.Getenv("DB_INSTANCES_NAMESPACE_MONGO")
+	if mongoNS == "" {
+		mongoNS = "mongodb-instances"
 	}
 
 	config, err := rest.InClusterConfig()
@@ -91,13 +97,14 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 	tierConfig := getTierConfig()
 
 	return &OperatorProvisioner{
-		namespace:  namespace,
-		dynamic:    dyn,
-		core:       core,
-		cnpgGVR:    schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
-		mongoGVR:   schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
-		tierConfig: tierConfig,
-		inCluster:  inCluster,
+		postgresNamespace: postgresNS,
+		mongoNamespace:    mongoNS,
+		dynamic:            dyn,
+		core:               core,
+		cnpgGVR:            schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
+		mongoGVR:           schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
+		tierConfig:         tierConfig,
+		inCluster:          inCluster,
 	}, nil
 }
 
@@ -107,8 +114,13 @@ func (p *OperatorProvisioner) ClusterNameForProject(projectID uuid.UUID) string 
 }
 
 // ResourceRefForProject returns "namespace/name" for the project's cluster (for discovery/heal).
-func (p *OperatorProvisioner) ResourceRefForProject(projectID uuid.UUID) string {
-	return p.namespace + "/" + p.ClusterNameForProject(projectID)
+// dbType must be "postgresql" or "mongodb" so the correct namespace is used.
+func (p *OperatorProvisioner) ResourceRefForProject(projectID uuid.UUID, dbType string) string {
+	name := p.ClusterNameForProject(projectID)
+	if dbType == "mongodb" {
+		return p.mongoNamespace + "/" + name
+	}
+	return p.postgresNamespace + "/" + name
 }
 
 // GetTierResources returns the CPU (cores), memory (MB), and storage (GB) for a tier.
@@ -139,6 +151,7 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 }
 
 func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+	ns := p.postgresNamespace
 	size := fmt.Sprintf("%dGi", storageGB)
 	if size == "0Gi" {
 		size = "1Gi"
@@ -154,7 +167,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 	adminSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      adminSecretName,
-			Namespace: p.namespace,
+			Namespace: ns,
 		},
 		Type: corev1.SecretTypeBasicAuth,
 		StringData: map[string]string{
@@ -162,13 +175,13 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			"password": adminPassword,
 		},
 	}
-	_, createErr := p.core.CoreV1().Secrets(p.namespace).Create(ctx, adminSecret, metav1.CreateOptions{})
+	_, createErr := p.core.CoreV1().Secrets(ns).Create(ctx, adminSecret, metav1.CreateOptions{})
 	if createErr != nil {
 		if !errors.IsAlreadyExists(createErr) {
 			return nil, fmt.Errorf("create admin user secret %s: %w", adminSecretName, createErr)
 		}
 		// Secret exists (e.g. from a previous failed run); update with a fresh password for this cluster.
-		existing, getErr := p.core.CoreV1().Secrets(p.namespace).Get(ctx, adminSecretName, metav1.GetOptions{})
+		existing, getErr := p.core.CoreV1().Secrets(ns).Get(ctx, adminSecretName, metav1.GetOptions{})
 		if getErr != nil {
 			return nil, fmt.Errorf("get admin user secret %s: %w", adminSecretName, getErr)
 		}
@@ -176,7 +189,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			"username": []byte(adminUsername),
 			"password": []byte(adminPassword),
 		}
-		if _, err := p.core.CoreV1().Secrets(p.namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		if _, err := p.core.CoreV1().Secrets(ns).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 			return nil, fmt.Errorf("update admin user secret %s: %w", adminSecretName, err)
 		}
 	}
@@ -187,7 +200,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			"kind":       "Cluster",
 			"metadata": map[string]interface{}{
 				"name":      name,
-				"namespace": p.namespace,
+				"namespace": ns,
 			},
 			"spec": map[string]interface{}{
 				"instances":             1,
@@ -219,29 +232,27 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 		},
 	}
 
-	_, err = p.dynamic.Resource(p.cnpgGVR).Namespace(p.namespace).Create(ctx, cluster, metav1.CreateOptions{})
+	_, err = p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			// Use existing cluster: read secret and return connection info
-			return p.getPostgresConnectionFromCluster(ctx, name, "app")
+			return p.getPostgresConnectionFromCluster(ctx, ns, name, "app")
 		}
 		return nil, fmt.Errorf("create postgresql cluster: %w", err)
 	}
 
-	log.Printf("Created PostgreSQL cluster %s/%s, waiting for ready", p.namespace, name)
-	if err := p.waitForPostgresReady(ctx, name); err != nil {
-		_ = p.dynamic.Resource(p.cnpgGVR).Namespace(p.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	log.Printf("Created PostgreSQL cluster %s/%s, waiting for ready", ns, name)
+	if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
+		_ = p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
 		return nil, fmt.Errorf("postgresql cluster not ready: %w", err)
 	}
 
-	return p.getPostgresConnectionFromCluster(ctx, name, "app")
+	return p.getPostgresConnectionFromCluster(ctx, ns, name, "app")
 }
 
-func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, name string) error {
+func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
 	secretName := name + "-superuser"
-	// Wait for superuser secret (created by CNPG when enableSuperuserAccess=true). Bounded by parent context (e.g. 6m from CreateInstance); 10m is local upper bound.
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
-		secret, err := p.core.CoreV1().Secrets(p.namespace).Get(ctx, secretName, metav1.GetOptions{})
+		secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return false, nil
@@ -261,7 +272,7 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, name str
 				user = "postgres"
 			}
 			password := string(passBytes)
-			host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, p.namespace)
+			host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
 			userInfo := url.UserPassword(user, password)
 			dsn := fmt.Sprintf("postgresql://%s@%s:5432/postgres?sslmode=disable", userInfo.String(), host)
 
@@ -277,14 +288,13 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, name str
 	})
 }
 
-func (p *OperatorProvisioner) getPostgresConnectionFromCluster(ctx context.Context, name, database string) (*ProvisionResult, error) {
-	// Prefer admin secret (new clusters); fall back to app-user for backward compatibility.
+func (p *OperatorProvisioner) getPostgresConnectionFromCluster(ctx context.Context, namespace, name, database string) (*ProvisionResult, error) {
 	adminSecretName := name + "-admin"
 	appUserSecretName := name + "-app-user"
-	secret, err := p.core.CoreV1().Secrets(p.namespace).Get(ctx, adminSecretName, metav1.GetOptions{})
+	secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, adminSecretName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			secret, err = p.core.CoreV1().Secrets(p.namespace).Get(ctx, appUserSecretName, metav1.GetOptions{})
+			secret, err = p.core.CoreV1().Secrets(namespace).Get(ctx, appUserSecretName, metav1.GetOptions{})
 		}
 		if err != nil {
 			return nil, fmt.Errorf("get postgresql user secret (%s or %s): %w", adminSecretName, appUserSecretName, err)
@@ -300,36 +310,34 @@ func (p *OperatorProvisioner) getPostgresConnectionFromCluster(ctx context.Conte
 		return nil, fmt.Errorf("secret has no password")
 	}
 
-	// In-cluster host: <cluster>-rw.<namespace>.svc.cluster.local
-	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, p.namespace)
-	resourceRef := p.namespace + "/" + name
-
-	dbName := "app"
+	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
+	resourceRef := namespace + "/" + name
 	return &ProvisionResult{
 		Host:        host,
 		Port:        5432,
 		User:        user,
 		Password:    password,
-		Database:    dbName,
+		Database:    database,
 		ResourceRef: resourceRef,
 	}, nil
 }
 
 func (p *OperatorProvisioner) createMongoDB(ctx context.Context, name, database string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+	ns := p.mongoNamespace
 	passSecretName := name + "-admin-password"
 	password := uuid.New().String()[:20]
 
 	passSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      passSecretName,
-			Namespace: p.namespace,
+			Namespace: ns,
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"password": []byte(password),
 		},
 	}
-	_, err := p.core.CoreV1().Secrets(p.namespace).Create(ctx, passSecret, metav1.CreateOptions{})
+	_, err := p.core.CoreV1().Secrets(ns).Create(ctx, passSecret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("create mongo password secret: %w", err)
 	}
@@ -345,7 +353,7 @@ func (p *OperatorProvisioner) createMongoDB(ctx context.Context, name, database 
 			"kind":       "MongoDBCommunity",
 			"metadata": map[string]interface{}{
 				"name":      name,
-				"namespace": p.namespace,
+				"namespace": ns,
 			},
 			"spec": map[string]interface{}{
 				"members": 1,
@@ -354,6 +362,9 @@ func (p *OperatorProvisioner) createMongoDB(ctx context.Context, name, database 
 				"security": map[string]interface{}{
 					"authentication": map[string]interface{}{
 						"modes": []interface{}{"SCRAM"},
+					},
+					"tls": map[string]interface{}{
+						"enabled": false,
 					},
 				},
 				"users": []interface{}{
@@ -404,27 +415,27 @@ func (p *OperatorProvisioner) createMongoDB(ctx context.Context, name, database 
 		},
 	}
 
-	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(p.namespace).Create(ctx, mongo, metav1.CreateOptions{})
+	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, mongo, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			return p.getMongoConnection(ctx, name, password)
+			return p.getMongoConnection(ctx, ns, name, password)
 		}
 		return nil, fmt.Errorf("create mongodb community: %w", err)
 	}
 
-	log.Printf("Created MongoDBCommunity %s/%s, waiting for ready", p.namespace, name)
-	if err := p.waitForMongoReady(ctx, name); err != nil {
-		_ = p.dynamic.Resource(p.mongoGVR).Namespace(p.namespace).Delete(ctx, name, metav1.DeleteOptions{})
-		return nil, fmt.Errorf("mongodb not ready: %w", err)
+	log.Printf("Created MongoDBCommunity %s/%s, waiting for ready", ns, name)
+	if err := p.waitForMongoReady(ctx, ns, name); err != nil {
+		_ = p.logMongoStatus(ctx, ns, name)
+		_ = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		return nil, fmt.Errorf("mongodb not ready (ensure MongoDB Community Operator watches namespace %q, see scripts/k3s-local-setup.sh): %w", ns, err)
 	}
 
-	return p.getMongoConnection(ctx, name, password)
+	return p.getMongoConnection(ctx, ns, name, password)
 }
 
-func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, name string) error {
-	// MongoDB Community Operator creates a service; wait for pods or use status
+func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
-		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(p.namespace).Get(ctx, name, metav1.GetOptions{})
+		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -433,13 +444,34 @@ func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, name string
 			return false, nil
 		}
 		phase, _ := status["phase"].(string)
+		msg, _ := status["message"].(string)
+		if phase != "" && phase != "Running" && phase != "running" && msg != "" {
+			log.Printf("[MongoDB %s/%s] phase=%q message=%q", namespace, name, phase, msg)
+		}
 		return phase == "Running" || phase == "running", nil
 	})
 }
 
-func (p *OperatorProvisioner) getMongoConnection(ctx context.Context, name, password string) (*ProvisionResult, error) {
-	host := fmt.Sprintf("%s-svc.%s.svc.cluster.local", name, p.namespace)
-	resourceRef := p.namespace + "/" + name
+// logMongoStatus logs current MongoDBCommunity status for debugging.
+func (p *OperatorProvisioner) logMongoStatus(ctx context.Context, namespace, name string) error {
+	obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	status, _, _ := unstructured.NestedMap(obj.Object, "status")
+	if status != nil {
+		phase, _ := status["phase"].(string)
+		msg, _ := status["message"].(string)
+		log.Printf("[MongoDB %s/%s] final status: phase=%q message=%q", namespace, name, phase, msg)
+	} else {
+		log.Printf("[MongoDB %s/%s] status not set (operator may not be reconciling this namespace)", namespace, name)
+	}
+	return nil
+}
+
+func (p *OperatorProvisioner) getMongoConnection(ctx context.Context, namespace, name, password string) (*ProvisionResult, error) {
+	host := fmt.Sprintf("%s-svc.%s.svc.cluster.local", name, namespace)
+	resourceRef := namespace + "/" + name
 	return &ProvisionResult{
 		Host:        host,
 		Port:        27017,
@@ -458,16 +490,12 @@ func (p *OperatorProvisioner) GetConnectionByResourceRef(ctx context.Context, re
 		return nil, fmt.Errorf("invalid resource ref: expected namespace/name, got %q", resourceRef)
 	}
 	namespace, name := parts[0], parts[1]
-	if p.namespace != namespace {
-		// Provisioner is scoped to one namespace; ref from another namespace not supported
-		return nil, fmt.Errorf("resource ref namespace %q does not match provisioner namespace %q", namespace, p.namespace)
-	}
 	switch dbType {
 	case "postgres", "postgresql":
-		return p.getPostgresConnectionFromCluster(ctx, name, "app")
+		return p.getPostgresConnectionFromCluster(ctx, namespace, name, "app")
 	case "mongodb":
 		passSecretName := name + "-admin-password"
-		secret, err := p.core.CoreV1().Secrets(p.namespace).Get(ctx, passSecretName, metav1.GetOptions{})
+		secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, passSecretName, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("get mongo password secret %s: %w", passSecretName, err)
 		}
@@ -475,7 +503,7 @@ func (p *OperatorProvisioner) GetConnectionByResourceRef(ctx context.Context, re
 		if password == "" {
 			return nil, fmt.Errorf("secret %s has no password", passSecretName)
 		}
-		return p.getMongoConnection(ctx, name, password)
+		return p.getMongoConnection(ctx, namespace, name, password)
 	default:
 		return nil, fmt.Errorf("unsupported database type for get connection: %s", dbType)
 	}

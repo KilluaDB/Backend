@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Database-as-a-Service Backend Startup Script (k3d)
-# Single path: start meta-DB containers, build image, deploy to k3d, port-forward, stream logs.
+# Deploys Postgres + Redis in-cluster, builds backend image, deploys to k3d, port-forward, stream logs.
 
 # Colors for output
 RED='\033[0;31m'
@@ -54,7 +54,7 @@ setup_env() {
 # Application Configuration
 PORT=8080
 
-# Database Configuration (meta-DB for the backend)
+# Database Configuration (meta-DB; in-cluster start.sh sets backend ConfigMap DB_HOST=postgres)
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
@@ -77,7 +77,8 @@ GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/google/callback
 DB_CRED_ENCRYPTION_KEY=change-this-to-a-long-random-secret
 
 # Kubernetes operator provisioner (optional)
-# DB_INSTANCES_NAMESPACE=default
+# DB_INSTANCES_NAMESPACE_POSTGRES=postgres-instances
+# DB_INSTANCES_NAMESPACE_MONGO=mongodb-instances
 # KUBECONFIG=
 EOF
 
@@ -104,120 +105,29 @@ check_docker() {
     print_success "Docker is installed and running"
 }
 
-# --- Meta-DB containers and DB setup (backend in k8s connects to Postgres on host) ---
-stop_conflicting_services() {
-    if ! port_in_use 5432 && ! port_in_use 6379; then
-        return 0
-    fi
-    print_info "Checking for conflicting services on ports 5432 and 6379..."
-    if port_in_use 5432; then
-        print_warning "Port 5432 is in use. Ensure PostgreSQL is not conflicting with our container."
-    fi
-    if port_in_use 6379; then
-        print_warning "Port 6379 is in use. Our Redis container may fail to start."
-    fi
-}
-
-start_containers() {
-    print_info "Starting Docker containers (PostgreSQL and Redis)..."
-    stop_conflicting_services
-
-    if command_exists docker-compose; then
-        COMPOSE_CMD="docker-compose"
-    elif docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD="docker compose"
-    else
-        print_error "Docker Compose is required (docker-compose or docker compose)."
-        exit 1
-    fi
-
-    if docker ps --format '{{.Names}}' | grep -q '^dbaas-postgres$' && \
-       docker ps --format '{{.Names}}' | grep -q '^dbaas-redis$'; then
-        print_success "Containers are already running"
-        return 0
-    fi
-
-    if [ ! -f docker-compose.yml ]; then
-        print_error "docker-compose.yml not found"
-        exit 1
-    fi
-    $COMPOSE_CMD up -d || { print_error "Failed to start containers"; exit 1; }
-
-    local max_attempts=30
-    local attempt=0
-    while [ $attempt -lt $max_attempts ]; do
-        if docker exec dbaas-postgres pg_isready -U postgres >/dev/null 2>&1; then
-            print_success "PostgreSQL is ready"
-            break
-        fi
-        attempt=$((attempt + 1))
-        sleep 1
-    done
-    if [ $attempt -eq $max_attempts ]; then
-        print_error "PostgreSQL did not become ready"
-        exit 1
-    fi
-
-    attempt=0
-    while [ $attempt -lt $max_attempts ]; do
-        if docker exec dbaas-redis redis-cli ping >/dev/null 2>&1; then
-            print_success "Redis is ready"
-            break
-        fi
-        attempt=$((attempt + 1))
-        sleep 1
-    done
-    if [ $attempt -eq $max_attempts ]; then
-        print_warning "Redis did not become ready; continuing anyway"
-    fi
-}
-
-check_postgresql() {
-    if ! docker ps --format '{{.Names}}' | grep -q '^dbaas-postgres$'; then
-        print_warning "PostgreSQL container not running. Starting containers..."
-        start_containers
-        return
-    fi
-    if ! docker exec dbaas-postgres pg_isready -U postgres >/dev/null 2>&1; then
-        print_warning "PostgreSQL not ready. Waiting..."
-        sleep 3
-    fi
-    print_success "PostgreSQL container is running"
-}
-
-check_redis() {
-    if ! docker ps --format '{{.Names}}' | grep -q '^dbaas-redis$'; then
-        print_warning "Redis container not running. Starting containers..."
-        start_containers
-        return
-    fi
-    print_success "Redis container is running"
-}
-
-setup_database() {
-    print_info "Setting up database..."
+# --- Deploy Postgres and Redis inside the cluster ---
+deploy_meta_dbs() {
+    print_info "Deploying PostgreSQL and Redis in the cluster..."
     setup_env
-    local POSTGRES_SUPERUSER="postgres"
-    local DB_NAME="${DB_DATABASE:-dbaas}"
 
-    if docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
-        print_success "Database '$DB_NAME' already exists"
-    else
-        print_info "Creating database '$DB_NAME'..."
-        docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -c "CREATE DATABASE \"$DB_NAME\";" 2>/dev/null || {
-            print_error "Failed to create database. Try: docker exec -it dbaas-postgres psql -U postgres -c 'CREATE DATABASE $DB_NAME;'"
-            exit 1
-        }
-        print_success "Database '$DB_NAME' created"
-    fi
+    print_info "Creating Postgres secret from .env..."
+    kubectl create secret generic postgres-secrets \
+        --from-literal=POSTGRES_PASSWORD="${DB_PASSWORD:-postgres}" \
+        -n default --dry-run=client -o yaml | kubectl apply -f - || { print_error "Postgres secret failed"; exit 1; }
 
-    if [ -n "$DB_USERNAME" ] && [ "$DB_USERNAME" != "$POSTGRES_SUPERUSER" ]; then
-        if ! docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USERNAME'" 2>/dev/null | grep -q 1; then
-            docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -c "CREATE USER \"$DB_USERNAME\" WITH PASSWORD '${DB_PASSWORD:-postgres}';" 2>/dev/null || true
-        fi
-        docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USERNAME\";" 2>/dev/null || true
-        docker exec dbaas-postgres psql -U "$POSTGRES_SUPERUSER" -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USERNAME\"; ALTER SCHEMA public OWNER TO \"$DB_USERNAME\";" 2>/dev/null || true
+    if [ ! -f deploy/postgres.yaml ] || [ ! -f deploy/redis.yaml ]; then
+        print_error "deploy/postgres.yaml or deploy/redis.yaml not found"
+        exit 1
     fi
+    kubectl apply -f deploy/postgres.yaml -f deploy/redis.yaml || { print_error "Postgres/Redis apply failed"; exit 1; }
+
+    print_info "Waiting for PostgreSQL pod to be ready..."
+    kubectl wait --for=condition=ready pod -l app=postgres -n default --timeout=120s || { print_error "PostgreSQL did not become ready"; exit 1; }
+    print_success "PostgreSQL is ready"
+
+    print_info "Waiting for Redis pod to be ready..."
+    kubectl wait --for=condition=ready pod -l app=redis -n default --timeout=60s || { print_warning "Redis did not become ready; continuing anyway"; }
+    print_success "Redis is ready"
 }
 
 # --- Kubernetes: run backend in cluster and port-forward ---
@@ -234,16 +144,6 @@ check_kubectl() {
     print_success "kubectl is available and cluster is reachable"
 }
 
-k8s_meta_db_host() {
-    local ctx
-    ctx=$(kubectl config current-context 2>/dev/null || true)
-    if printf '%s\n' "$ctx" | grep -q '^k3d-'; then
-        echo "host.k3d.internal"
-    else
-        echo "host.docker.internal"
-    fi
-}
-
 # K8s mode: port-forward PID and cleanup flag
 PF_PID=""
 K8S_CLEANUP=""
@@ -254,15 +154,12 @@ run_in_k8s() {
     check_docker
 
     setup_env
-    start_containers
-    check_postgresql
-    check_redis
-    setup_database
+    deploy_meta_dbs
 
     export $(grep -v '^#' .env | xargs 2>/dev/null)
-    local meta_host
-    meta_host=$(k8s_meta_db_host)
-    local namespace="${DB_INSTANCES_NAMESPACE:-default}"
+    local meta_host="postgres"
+    local postgres_ns="${DB_INSTANCES_NAMESPACE_POSTGRES:-postgres-instances}"
+    local mongo_ns="${DB_INSTANCES_NAMESPACE_MONGO:-mongodb-instances}"
 
     print_info "Building backend Docker image..."
     docker build -t backend-api:latest . || { print_error "Docker build failed"; exit 1; }
@@ -281,7 +178,7 @@ run_in_k8s() {
     fi
     print_success "Image built"
 
-    print_info "Updating ConfigMap (DB_HOST=$meta_host, namespace=$namespace)..."
+    print_info "Updating ConfigMap (DB_HOST=$meta_host, postgres_ns=$postgres_ns, mongo_ns=$mongo_ns)..."
     kubectl create configmap backend-config \
         --from-literal=PORT=8080 \
         --from-literal=DB_HOST="$meta_host" \
@@ -289,7 +186,8 @@ run_in_k8s() {
         --from-literal=DB_DATABASE="${DB_DATABASE:-dbaas}" \
         --from-literal=DB_USERNAME="${DB_USERNAME:-postgres}" \
         --from-literal=DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}" \
-        --from-literal=DB_INSTANCES_NAMESPACE="$namespace" \
+        --from-literal=DB_INSTANCES_NAMESPACE_POSTGRES="$postgres_ns" \
+        --from-literal=DB_INSTANCES_NAMESPACE_MONGO="$mongo_ns" \
         --from-literal=GOOGLE_REDIRECT_URL="${GOOGLE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}" \
         -n default --dry-run=client -o yaml | kubectl apply -f - || { print_error "ConfigMap apply failed"; exit 1; }
 
@@ -302,6 +200,12 @@ run_in_k8s() {
         exit 1
     fi
     kubectl apply -f deploy/rbac.yaml -f deploy/deployment.yaml -f deploy/service.yaml || { print_error "kubectl apply failed"; exit 1; }
+    if [ -f deploy/mongodb-operator-mongodb-instances-rbac.yaml ]; then
+        kubectl apply -f deploy/mongodb-operator-mongodb-instances-rbac.yaml 2>/dev/null || true
+    fi
+    if ! kubectl get deployment mongodb-kubernetes-operator -n mongodb-operator -o name 2>/dev/null | grep -q .; then
+        print_warning "MongoDB Community Operator not found in mongodb-operator. For MongoDB instances run: ./scripts/k3s-local-setup.sh"
+    fi
 
     # Restore replicas if cleanup had scaled to 0; then single rollout restart to pick up new image.
     current_replicas=$(kubectl get deployment backend -n default -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
@@ -394,10 +298,6 @@ main() {
 
     check_docker
     setup_env
-    start_containers
-    check_postgresql
-    check_redis
-    setup_database
     run_in_k8s
 }
 

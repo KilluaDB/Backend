@@ -1,27 +1,20 @@
-# ServiceAccount for the backend (used by Deployment).
+# ServiceAccount for the backend (used by Deployment in default).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: backend
   namespace: default
 ---
-# Role: manage DB instance resources in the same namespace (DB_INSTANCES_NAMESPACE=default).
-# When using a different namespace for DB instances, duplicate this Role and RoleBinding in that namespace.
+# Postgres instances namespace: backend can create/manage Cluster and secrets.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: backend-db-instances
-  namespace: default
+  namespace: postgres-instances
 rules:
-  # CloudNativePG Cluster CR
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-  # MongoDB Community Operator CR
-  - apiGroups: ["mongodbcommunity.mongodb.com"]
-    resources: ["mongodbcommunity"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-  # Secrets: read CNPG superuser secret, create/read Mongo admin password secret
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
@@ -30,7 +23,35 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: backend-db-instances
-  namespace: default
+  namespace: postgres-instances
+subjects:
+  - kind: ServiceAccount
+    name: backend
+    namespace: default
+roleRef:
+  kind: Role
+  name: backend-db-instances
+  apiGroup: rbac.authorization.k8s.io
+---
+# MongoDB instances namespace: backend can create/manage MongoDBCommunity and secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-db-instances
+  namespace: mongodb-instances
+rules:
+  - apiGroups: ["mongodbcommunity.mongodb.com"]
+    resources: ["mongodbcommunity"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-db-instances
+  namespace: mongodb-instances
 subjects:
   - kind: ServiceAccount
     name: backend
