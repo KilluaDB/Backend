@@ -267,7 +267,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	}
 
 	// Delete K8s DB resource by project ID (discover resource ref from cluster name convention)
-	resourceRef := s.provisioner.ResourceRefForProject(projectUUID)
+	resourceRef := s.provisioner.ResourceRefForProject(projectUUID, project.DBType)
 	delCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := s.provisioner.DeleteInstance(delCtx, resourceRef); err != nil {

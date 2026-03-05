@@ -150,6 +150,6 @@ func validateRequiredEnvVars() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-	// K8s provisioner: DB_INSTANCES_NAMESPACE (optional), KUBECONFIG (optional)
+	// K8s provisioner: DB_INSTANCES_NAMESPACE_POSTGRES, DB_INSTANCES_NAMESPACE_MONGO (optional), KUBECONFIG (optional)
 	return nil
 }

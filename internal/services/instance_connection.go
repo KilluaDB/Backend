@@ -73,7 +73,7 @@ func (s *InstanceConnectionService) getConnectionParams(ctx context.Context, use
 			if !needHeal {
 				inst = inst2
 			} else {
-				resourceRef := s.provisioner.ResourceRefForProject(projectID)
+				resourceRef := s.provisioner.ResourceRefForProject(projectID, dbType)
 				healCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				result, healErr := s.provisioner.GetConnectionByResourceRef(healCtx, resourceRef, dbType)
 				cancel()
@@ -152,7 +152,7 @@ func (s *InstanceConnectionService) GetPool(ctx context.Context, userID, project
 		if shouldHeal {
 			project, _ := s.projectRepo.GetByIDAndUserID(projectID, userID)
 			if project != nil {
-				resourceRef := s.provisioner.ResourceRefForProject(projectID)
+				resourceRef := s.provisioner.ResourceRefForProject(projectID, project.DBType)
 				healCtx, healCancel := context.WithTimeout(ctx, 30*time.Second)
 				healResult, healErr := s.provisioner.GetConnectionByResourceRef(healCtx, resourceRef, project.DBType)
 				healCancel()
@@ -210,7 +210,7 @@ func (s *InstanceConnectionService) GetPoolWithMeta(ctx context.Context, userID,
 		if shouldHeal {
 			project, _ := s.projectRepo.GetByIDAndUserID(projectID, userID)
 			if project != nil {
-				resourceRef := s.provisioner.ResourceRefForProject(projectID)
+				resourceRef := s.provisioner.ResourceRefForProject(projectID, project.DBType)
 				healCtx, healCancel := context.WithTimeout(ctx, 30*time.Second)
 				healResult, healErr := s.provisioner.GetConnectionByResourceRef(healCtx, resourceRef, project.DBType)
 				healCancel()
