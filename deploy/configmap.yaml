@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: default
+data:
+  PORT: "8080"
+  DB_HOST: "meta-db-rw.default.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_DATABASE: "dbaas"
+  DB_USERNAME: "dbaas"
+  DB_ADMIN_USER: "postgres"
+  DB_INSTANCES_NAMESPACE: "default"
+  GOOGLE_REDIRECT_URL: "https://api.yourdomain.com/api/v1/auth/google/callback"

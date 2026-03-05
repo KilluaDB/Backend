@@ -21,28 +21,25 @@ spec:
       serviceAccountName: backend
       containers:
         - name: api
-          image: backend-api:latest
-          imagePullPolicy: IfNotPresent
+          image: <ECR_URL>:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
-          # Config values (DB host, port, DB name, usernames, namespace, redirect URL)
           envFrom:
             - configMapRef:
                 name: backend-config
-          # Secrets (passwords, tokens, OAuth) – these must be present in backend-secrets, but
-          # DB_* host/port/database/user always come from ConfigMap so in-cluster DNS works.
           env:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: backend-secrets
-                  key: DB_PASSWORD
+                  name: meta-db-app
+                  key: password
             - name: DB_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: backend-secrets
-                  key: DB_ADMIN_PASSWORD
+                  name: meta-db-superuser
+                  key: password
             - name: ACCESS_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:
