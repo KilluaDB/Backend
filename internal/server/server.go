@@ -2,9 +2,13 @@ package server
 
 import (
 	"backend/internal/config"
+	dbdrivers "backend/internal/database"
+	pgdriver "backend/internal/database/postgres"
+	mongodriver "backend/internal/database/mongo"
 	"backend/internal/database"
 	"backend/internal/handlers"
 	"backend/internal/repositories"
+	repopg "backend/internal/repositories/postgres"
 	"backend/internal/routes"
 	"backend/internal/services"
 	"fmt"
@@ -78,7 +82,7 @@ func NewServer() *http.Server {
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
-	projectRepo := repositories.NewProjectRepository(pool)
+	projectRepo := repopg.NewProjectRepository(pool)
 	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
 	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
@@ -89,9 +93,20 @@ func NewServer() *http.Server {
 	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
+	// Database drivers registry (Postgres + Mongo) for unified container/record/field APIs
+	pgDBDriver := pgdriver.NewDriver(pool)
+	mongoDBDriver := mongodriver.NewDriver(pool)
+	driverRegistry := dbdrivers.NewInMemoryDriverRegistry(map[string]dbdrivers.DatabaseDriver{
+		"postgresql": pgDBDriver,
+		"mongodb":    mongoDBDriver,
+	})
+
+	recordService := services.NewRecordService(projectRepo, driverRegistry)
+	containerHandler := handlers.NewContainerHandler(recordService)
+
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(instanceConn, queryHistoryRepo)
+	queryService := services.NewQueryService(instanceConn, queryHistoryRepo, projectRepo, driverRegistry)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
 	tableRepo := repositories.NewTableRepository()
@@ -115,7 +130,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler, containerHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),

@@ -18,7 +18,7 @@ import (
 )
 
 type ProjectService struct {
-	projectRepo      *repositories.ProjectRepository
+	projectRepo      repositories.ProjectRepository
 	provisioner      *OperatorProvisioner
 	dbInstanceRepo   *repositories.DatabaseInstanceRepository
 	dbCredentialRepo *repositories.DatabaseCredentialRepository
@@ -26,7 +26,7 @@ type ProjectService struct {
 }
 
 func NewProjectService(
-	projectRepo *repositories.ProjectRepository,
+	projectRepo repositories.ProjectRepository,
 	provisioner *OperatorProvisioner,
 	dbInstanceRepo *repositories.DatabaseInstanceRepository,
 	dbCredentialRepo *repositories.DatabaseCredentialRepository,
@@ -99,11 +99,11 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 
 	// Persist project and instance with status "creating" before kicking off
 	// background provisioning.
-	if err := s.projectRepo.Create(project); err != nil {
+	if err := s.projectRepo.Create(context.Background(), project); err != nil {
 		return nil, nil, fmt.Errorf("failed to save project to database: %w", err)
 	}
 	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
-		s.projectRepo.Delete(project.ID)
+		_ = s.projectRepo.Delete(context.Background(), project.ID)
 		return nil, nil, fmt.Errorf("failed to save database instance: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 
 	// Reload project and instance to ensure timestamps and other DB-managed
 	// fields are populated in the API response.
-	persistedProject, err := s.projectRepo.GetByID(project.ID)
+	persistedProject, err := s.projectRepo.GetByID(context.Background(), project.ID)
 	if err == nil && persistedProject != nil {
 		project = persistedProject
 	}
@@ -172,7 +172,7 @@ func (s *ProjectService) GetProjectByID(projectID string) (*models.Project, erro
 		return nil, fmt.Errorf("invalid project ID: %w", err)
 	}
 
-	return s.projectRepo.GetByID(projectUUID)
+	return s.projectRepo.GetByID(context.Background(), projectUUID)
 }
 
 func (s *ProjectService) GetProjectByIDAndUserID(projectID string, userID string) (*models.Project, error) {
@@ -186,7 +186,7 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID string, userID string
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	project, err := s.projectRepo.GetByIDAndUserID(projectUUID, userUUID)
+	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
@@ -209,7 +209,7 @@ func (s *ProjectService) GetProjectsByUserID(userID string) ([]models.Project, e
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	projects, err := s.projectRepo.GetByUserID(userUUID)
+	projects, err := s.projectRepo.GetByUserID(context.Background(), userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (s *ProjectService) DeleteProject(projectID string) error {
 	}
 
 	// Get project to verify it exists
-	project, err := s.projectRepo.GetByID(projectUUID)
+	project, err := s.projectRepo.GetByID(context.Background(), projectUUID)
 	if err != nil {
 		return fmt.Errorf("project not found: %w", err)
 	}
@@ -243,7 +243,7 @@ func (s *ProjectService) DeleteProject(projectID string) error {
 	// For now, just delete the project (CASCADE will handle related records)
 
 	// Delete project from database
-	return s.projectRepo.Delete(projectUUID)
+	return s.projectRepo.Delete(context.Background(), projectUUID)
 }
 
 func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID string) error {
@@ -258,7 +258,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	}
 
 	// Verify project belongs to user
-	project, err := s.projectRepo.GetByIDAndUserID(projectUUID, userUUID)
+	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
 	if err != nil {
 		return fmt.Errorf("failed to get project: %w", err)
 	}
@@ -277,7 +277,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	}
 
 	// Delete project from database (CASCADE will handle database_instances and credentials)
-	err = s.projectRepo.DeleteByIDAndUserID(projectUUID, userUUID)
+	err = s.projectRepo.DeleteByIDAndUserID(context.Background(), projectUUID, userUUID)
 	if err != nil {
 		return fmt.Errorf("failed to delete project: %w", err)
 	}

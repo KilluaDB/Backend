@@ -160,9 +160,9 @@ func Close() {
 	}
 }
 
-// ConnectToProjectDatabase creates a connection pool to a project's database instance
-// This is used to connect to project databases whose metadata is stored in the main database
-func ConnectToProjectDatabase(endpoint string, port int, username, password, database string) (*pgxpool.Pool, error) {
+// ConnectToPostgresProject creates a connection pool to a project's PostgreSQL database instance.
+// This is used to connect to project databases whose metadata is stored in the main database.
+func ConnectToPostgresProject(endpoint string, port int, username, password, database string) (*pgxpool.Pool, error) {
 	// Build connection string using postgresql:// URL format
 	userInfo := url.UserPassword(username, password)
 	encodedDatabase := url.PathEscape(database)
@@ -183,7 +183,7 @@ func ConnectToProjectDatabase(endpoint string, port int, username, password, dat
 	config.MaxConns = 5
 	config.MinConns = 1
 	config.MaxConnLifetime = 5 * time.Minute
-	config.MaxConnIdleTime = 1 * time.Minute
+	config.MaxConnIdleTime = 1 *time.Minute
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
@@ -201,3 +201,4 @@ func ConnectToProjectDatabase(endpoint string, port int, username, password, dat
 
 	return pool, nil
 }
+

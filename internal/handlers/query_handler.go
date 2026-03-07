@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +21,17 @@ func NewQueryHandler(queryService *services.QueryService) *QueryHandler {
 	}
 }
 
-// ExecuteQuery executes a SQL query on the specified database connection
+// ExecuteQuery executes a query on the project's database instance.
+// For PostgreSQL projects, it accepts: { "query": "..." } (raw SQL).
+// For MongoDB projects, it accepts:
+//
+//	{
+//	  "collection": "...",
+//	  "operation": "find|insertOne|updateMany|deleteMany",
+//	  "filter": { ... },
+//	  "data": { ... },
+//	  "limit": 10
+//	}
 func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	projectId := c.Param("id")
 	if projectId == "" {
@@ -34,16 +45,6 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	var req services.ExecuteQueryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
-		return
-	}
-
-	if req.Query == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Query is required: Cannot be empty")
-		return
-	}
 	// Convert userID to UUID (handle both uuid.UUID and string types)
 	var userUUID uuid.UUID
 	switch v := userId.(type) {
@@ -65,18 +66,73 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
-	result, exec, err := h.queryService.ExecuteQuery(userUUID, &req, projectUUID)
-	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to execute query")
+
+	// Detect database type for this project (ownership enforced).
+	project, err := h.queryService.GetProjectByIDAndUserID(c.Request.Context(), projectUUID, userUUID)
+	if err != nil || project == nil {
+		responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
 		return
 	}
-	response := gin.H{
-		"result":            result,
-		"execution_id":      exec.ID,
-		"execution_time_ms": result.ExecutionTime,
-	}
 
-	responses.Success(c, http.StatusOK, response, "Query executed successfully")
+	switch project.DBType {
+	case "postgresql":
+		var req services.ExecuteQueryRequest
+		if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
+			return
+		}
+		if req.Query == "" {
+			responses.Fail(c, http.StatusBadRequest, nil, "Query is required: Cannot be empty")
+			return
+		}
+
+		result, exec, err := h.queryService.ExecuteSQLQuery(userUUID, &req, projectUUID)
+		if err != nil {
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to execute query")
+			return
+		}
+
+		execMs := int64(result.ExecutionTime)
+		if exec.ExecutionTimeMs != nil {
+			execMs = int64(*exec.ExecutionTimeMs)
+		}
+
+		response := gin.H{
+			"result":            result,
+			"execution_id":      exec.ID,
+			"execution_time_ms": execMs,
+		}
+		responses.Success(c, http.StatusOK, response, "Query executed successfully")
+
+	case "mongodb":
+		var req services.MongoQueryRequest
+		if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid request body for MongoDB query")
+			return
+		}
+
+		result, exec, err := h.queryService.ExecuteMongoQuery(userUUID, &req, projectUUID)
+		if err != nil {
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to execute query")
+			return
+		}
+
+		var execMs int64 = 0
+		if exec.ExecutionTimeMs != nil {
+			execMs = int64(*exec.ExecutionTimeMs)
+		}
+
+		response := gin.H{
+			"result":            result,
+			"execution_id":      exec.ID,
+			"execution_time_ms": execMs,
+		}
+		responses.Success(c, http.StatusOK, response, "Query executed successfully")
+
+	default:
+		responses.Fail(c, http.StatusBadRequest, nil, "Unsupported project database type")
+		return
+	}
 }
 
 // GetQueryHistory returns query execution history for the authenticated user

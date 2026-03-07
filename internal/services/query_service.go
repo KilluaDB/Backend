@@ -1,10 +1,13 @@
 package services
 
 import (
+	"backend/internal/database"
 	"backend/internal/models"
 	"backend/internal/repositories"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -16,15 +19,21 @@ import (
 type QueryService struct {
 	instanceConn *InstanceConnectionService
 	execRepo     *repositories.QueryHistoryRepository
+	projectRepo  repositories.ProjectRepository
+	drivers      database.DriverRegistry
 }
 
 func NewQueryService(
 	instanceConn *InstanceConnectionService,
 	execRepo *repositories.QueryHistoryRepository,
+	projectRepo repositories.ProjectRepository,
+	drivers database.DriverRegistry,
 ) *QueryService {
 	return &QueryService{
 		instanceConn: instanceConn,
 		execRepo:     execRepo,
+		projectRepo:  projectRepo,
+		drivers:      drivers,
 	}
 }
 
@@ -39,6 +48,20 @@ type QueryResult struct {
 
 type ExecuteQueryRequest struct {
 	Query string `json:"query" binding:"required"`
+}
+
+// MongoQueryRequest describes a MongoDB query operation for unified /query/execute endpoint.
+type MongoQueryRequest struct {
+	Collection string                 `json:"collection" binding:"required"`
+	Operation  string                 `json:"operation" binding:"required"` // find | insertOne | updateMany | deleteMany
+	Filter     map[string]interface{} `json:"filter,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty"` // for insertOne/updateMany
+	Limit      *int                   `json:"limit,omitempty"` // used for find
+}
+
+// GetProjectByIDAndUserID is used by handlers to detect DB type with ownership check.
+func (s *QueryService) GetProjectByIDAndUserID(ctx context.Context, projectID, userID uuid.UUID) (*models.Project, error) {
+	return s.projectRepo.GetByIDAndUserID(ctx, projectID, userID)
 }
 
 // ValidateSQLQuery validates SQL queries to prevent dangerous operations
@@ -91,8 +114,8 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
-// ExecuteQuery executes a SQL query on the project's database instance.
-func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
+// ExecuteSQLQuery executes a SQL query on the project's PostgreSQL database instance.
+func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
 	ctx := context.Background()
 
@@ -150,6 +173,122 @@ func (s *QueryService) ExecuteQuery(userID uuid.UUID, req *ExecuteQueryRequest, 
 	}
 	_ = s.execRepo.Create(exec)
 	return result, exec, nil
+}
+
+// ExecuteMongoQuery executes a MongoDB query operation on the project's MongoDB instance.
+// It records the execution in query_history (QueryText stored as JSON of the request).
+func (s *QueryService) ExecuteMongoQuery(userID uuid.UUID, req *MongoQueryRequest, projectId uuid.UUID) (interface{}, *models.QueryHistory, error) {
+	startTime := time.Now()
+	ctx := context.Background()
+
+	// Ownership check + determine DB type
+	project, err := s.projectRepo.GetByIDAndUserID(ctx, projectId, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if project == nil {
+		return nil, nil, fmt.Errorf("project not found or access denied")
+	}
+	if project.DBType != "mongodb" {
+		return nil, nil, fmt.Errorf("project db_type is %q (expected mongodb)", project.DBType)
+	}
+
+	operation := strings.ToLower(strings.TrimSpace(req.Operation))
+	switch operation {
+	case "find", "insertone", "updatemany", "deletemany":
+	default:
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    uuid.Nil,
+			UserID:          userID,
+			QueryText:       mustJSON(req),
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return map[string]any{"error": "unsupported mongo operation"}, exec, nil
+	}
+
+	if req.Collection == "" {
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    uuid.Nil,
+			UserID:          userID,
+			QueryText:       mustJSON(req),
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return map[string]any{"error": "collection is required"}, exec, nil
+	}
+
+	if (operation == "insertone" || operation == "updatemany") && len(req.Data) == 0 {
+		execTime := time.Since(startTime).Milliseconds()
+		success := false
+		exec := &models.QueryHistory{
+			DBInstanceID:    uuid.Nil,
+			UserID:          userID,
+			QueryText:       mustJSON(req),
+			ExecutedAt:      time.Now(),
+			Success:         &success,
+			ExecutionTimeMs: &[]int{int(execTime)}[0],
+		}
+		_ = s.execRepo.Create(exec)
+		return map[string]any{"error": "data is required for this operation"}, exec, nil
+	}
+
+	driver, err := s.drivers.GetDriver(project.DBType)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	payload := map[string]any{
+		"collection": req.Collection,
+		"operation":  operation,
+		"filter":     req.Filter,
+		"data":       req.Data,
+	}
+	if req.Limit != nil {
+		payload["limit"] = *req.Limit
+	}
+
+	result, execErr := driver.ExecuteQuery(ctx, projectId.String(), payload)
+	execTime := time.Since(startTime).Milliseconds()
+
+	// Best-effort instance id for query history.
+	instanceID, instErr := s.instanceConn.GetInstanceID(ctx, userID, projectId)
+	if instErr != nil {
+		instanceID = uuid.Nil
+	}
+
+	success := execErr == nil
+	execTimeInt := int(execTime)
+	exec := &models.QueryHistory{
+		DBInstanceID:    instanceID,
+		UserID:          userID,
+		QueryText:       mustJSON(req),
+		ExecutedAt:      time.Now(),
+		Success:         &success,
+		ExecutionTimeMs: &execTimeInt,
+	}
+	_ = s.execRepo.Create(exec)
+
+	if execErr != nil {
+		return map[string]any{"error": execErr.Error()}, exec, nil
+	}
+	return result, exec, nil
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
 }
 
 func (s *QueryService) executeSQLQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
