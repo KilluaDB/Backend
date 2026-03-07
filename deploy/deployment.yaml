@@ -21,8 +21,10 @@ spec:
       serviceAccountName: backend
       containers:
         - name: api
-          image: <ECR_URL>:latest
-          imagePullPolicy: Always
+          # For local k3d: build and load with same name, e.g. docker build -t backend-api:latest . && k3d image import backend-api:latest -c <cluster-name>
+          # For AWS: use your ECR URL, e.g. 123456789012.dkr.ecr.region.amazonaws.com/backend:latest
+          image: backend-api:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http
@@ -30,16 +32,17 @@ spec:
             - configMapRef:
                 name: backend-config
           env:
+            # Plain postgres (start.sh): uses postgres-secrets. For CNPG meta-db use meta-db-app / meta-db-superuser with key password.
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: meta-db-app
-                  key: password
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
             - name: DB_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: meta-db-superuser
-                  key: password
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
             - name: ACCESS_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:
