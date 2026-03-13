@@ -2,13 +2,18 @@ package server
 
 import (
 	"backend/internal/config"
-	dbdrivers "backend/internal/database"
-	pgdriver "backend/internal/database/postgres"
-	mongodriver "backend/internal/database/mongo"
 	"backend/internal/database"
+	dbdrivers "backend/internal/database"
 	"backend/internal/handlers"
+	mgodriver "backend/internal/mongodb/driver"
+	mongodbhandler "backend/internal/mongodb/handler"
+	mongorepo "backend/internal/mongodb/repository"
+	mongosvc "backend/internal/mongodb/service"
+	pgdriver "backend/internal/postgres/driver"
+	pghandler "backend/internal/postgres/handler"
+	postgresrepo "backend/internal/postgres/repository"
+	postgressvc "backend/internal/postgres/service"
 	"backend/internal/repositories"
-	repopg "backend/internal/repositories/postgres"
 	"backend/internal/routes"
 	"backend/internal/services"
 	"fmt"
@@ -82,7 +87,7 @@ func NewServer() *http.Server {
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
-	projectRepo := repopg.NewProjectRepository(pool)
+	projectRepo := postgresrepo.NewProjectRepository(pool)
 	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
 	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
@@ -95,7 +100,7 @@ func NewServer() *http.Server {
 
 	// Database drivers registry (Postgres + Mongo) for unified container/record/field APIs
 	pgDBDriver := pgdriver.NewDriver(pool)
-	mongoDBDriver := mongodriver.NewDriver(pool)
+	mongoDBDriver := mgodriver.NewDriver(pool)
 	driverRegistry := dbdrivers.NewInMemoryDriverRegistry(map[string]dbdrivers.DatabaseDriver{
 		"postgresql": pgDBDriver,
 		"mongodb":    mongoDBDriver,
@@ -103,22 +108,25 @@ func NewServer() *http.Server {
 
 	recordService := services.NewRecordService(projectRepo, driverRegistry)
 
-	// Query dependencies
-	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(instanceConn, queryHistoryRepo, projectRepo, driverRegistry)
-	queryHandler := handlers.NewQueryHandler(queryService)
+	// Query dependencies (split per DB type + separate history tables)
+	pgQueryHistoryRepo := postgresrepo.NewQueryHistoryRepository(pool)
+	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo)
+	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
-	tableRepo := repositories.NewTableRepository()
-	tableService := services.NewTableService(instanceConn, queryHistoryRepo, tableRepo)
-	tableHandler := handlers.NewTableHandler(tableService)
+	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
+	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
+	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
 
-	// Schema dependencies
-	schemaService := services.NewSchemaService(instanceConn)
-	schemaHandler := handlers.NewSchemaHandler(schemaService)
+	// Postgres-specific: table, schema repos and services, handlers
+	tableRepo := postgresrepo.NewTableRepository()
+	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
+	tableHandler := pghandler.NewTableHandler(tableService)
+	schemaService := postgressvc.NewSchemaService(instanceConn)
+	schemaHandler := pghandler.NewSchemaHandler(schemaService)
+	postgresHandler := pghandler.NewPostgresHandler(projectService, tableService, recordService)
 
-	// Postgres / MongoDB API handlers (replacing unified container API)
-	postgresHandler := handlers.NewPostgresHandler(projectService, tableService, recordService)
-	mongodbHandler := handlers.NewMongoDBHandler(recordService)
+	// MongoDB API handler
+	mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
 
 	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
 	router := gin.New()
@@ -137,7 +145,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler, projectRepo, postgresHandler, mongodbHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, schemaHandler, tableHandler, projectRepo, postgresHandler, pgQueryHandler, mongodbHandler, mongoQueryHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),

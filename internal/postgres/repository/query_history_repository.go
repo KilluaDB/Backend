@@ -1,4 +1,4 @@
-package repositories
+package repository
 
 import (
 	"backend/internal/models"
@@ -17,12 +17,15 @@ func NewQueryHistoryRepository(pool *pgxpool.Pool) *QueryHistoryRepository {
 }
 
 func (r *QueryHistoryRepository) Create(queryHistory *models.QueryHistory) error {
+	if queryHistory == nil {
+		return nil
+	}
 	ctx := context.Background()
 
 	queryHistory.Prepare()
 
 	query := `
-		INSERT INTO query_history (id, db_instance_id, user_id, query_text, executed_at, success, execution_time_ms)
+		INSERT INTO postgres_query_history (id, db_instance_id, user_id, query_text, executed_at, success, execution_time_ms)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
@@ -43,12 +46,12 @@ func (r *QueryHistoryRepository) GetByUserID(userID uuid.UUID, limit int) ([]mod
 	ctx := context.Background()
 
 	if limit <= 0 {
-		limit = 100 // Default limit
+		limit = 100
 	}
 
 	query := `
 		SELECT id, db_instance_id, user_id, query_text, executed_at, success, execution_time_ms
-		FROM query_history WHERE user_id = $1
+		FROM postgres_query_history WHERE user_id = $1
 		ORDER BY executed_at DESC
 		LIMIT $2
 	`
@@ -79,3 +82,4 @@ func (r *QueryHistoryRepository) GetByUserID(userID uuid.UUID, limit int) ([]mod
 
 	return queries, rows.Err()
 }
+

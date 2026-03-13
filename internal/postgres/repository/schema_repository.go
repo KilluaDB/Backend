@@ -1,7 +1,7 @@
-package repositories
+package repository
 
 import (
-	"backend/internal/models"
+	pgmodels "backend/internal/postgres/models"
 	"context"
 	"fmt"
 	"strings"
@@ -50,7 +50,7 @@ func (r *SchemaRepository) GetTables(ctx context.Context, schema string) ([]stri
 }
 
 // GetColumns returns all columns for a specific table in a schema
-func (r *SchemaRepository) GetColumns(ctx context.Context, schema, table string) ([]models.Column, error) {
+func (r *SchemaRepository) GetColumns(ctx context.Context, schema, table string) ([]pgmodels.Column, error) {
 	query := `
 		SELECT column_name, data_type, is_nullable
 		FROM information_schema.columns
@@ -64,9 +64,9 @@ func (r *SchemaRepository) GetColumns(ctx context.Context, schema, table string)
 	}
 	defer rows.Close()
 
-	var columns []models.Column
+	var columns []pgmodels.Column
 	for rows.Next() {
-		var col models.Column
+		var col pgmodels.Column
 		var nullable string
 		if err := rows.Scan(&col.Name, &col.DataType, &nullable); err != nil {
 			return nil, err
@@ -119,7 +119,7 @@ func (r *SchemaRepository) GetPrimaryKeys(ctx context.Context, schema, table str
 }
 
 // GetForeignKeys returns all foreign keys for a specific table
-func (r *SchemaRepository) GetForeignKeys(ctx context.Context, schema, table string) ([]models.ForeignKey, error) {
+func (r *SchemaRepository) GetForeignKeys(ctx context.Context, schema, table string) ([]pgmodels.ForeignKey, error) {
 	query := `
 		SELECT 
 			tc.constraint_name,
@@ -144,9 +144,9 @@ func (r *SchemaRepository) GetForeignKeys(ctx context.Context, schema, table str
 	}
 	defer rows.Close()
 
-	var fks []models.ForeignKey
+	var fks []pgmodels.ForeignKey
 	for rows.Next() {
-		var fk models.ForeignKey
+		var fk pgmodels.ForeignKey
 		if err := rows.Scan(&fk.ConstraintName, &fk.FromColumn, &fk.ToTable, &fk.ToColumn); err != nil {
 			return nil, err
 		}

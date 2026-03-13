@@ -25,3 +25,4 @@ type Relationship struct {
 	ToTable   string
 	Type      string // "||--o{", "||--||", etc.
 }
+

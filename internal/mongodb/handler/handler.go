@@ -1,4 +1,4 @@
-package handlers
+package handler
 
 import (
 	"backend/internal/responses"
@@ -292,7 +292,6 @@ func (h *MongoDBHandler) RemoveField(c *gin.Context) {
 	responses.Success(c, http.StatusNoContent, nil, "Field removed successfully")
 }
 
-// parseFilterFromQueryMongo parses ?filter= query param as JSON (used only if we need a separate impl; reusing from postgres would require exporting)
 func parseFilterFromQueryMongo(c *gin.Context) map[string]interface{} {
 	q := c.Query("filter")
 	if q == "" {

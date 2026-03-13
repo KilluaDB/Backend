@@ -111,8 +111,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_revoked ON api_keys(revoked);
 CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at);
 
 
--- Query History table
-CREATE TABLE IF NOT EXISTS query_history (
+-- Query History tables (split by DB type)
+CREATE TABLE IF NOT EXISTS postgres_query_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
@@ -122,9 +122,23 @@ CREATE TABLE IF NOT EXISTS query_history (
   execution_time_ms INT
 );
 
-CREATE INDEX IF NOT EXISTS idx_query_history_db_instance_id ON query_history(db_instance_id);
-CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_query_history_executed_at ON query_history(executed_at);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_db_instance_id ON postgres_query_history(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_user_id ON postgres_query_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_executed_at ON postgres_query_history(executed_at);
+
+CREATE TABLE IF NOT EXISTS mongo_query_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  query_text TEXT NOT NULL,
+  executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  success BOOLEAN,
+  execution_time_ms INT
+);
+
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_db_instance_id ON mongo_query_history(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_user_id ON mongo_query_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_executed_at ON mongo_query_history(executed_at);
 
 
 -- Usage Metrics table

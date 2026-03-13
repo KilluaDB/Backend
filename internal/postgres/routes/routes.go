@@ -1,8 +1,8 @@
 package routes
 
 import (
-	"backend/internal/handlers"
 	"backend/internal/middlewares"
+	"backend/internal/postgres/handler"
 	"backend/internal/repositories"
 
 	"github.com/gin-gonic/gin"
@@ -11,26 +11,26 @@ import (
 // PostgresRoutes registers all /projects/:id/postgres/* endpoints.
 // Middleware ensures the project is PostgreSQL.
 type PostgresRoutes struct {
-	projectRepo    repositories.ProjectRepository
-	postgresHandler *handlers.PostgresHandler
-	tableHandler   *handlers.TableHandler
-	schemaHandler  *handlers.SchemaHandler
-	queryHandler   *handlers.QueryHandler
+	projectRepo     repositories.ProjectRepository
+	postgresHandler *handler.PostgresHandler
+	tableHandler    *handler.TableHandler
+	schemaHandler   *handler.SchemaHandler
+	queryHandler    *handler.QueryHandler
 }
 
 func NewPostgresRoutes(
 	projectRepo repositories.ProjectRepository,
-	postgresHandler *handlers.PostgresHandler,
-	tableHandler *handlers.TableHandler,
-	schemaHandler *handlers.SchemaHandler,
-	queryHandler *handlers.QueryHandler,
+	postgresHandler *handler.PostgresHandler,
+	tableHandler *handler.TableHandler,
+	schemaHandler *handler.SchemaHandler,
+	queryHandler *handler.QueryHandler,
 ) *PostgresRoutes {
 	return &PostgresRoutes{
 		projectRepo:     projectRepo,
 		postgresHandler: postgresHandler,
-		tableHandler:   tableHandler,
-		schemaHandler:  schemaHandler,
-		queryHandler:   queryHandler,
+		tableHandler:    tableHandler,
+		schemaHandler:   schemaHandler,
+		queryHandler:    queryHandler,
 	}
 }
 

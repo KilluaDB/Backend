@@ -3,6 +3,7 @@ package services
 import (
 	"backend/internal/database"
 	"backend/internal/models"
+	"backend/internal/mongodb/repository"
 	"backend/internal/repositories"
 	"backend/internal/utils"
 	"context"
@@ -262,7 +263,7 @@ func (s *InstanceConnectionService) GetMongoClient(ctx context.Context, userID, 
 		return nil, err
 	}
 
-	client, err := database.ConnectToMongoProject(params.host, params.port, params.username, params.password, "app")
+	client, err := repository.ConnectToMongoProject(params.host, params.port, params.username, params.password, "app")
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,7 @@
-package services
+package service
 
 import (
-	"backend/internal/repositories"
+	"backend/internal/postgres/repository"
 	"context"
 	"errors"
 	"fmt"
@@ -12,19 +12,16 @@ import (
 )
 
 type TableService struct {
-	instanceConn *InstanceConnectionService
-	executeRepo  *repositories.QueryHistoryRepository
-	tableRepo    *repositories.TableRepository
+	instanceConn InstanceConnectionService
+	tableRepo    *repository.TableRepository
 }
 
 func NewTableService(
-	instanceConn *InstanceConnectionService,
-	executeRepo *repositories.QueryHistoryRepository,
-	tableRepo *repositories.TableRepository,
+	instanceConn InstanceConnectionService,
+	tableRepo *repository.TableRepository,
 ) *TableService {
 	return &TableService{
 		instanceConn: instanceConn,
-		executeRepo:  executeRepo,
 		tableRepo:    tableRepo,
 	}
 }
@@ -144,16 +141,6 @@ func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, pr
 	return &TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
 }
 
-// func (s *TableService) UpdateTable(req *UpdateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*sql.Result, error) {
-// 	sqlDb, err := s.openDbConnection(userId, projectId)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer sqlDb.Close()
-
-// 	return nil, nil
-// }
-
 func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error) {
 	if req.Schema == "" {
 		req.Schema = "public"
@@ -220,52 +207,6 @@ func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error)
 	query += ");\n"
 
 	return query, nil
-
-	/*
-		{
-			"schema": 	"public",
-			"table": 	"users",
-			"columns":	[
-				{
-					"name": 			"id",
-					"type": 			"INT",
-					"primary": 		true,
-					"is_unique": 	true,
-					"is_identity": true,
-					"nullable": 	false
-				},
-				{
-					"name": 			"first_name",
-					"type": 			"VARCHAR(50)",
-					"nullable": 	false
-				},
-				{
-					"name": 			"last_name",
-					"type": 			"VARCHAR(50)",
-					"nullable": 	false
-				},
-				{
-					"name": 			"department_id",
-					"type": 			"INT",
-					"nullable": 	false
-				}
-			],
-			"foreign_keys": [
-				{
-					"schema":	"public",
-					"table":		"users",
-					"references": [
-						{
-							"local_column": 	"department_id",
-							"foreign_column": "id",
-							"on_update": 		"CASCADE",
-							"on_delete": 		"SET NULL"
-						}
-					]
-				}
-			]
-		}
-	*/
 }
 
 // isValidIdentifier checks if a string is a valid PostgreSQL identifier
@@ -348,4 +289,3 @@ func isValidColumnType(colType string) bool {
 	}
 	return false
 }
-

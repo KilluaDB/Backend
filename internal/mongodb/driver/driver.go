@@ -1,75 +1,33 @@
-package mongo
+package driver
 
 import (
 	"backend/internal/database"
-	"backend/internal/repositories"
-	"backend/internal/utils"
+	"backend/internal/mongodb/repository"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/bson"
 	mongodriver "go.mongodb.org/mongo-driver/mongo"
 )
 
 // Driver is a MongoDB implementation of database.DatabaseDriver.
-// It uses the main metadata pool to resolve per-project instances and
+// It uses the repository layer to resolve per-project instances and
 // opens a MongoDB client to the project's database for each operation.
 type Driver struct {
-	metaPool *pgxpool.Pool
+	resolver *repository.ConnectionResolver
 }
 
 var _ database.DatabaseDriver = (*Driver)(nil)
 
 func NewDriver(metaPool *pgxpool.Pool) *Driver {
-	return &Driver{metaPool: metaPool}
+	return &Driver{resolver: repository.NewConnectionResolver(metaPool)}
 }
 
-// getProjectClient resolves the running instance for a project and opens
-// a MongoDB client to the project's "app" database.
 func (d *Driver) getProjectClient(ctx context.Context, projectID string) (*mongodriver.Client, *mongodriver.Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	projectUUID, err := uuid.Parse(projectID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	instRepo := repositories.NewDatabaseInstanceRepository(d.metaPool)
-	credRepo := repositories.NewDatabaseCredentialRepository(d.metaPool)
-
-	inst, err := instRepo.GetConnectableByProjectID(projectUUID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if inst == nil || inst.Host == nil || inst.Port == nil {
-		return nil, nil, errors.New("no connectable MongoDB instance for project")
-	}
-
-	cred, err := credRepo.GetLatestByInstanceID(inst.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if cred == nil {
-		return nil, nil, errors.New("no credentials configured for MongoDB instance")
-	}
-
-	password, err := utils.DecryptString(cred.PasswordEncrypted)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decrypt database credentials: %w", err)
-	}
-
-	client, err := database.ConnectToMongoProject(*inst.Host, *inst.Port, cred.Username, password, "app")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return client, client.Database("app"), nil
+	return d.resolver.GetClient(ctx, projectID)
 }
 
 func (d *Driver) CreateContainer(ctx context.Context, projectID string, name string) error {
@@ -219,14 +177,6 @@ func (d *Driver) RemoveField(ctx context.Context, projectID string, container st
 }
 
 // ExecuteQuery executes a basic MongoDB operation described as map[string]interface{}.
-// Supported payload keys:
-//   {
-//     "collection": string,
-//     "operation":  "find" | "insertone" | "updatemany" | "deletemany",
-//     "filter":     map[string]interface{} (optional),
-//     "data":       map[string]interface{} (for insertone/updatemany),
-//     "limit":      int (optional, for find)
-//   }
 func (d *Driver) ExecuteQuery(ctx context.Context, projectID string, query interface{}) (interface{}, error) {
 	q, ok := query.(map[string]interface{})
 	if !ok {
@@ -299,7 +249,6 @@ func (d *Driver) ExecuteQuery(ctx context.Context, projectID string, query inter
 			return nil, errors.New("data is required for updateMany")
 		}
 		update := bson.M{}
-		// If caller passes update operators, forward as-is; otherwise wrap with $set.
 		hasOperator := false
 		for k := range dataMap {
 			if strings.HasPrefix(k, "$") {
@@ -334,4 +283,3 @@ func (d *Driver) ExecuteQuery(ctx context.Context, projectID string, query inter
 		return nil, fmt.Errorf("unsupported mongo operation: %s", operation)
 	}
 }
-

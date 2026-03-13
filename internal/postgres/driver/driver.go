@@ -1,4 +1,4 @@
-package postgres
+package driver
 
 import (
 	"backend/internal/database"
@@ -361,4 +361,3 @@ func (d *Driver) ExecuteQuery(ctx context.Context, projectID string, query inter
 	}
 	return map[string]any{"status": "ok"}, nil
 }
-

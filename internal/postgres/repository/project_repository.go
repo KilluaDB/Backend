@@ -1,4 +1,4 @@
-package postgres
+package repository
 
 import (
 	"backend/internal/models"
@@ -199,4 +199,3 @@ func (r *PostgresProjectRepository) DeleteByIDAndUserID(ctx context.Context, id 
 
 	return nil
 }
-

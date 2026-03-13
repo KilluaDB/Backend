@@ -1,8 +1,8 @@
 package routes
 
 import (
-	"backend/internal/handlers"
 	"backend/internal/middlewares"
+	"backend/internal/mongodb/handler"
 	"backend/internal/repositories"
 
 	"github.com/gin-gonic/gin"
@@ -11,15 +11,15 @@ import (
 // MongoDBRoutes registers all /projects/:id/mongodb/* endpoints.
 // Middleware ensures the project is MongoDB.
 type MongoDBRoutes struct {
-	projectRepo     repositories.ProjectRepository
-	mongodbHandler  *handlers.MongoDBHandler
-	queryHandler   *handlers.QueryHandler
+	projectRepo    repositories.ProjectRepository
+	mongodbHandler *handler.MongoDBHandler
+	queryHandler   *handler.QueryHandler
 }
 
 func NewMongoDBRoutes(
 	projectRepo repositories.ProjectRepository,
-	mongodbHandler *handlers.MongoDBHandler,
-	queryHandler *handlers.QueryHandler,
+	mongodbHandler *handler.MongoDBHandler,
+	queryHandler *handler.QueryHandler,
 ) *MongoDBRoutes {
 	return &MongoDBRoutes{
 		projectRepo:    projectRepo,

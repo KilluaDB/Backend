@@ -1,10 +1,9 @@
-package handlers
+package handler
 
 import (
+	"backend/internal/postgres/service"
 	"backend/internal/responses"
-	"backend/internal/services"
 	"fmt"
-
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,16 +11,16 @@ import (
 )
 
 type SchemaHandler struct {
-	schemaService *services.SchemaService
+	schemaService *service.SchemaService
 }
 
-func NewSchemaHandler(schemaService *services.SchemaService) *SchemaHandler {
+func NewSchemaHandler(schemaService *service.SchemaService) *SchemaHandler {
 	return &SchemaHandler{
 		schemaService: schemaService,
 	}
 }
 
-// VisualizeSchema handles GET /api/v1/projects/:id/schema/visualize
+// VisualizeSchema handles GET /api/v1/projects/:id/postgres/schema/visualize
 func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 	// Get user ID from context (set by auth middleware)
 	userID, exists := c.Get("userId")

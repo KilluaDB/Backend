@@ -1,6 +1,7 @@
-package handlers
+package handler
 
 import (
+	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
 	"encoding/json"
@@ -14,13 +15,13 @@ import (
 // Table name comes from path param :table. Middleware ensures project is PostgreSQL.
 type PostgresHandler struct {
 	projectService *services.ProjectService
-	tableService   *services.TableService
+	tableService   *service.TableService
 	recordService  *services.RecordService
 }
 
 func NewPostgresHandler(
 	projectService *services.ProjectService,
-	tableService *services.TableService,
+	tableService *service.TableService,
 	recordService *services.RecordService,
 ) *PostgresHandler {
 	return &PostgresHandler{
@@ -98,7 +99,7 @@ func (h *PostgresHandler) DeleteTableByPath(c *gin.Context) {
 		responses.Fail(c, http.StatusBadRequest, nil, "Invalid project ID")
 		return
 	}
-	req := services.DeleteTableRequest{Schema: "public", Table: table}
+	req := service.DeleteTableRequest{Schema: "public", Table: table}
 	result, err := h.tableService.DeleteTable(&req, userUUID, projectUUID)
 	if err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Failed to delete table")

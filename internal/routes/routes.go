@@ -2,9 +2,12 @@ package routes
 
 import (
 	"backend/internal/handlers"
+	mongodbhandler "backend/internal/mongodb/handler"
+	mongodbroutes "backend/internal/mongodb/routes"
+	postgreshandler "backend/internal/postgres/handler"
+	postgresroutes "backend/internal/postgres/routes"
 	"backend/internal/repositories"
 	"net/http"
-	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,12 +19,13 @@ func RegisterRoutes(
 	userHandler *handlers.UserHandler,
 	userRepo *repositories.UserRepository,
 	projectHandler *handlers.ProjectHandler,
-	queryHandler *handlers.QueryHandler,
-	schemaHandler *handlers.SchemaHandler,
-	tableHandler *handlers.TableHandler,
+	schemaHandler *postgreshandler.SchemaHandler,
+	tableHandler *postgreshandler.TableHandler,
 	projectRepo repositories.ProjectRepository,
-	postgresHandler *handlers.PostgresHandler,
-	mongodbHandler *handlers.MongoDBHandler,
+	postgresHandler *postgreshandler.PostgresHandler,
+	postgresQueryHandler *postgreshandler.QueryHandler,
+	mongodbHandler *mongodbhandler.MongoDBHandler,
+	mongoQueryHandler *mongodbhandler.QueryHandler,
 ) {
 	api := router.Group("/api/v1")
 
@@ -34,27 +38,15 @@ func RegisterRoutes(
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
 
-	postgresRoutes := NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, queryHandler)
+	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, postgresQueryHandler)
 	postgresRoutes.RegisterRoutes(api)
 
-	mongodbRoutes := NewMongoDBRoutes(projectRepo, mongodbHandler, queryHandler)
+	mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
 	mongodbRoutes.RegisterRoutes(api)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
-		})
-	})
-
-	// Debug: which host is serving (pod name in K8s vs machine name when running locally)
-	api.GET("/debug/host", func(c *gin.Context) {
-		host, err := os.Hostname()
-		if err != nil || host == "" {
-			host = "(unknown)"
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"host":   host,
-			"tip":    "If you see a pod name (e.g. backend-xxx), requests use the in-cluster backend. If you see your PC name, use the K8s port-forward URL (e.g. http://localhost:8081).",
 		})
 	})
 }
