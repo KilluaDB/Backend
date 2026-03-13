@@ -29,6 +29,7 @@ components:
   schemas:
     APIResponse:
       type: object
+      required: [status, message]
       properties:
         status:
           type: string
@@ -44,6 +45,7 @@ components:
 
     ErrorResponse:
       type: object
+      required: [status, message]
       properties:
         status:
           type: string
@@ -77,6 +79,7 @@ components:
 
     Project:
       type: object
+      required: [id, user_id, name, db_type, resource_tier, created_at]
       properties:
         id:
           type: string
@@ -105,15 +108,19 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          description: Project display name
         description:
           type: string
           nullable: true
         db_type:
           type: string
           enum: [postgresql, mongodb]
+          description: Allowed values are 'postgresql' or 'mongodb'
         resource_tier:
           type: string
           enum: [free, basic, premium]
+          description: Allowed values are 'free', 'basic', or 'premium'
 
     ExecuteSQLQueryRequest:
       type: object
@@ -124,6 +131,7 @@ components:
 
     SQLQueryResult:
       type: object
+      required: [columns, rows, row_count, execution_time_ms]
       properties:
         columns:
           type: array
@@ -146,6 +154,7 @@ components:
 
     QueryHistoryItem:
       type: object
+      required: [id, db_instance_id, user_id, query_text, executed_at]
       properties:
         id:
           type: string
@@ -170,6 +179,7 @@ components:
 
     User:
       type: object
+      required: [id, email, role, status, created_at]
       properties:
         id:
           type: string
@@ -201,9 +211,11 @@ components:
         email:
           type: string
           format: email
+          description: New email for the user
         role:
           type: string
           enum: [user, admin]
+          description: New role; only admins may change roles
 
     PostgresInsertRowRequest:
       type: object
@@ -234,12 +246,144 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            New column name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
         type:
           type: string
-          description: PostgreSQL column type (e.g., VARCHAR(50), INTEGER)
+          description: >
+            PostgreSQL column type. Common allowed prefixes include:
+            INT, INTEGER, BIGINT, SMALLINT, SERIAL, BIGSERIAL, DECIMAL, NUMERIC,
+            REAL, DOUBLE PRECISION, BOOLEAN/BOOL, CHAR, VARCHAR, TEXT, DATE,
+            TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
+            Parameterized variants like VARCHAR(50) are also accepted.
         default:
           description: Default value for the column (any JSON value)
           nullable: true
+
+    TableColumn:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Column name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
+        type:
+          type: string
+          description: >
+            PostgreSQL column type. Common allowed prefixes include:
+            INT, INTEGER, BIGINT, SMALLINT, SERIAL, BIGSERIAL, DECIMAL, NUMERIC,
+            REAL, DOUBLE PRECISION, BOOLEAN/BOOL, CHAR, VARCHAR, TEXT, DATE,
+            TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
+            Parameterized variants like VARCHAR(50) are also accepted.
+        default:
+          type: string
+          nullable: true
+          description: Raw SQL default expression (e.g. 'NOW()', '0', 'true').
+        primary:
+          type: boolean
+          default: false
+          description: Whether this column is part of the primary key.
+        is_unique:
+          type: boolean
+          default: false
+          description: Whether this column has a UNIQUE constraint.
+        is_identity:
+          type: boolean
+          default: false
+          description: Whether this column is GENERATED ALWAYS AS IDENTITY.
+        nullable:
+          type: boolean
+          default: true
+          description: Whether this column allows NULL values.
+
+    ForeignKeyRef:
+      type: object
+      required: [local_column, foreign_column]
+      properties:
+        local_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Local column name in the created table.
+        foreign_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Referenced column name in the target table.
+        on_update:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION"]
+          description: Optional ON UPDATE action. If omitted, database default is used.
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION", "SET NULL", "SET DEFAULT"]
+          description: Optional ON DELETE action. If omitted, database default is used.
+
+    ForeignKey:
+      type: object
+      required: [schema, table, references]
+      properties:
+        schema:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema name of the referenced table (e.g. public).
+        table:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Target table name for the foreign key.
+        references:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ForeignKeyRef'
+
+    CreateTableRequestBody:
+      type: object
+      required: [schema, table, columns]
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Schema name to create the table in. Must be a valid PostgreSQL identifier.
+            Defaults to "public" if omitted.
+        table:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Table name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
+        columns:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TableColumn'
+          description: At least one column definition is required.
+        foreign_keys:
+          $ref: '#/components/schemas/ForeignKey'
+          nullable: true
+          description: Optional foreign key configuration for the table.
+
+    DeleteTableRequestBody:
+      type: object
+      required: [schema, table]
+      properties:
+        schema:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema name of the table to delete.
+        table:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Table name to delete.
 
     MongoCreateCollectionRequest:
       type: object
@@ -247,6 +391,8 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          description: Collection name
 
     MongoInsertDocumentRequest:
       type: object
@@ -255,6 +401,7 @@ components:
         data:
           type: object
           additionalProperties: true
+          description: Arbitrary document fields to insert
 
     MongoUpdateDocumentsRequest:
       type: object
@@ -264,9 +411,11 @@ components:
           type: object
           additionalProperties: true
           nullable: true
+          description: Optional JSON filter applied to documents
         update:
           type: object
           additionalProperties: true
+          description: Fields to update on matched documents
 
     MongoAddFieldRequest:
       type: object
@@ -274,6 +423,8 @@ components:
       properties:
         field:
           type: string
+          minLength: 1
+          description: Field name to add
         field_type:
           type: string
           description: Optional type description or hint for the new field
@@ -284,9 +435,12 @@ components:
       properties:
         collection:
           type: string
+          minLength: 1
+          description: Target collection name
         operation:
           type: string
-          description: MongoDB operation (find | insertOne | updateMany | deleteMany)
+          enum: [find, insertOne, updateMany, deleteMany]
+          description: MongoDB operation; allowed values are 'find', 'insertOne', 'updateMany', 'deleteMany'
         filter:
           type: object
           additionalProperties: true
@@ -818,8 +972,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: Matches internal CreateTableRequest (schema, table, columns, optional foreign keys)
+              $ref: '#/components/schemas/CreateTableRequestBody'
       responses:
         '200':
           description: Table created successfully
@@ -849,8 +1002,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: Matches internal DeleteTableRequest (schema, table)
+              $ref: '#/components/schemas/DeleteTableRequestBody'
       responses:
         '200':
           description: Table deleted successfully
