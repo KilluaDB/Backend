@@ -102,7 +102,6 @@ func NewServer() *http.Server {
 	})
 
 	recordService := services.NewRecordService(projectRepo, driverRegistry)
-	containerHandler := handlers.NewContainerHandler(recordService)
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
@@ -117,8 +116,16 @@ func NewServer() *http.Server {
 	schemaService := services.NewSchemaService(instanceConn)
 	schemaHandler := handlers.NewSchemaHandler(schemaService)
 
-	// Initialize Gin router
-	router := gin.Default()
+	// Postgres / MongoDB API handlers (replacing unified container API)
+	postgresHandler := handlers.NewPostgresHandler(projectService, tableService, recordService)
+	mongodbHandler := handlers.NewMongoDBHandler(recordService)
+
+	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		Skip: func(c *gin.Context) bool { return c.Request.URL.Path == "/health" },
+	}))
+	router.Use(gin.Recovery())
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
@@ -130,7 +137,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler, containerHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, queryHandler, schemaHandler, tableHandler, projectRepo, postgresHandler, mongodbHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),

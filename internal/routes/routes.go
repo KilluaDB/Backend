@@ -9,7 +9,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, googleAuthHandler *handlers.GoogleAuthHandler, userHandler *handlers.UserHandler, userRepo *repositories.UserRepository, projectHandler *handlers.ProjectHandler, queryHandler *handlers.QueryHandler, schemaHandler *handlers.SchemaHandler, tableHandler *handlers.TableHandler, containerHandler *handlers.ContainerHandler) {
+func RegisterRoutes(
+	router *gin.Engine,
+	authHandler *handlers.AuthHandler,
+	googleAuthHandler *handlers.GoogleAuthHandler,
+	userHandler *handlers.UserHandler,
+	userRepo *repositories.UserRepository,
+	projectHandler *handlers.ProjectHandler,
+	queryHandler *handlers.QueryHandler,
+	schemaHandler *handlers.SchemaHandler,
+	tableHandler *handlers.TableHandler,
+	projectRepo repositories.ProjectRepository,
+	postgresHandler *handlers.PostgresHandler,
+	mongodbHandler *handlers.MongoDBHandler,
+) {
 	api := router.Group("/api/v1")
 
 	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)
@@ -18,22 +31,16 @@ func RegisterRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, googl
 	userRoutes := NewUserRoutes(userHandler, userRepo)
 	userRoutes.RegisterRoutes(api)
 
-	queryRoutes := NewQueryRoutes(queryHandler)
-	queryRoutes.RegisterRoutes(api)
-
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
 
-	schemaRoutes := NewSchemaRoutes(schemaHandler)
-	schemaRoutes.RegisterRoutes(api)
+	postgresRoutes := NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, queryHandler)
+	postgresRoutes.RegisterRoutes(api)
 
-	tableRoutes := NewTableRoutes(tableHandler)
-	tableRoutes.RegisterRoutes(api)
+	mongodbRoutes := NewMongoDBRoutes(projectRepo, mongodbHandler, queryHandler)
+	mongodbRoutes.RegisterRoutes(api)
 
-	containerRoutes := NewContainerRoutes(containerHandler)
-	containerRoutes.RegisterRoutes(api)
-
-	router.GET("/", func(c *gin.Context) {
+	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 		})
