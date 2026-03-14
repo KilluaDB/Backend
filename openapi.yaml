@@ -479,6 +479,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AuthRegisterRequest'
+            example:
+              email: "alice@example.com"
+              password: "SecurePass123!"
       responses:
         '201':
           description: User registered successfully
@@ -503,6 +506,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AuthLoginRequest'
+            example:
+              email: "alice@example.com"
+              password: "SecurePass123!"
       responses:
         '200':
           description: Login successful
@@ -585,11 +591,13 @@ paths:
           required: true
           schema:
             type: string
+            example: "4/0AY0e-g7ExampleAuthCode123456789"
         - name: state
           in: query
           required: true
           schema:
             type: string
+            example: "csrf-protection-random-state-uuid"
       responses:
         '200':
           description: Login successful
@@ -634,6 +642,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              email: "alice.new@example.com"
       responses:
         '200':
           description: User updated successfully
@@ -753,6 +763,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              email: "user+admin@example.com"
+              role: "admin"
       responses:
         '200':
           description: User updated successfully
@@ -829,6 +842,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateProjectRequest'
+            example:
+              name: "Analytics Service DB"
+              description: "Primary PostgreSQL database for the analytics microservice"
+              db_type: "postgresql"
+              resource_tier: "basic"
       responses:
         '201':
           description: Project created
@@ -973,6 +991,31 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTableRequestBody'
+            example:
+              schema: "public"
+              table: "customers"
+              columns:
+                - name: "id"
+                  type: "UUID"
+                  primary: true
+                  is_identity: true
+                  nullable: false
+                - name: "email"
+                  type: "VARCHAR(255)"
+                  is_unique: true
+                  nullable: false
+                - name: "created_at"
+                  type: "TIMESTAMPTZ"
+                  default: "NOW()"
+                  nullable: false
+              foreign_keys:
+                schema: "public"
+                table: "accounts"
+                references:
+                  - local_column: "account_id"
+                    foreign_column: "id"
+                    on_update: "CASCADE"
+                    on_delete: "CASCADE"
       responses:
         '200':
           description: Table created successfully
@@ -1003,6 +1046,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DeleteTableRequestBody'
+            example:
+              schema: "public"
+              table: "old_customers_backup"
       responses:
         '200':
           description: Table deleted successfully
@@ -1086,6 +1132,7 @@ paths:
           schema:
             type: string
           description: URL-encoded JSON filter applied to rows
+          example: "%7B%22status%22%3A%22active%22%2C%22country%22%3A%22US%22%7D"
       responses:
         '200':
           description: Rows retrieved successfully
@@ -1116,6 +1163,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PostgresInsertRowRequest'
+            example:
+              values:
+                id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                email: "bob@example.com"
+                status: "active"
+                created_at: "2026-03-14T10:15:00Z"
       responses:
         '201':
           description: Row inserted successfully
@@ -1146,6 +1199,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PostgresUpdateRowsRequest'
+            example:
+              filter:
+                status: "pending"
+              update:
+                status: "processed"
+                processed_at: "2026-03-14T12:00:00Z"
       responses:
         '200':
           description: Rows updated successfully
@@ -1177,6 +1236,7 @@ paths:
           schema:
             type: string
           description: URL-encoded JSON filter applied to rows; if omitted, all rows are deleted
+          example: "%7B%22status%22%3A%22inactive%22%7D"
       responses:
         '204':
           description: Rows deleted successfully
@@ -1341,6 +1401,7 @@ paths:
           schema:
             type: string
             default: public
+            example: "public"
       responses:
         '200':
           description: Schema visualization generated successfully
@@ -1380,6 +1441,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ExecuteSQLQueryRequest'
+            example:
+              query: "SELECT id, email, status FROM public.customers WHERE status = 'active' ORDER BY created_at DESC LIMIT 50;"
       responses:
         '200':
           description: Query executed successfully
@@ -1435,6 +1498,7 @@ paths:
             minimum: 1
             maximum: 30
           description: Max number of history items to return (default 10, max 30)
+          example: 10
       responses:
         '200':
           description: Query history
@@ -1500,6 +1564,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MongoCreateCollectionRequest'
+            example:
+              name: "orders"
       responses:
         '201':
           description: Collection created successfully
@@ -1579,6 +1645,7 @@ paths:
           schema:
             type: string
           description: URL-encoded JSON filter applied to documents
+          example: "%7B%22status%22%3A%22pending%22%7D"
       responses:
         '200':
           description: Documents retrieved successfully
@@ -1609,6 +1676,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MongoInsertDocumentRequest'
+            example:
+              data:
+                orderId: "ORD-2026-0001"
+                customerEmail: "alice@example.com"
+                totalAmount: 129.99
+                currency: "USD"
+                status: "pending"
+                createdAt: "2026-03-14T09:30:00Z"
       responses:
         '201':
           description: Document inserted successfully
@@ -1639,6 +1714,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MongoUpdateDocumentsRequest'
+            example:
+              filter:
+                status: "pending"
+              update:
+                status: "shipped"
+                shippedAt: "2026-03-15T14:00:00Z"
       responses:
         '200':
           description: Documents updated successfully
@@ -1670,6 +1751,7 @@ paths:
           schema:
             type: string
           description: URL-encoded JSON filter applied to documents; if omitted, all documents are deleted
+          example: "%7B%22status%22%3A%22cancelled%22%7D"
       responses:
         '204':
           description: Documents deleted successfully
@@ -1710,6 +1792,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MongoAddFieldRequest'
+            example:
+              field: "isArchived"
+              field_type: "boolean"
       responses:
         '200':
           description: Field added successfully
@@ -1788,6 +1873,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MongoQueryRequest'
+            example:
+              collection: "orders"
+              operation: "find"
+              filter:
+                status: "pending"
+              limit: 20
       responses:
         '200':
           description: Query executed successfully
@@ -1843,6 +1934,7 @@ paths:
             minimum: 1
             maximum: 30
           description: Max number of history items to return (default 10, max 30)
+          example: 10
       responses:
         '200':
           description: Query history
