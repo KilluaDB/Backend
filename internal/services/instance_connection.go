@@ -16,6 +16,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+// Sentinel errors for instance/connection so callers can return proper HTTP status.
+var (
+	ErrProjectNotAccessible = errors.New("project not found or not accessible")
+	ErrNoRunningInstance    = errors.New("no running database instance for this project")
+)
+
 // InstanceConnectionService resolves project, connectable instance, credentials,
 // and optional healing; returns a pgxpool for project database connections.
 type InstanceConnectionService struct {
@@ -57,7 +63,7 @@ func (s *InstanceConnectionService) getConnectionParams(ctx context.Context, use
 		return nil, err
 	}
 	if project == nil {
-		return nil, errors.New("project not found or not accessible")
+		return nil, ErrProjectNotAccessible
 	}
 
 	inst, err := s.instanceRepo.GetConnectableByProjectID(projectID)
@@ -96,7 +102,7 @@ func (s *InstanceConnectionService) getConnectionParams(ctx context.Context, use
 	}
 
 	if inst == nil {
-		return nil, errors.New("no running database instance for this project")
+		return nil, ErrNoRunningInstance
 	}
 
 	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)

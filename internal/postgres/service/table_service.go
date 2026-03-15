@@ -9,6 +9,14 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Sentinel errors for table operations so handlers can return proper HTTP status.
+var (
+	ErrInvalidTableRequest = errors.New("invalid table request")
+	ErrTableAlreadyExists  = errors.New("table already exists")
+	ErrTableNotFound       = errors.New("table does not exist")
 )
 
 type TableService struct {
@@ -75,7 +83,7 @@ type DeleteTableRequest struct {
 
 func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
 	if err := s.validateCreateTableRequest(req); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidTableRequest, err)
 	}
 
 	ctx := context.Background()
@@ -98,6 +106,10 @@ func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, pr
 
 	cmdTag, err := tx.Exec(ctx, query)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P07" { // duplicate_table
+			return nil, ErrTableAlreadyExists
+		}
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
@@ -110,10 +122,10 @@ func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, pr
 
 func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
 	if !isValidIdentifier(req.Schema) {
-		return nil, errors.New("invalid schema name")
+		return nil, fmt.Errorf("%w: invalid schema name", ErrInvalidTableRequest)
 	}
 	if !isValidIdentifier(req.Table) {
-		return nil, errors.New("invalid table name")
+		return nil, fmt.Errorf("%w: invalid table name", ErrInvalidTableRequest)
 	}
 
 	ctx := context.Background()
@@ -131,6 +143,10 @@ func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, pr
 
 	cmdTag, err := s.tableRepo.Delete(ctx, tx, req.Schema, req.Table)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
+			return nil, ErrTableNotFound
+		}
 		return nil, fmt.Errorf("failed to delete table: %w", err)
 	}
 

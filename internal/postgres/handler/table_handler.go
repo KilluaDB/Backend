@@ -3,6 +3,8 @@ package handler
 import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
+	"backend/internal/services"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -53,15 +55,27 @@ func (h *TableHandler) CreateTable(c *gin.Context) {
 
 	result, err := h.tableService.CreateTable(&req, userUUID, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Error while creating the table")
-		return
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid request: schema, table, or column names or types are invalid")
+			return
+		case errors.Is(err, service.ErrTableAlreadyExists):
+			responses.Fail(c, http.StatusConflict, err, "Table already exists")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create table")
+			return
+		}
 	}
 
 	response := gin.H{
 		"result": result,
 	}
 
-	responses.Success(c, http.StatusOK, response, "Table created successfully")
+	responses.Success(c, http.StatusCreated, response, "Table created successfully")
 }
 
 func (h *TableHandler) DeleteTable(c *gin.Context) {
@@ -97,8 +111,20 @@ func (h *TableHandler) DeleteTable(c *gin.Context) {
 
 	result, err := h.tableService.DeleteTable(&req, userUUID, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Cannot delete the given table")
-		return
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid request: schema or table name is invalid")
+			return
+		case errors.Is(err, service.ErrTableNotFound):
+			responses.Fail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete table")
+			return
+		}
 	}
 
 	response := gin.H{
