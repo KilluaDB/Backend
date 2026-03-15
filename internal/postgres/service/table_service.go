@@ -1,15 +1,18 @@
 package service
 
 import (
+	"backend/internal/postgres/model"
 	"backend/internal/postgres/repository"
 	"context"
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 )
 
 // Sentinel errors for table operations so handlers can return proper HTTP status.
@@ -34,54 +37,7 @@ func NewTableService(
 	}
 }
 
-// TableOpResult is returned by CreateTable and DeleteTable for API response.
-type TableOpResult struct {
-	RowsAffected int64 `json:"rows_affected"`
-}
-
-type Column struct {
-	Name       string  `json:"name" binding:"required"`
-	Type       string  `json:"type" binding:"required"`
-	Default    *string `json:"default"`
-	Primary    bool    `json:"primary"`
-	IsUnique   bool    `json:"is_unique"`
-	IsIdentity bool    `json:"is_identity"`
-	Nullable   bool    `json:"nullable"`
-}
-
-type ForeignKeyRef struct {
-	LocalColumn   string `json:"local_column" binding:"required"`
-	ForeignColumn string `json:"foreign_column" binding:"required"`
-	OnUpdate      string `json:"on_update" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION"`
-	OnDelete      string `json:"on_delete" binding:"omitempty, oneof=CASCADE RESTRICT NO ACTION SET NULL SET DEFAULT"`
-}
-
-type ForeignKey struct {
-	Schema     string          `json:"schema" binding:"required"`
-	Table      string          `json:"table" binding:"required"`
-	References []ForeignKeyRef `json:"references" binding:"required, min=1"`
-}
-
-type CreateTableRequest struct {
-	Schema      string      `json:"schema" binding:"required"`
-	Table       string      `json:"table" binding:"required"`
-	Columns     []Column    `json:"columns" binding:"required"`
-	ForeignKeys *ForeignKey `json:"foreign_keys"`
-}
-
-type UpdateTableRequest struct {
-	Schema      string      `json:"schema"`
-	Table       string      `json:"table"`
-	Columns     []Column    `json:"columns"`
-	ForeignKeys *ForeignKey `json:"foreign_keys"`
-}
-
-type DeleteTableRequest struct {
-	Schema string `json:"schema" binding:"required"`
-	Table  string `json:"table" binding:"required"`
-}
-
-func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
+func (s *TableService) CreateTable(req *model.CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*model.TableOpResult, error) {
 	if err := s.validateCreateTableRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidTableRequest, err)
 	}
@@ -117,10 +73,10 @@ func (s *TableService) CreateTable(req *CreateTableRequest, userId uuid.UUID, pr
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return &TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
+	return &model.TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
 }
 
-func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*TableOpResult, error) {
+func (s *TableService) DeleteTable(req *model.DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*model.TableOpResult, error) {
 	if !isValidIdentifier(req.Schema) {
 		return nil, fmt.Errorf("%w: invalid schema name", ErrInvalidTableRequest)
 	}
@@ -154,10 +110,10 @@ func (s *TableService) DeleteTable(req *DeleteTableRequest, userId uuid.UUID, pr
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return &TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
+	return &model.TableOpResult{RowsAffected: cmdTag.RowsAffected()}, nil
 }
 
-func (s *TableService) parseCreateQuery(req *CreateTableRequest) (string, error) {
+func (s *TableService) parseCreateQuery(req *model.CreateTableRequest) (string, error) {
 	if req.Schema == "" {
 		req.Schema = "public"
 	}
@@ -236,7 +192,7 @@ func isValidIdentifier(name string) bool {
 }
 
 // validateCreateTableRequest validates the create table request
-func (s *TableService) validateCreateTableRequest(req *CreateTableRequest) error {
+func (s *TableService) validateCreateTableRequest(req *model.CreateTableRequest) error {
 	if req.Schema == "" {
 		req.Schema = "public"
 	}
@@ -304,4 +260,235 @@ func isValidColumnType(colType string) bool {
 		}
 	}
 	return false
+}
+
+// validateRowColumnIdentifier validates SQL identifiers (table/column names) for row/column ops.
+func validateRowColumnIdentifier(identifier string) error {
+	if identifier == "" {
+		return errors.New("identifier cannot be empty")
+	}
+	validPattern := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_\-]*$`)
+	if !validPattern.MatchString(identifier) {
+		return errors.New("invalid identifier: must start with letter or underscore and contain only alphanumeric characters, underscores, and hyphens")
+	}
+	return nil
+}
+
+// InsertRowRequest represents the request body for inserting a row.
+type InsertRowRequest struct {
+	Table  string                 `json:"table" binding:"required"`
+	Values map[string]interface{} `json:"values" binding:"required"`
+}
+
+// InsertRowResponse represents the response for inserting a row.
+type InsertRowResponse struct {
+	RowID int64 `json:"row_id"`
+}
+
+// InsertRow inserts a row into a table.
+func (s *TableService) InsertRow(ctx context.Context, userID, projectID uuid.UUID, req InsertRowRequest) (*InsertRowResponse, error) {
+	if err := validateRowColumnIdentifier(req.Table); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+	if len(req.Values) == 0 {
+		return nil, errors.New("values cannot be empty")
+	}
+	for colName := range req.Values {
+		if err := validateRowColumnIdentifier(colName); err != nil {
+			return nil, fmt.Errorf("invalid column name '%s': %w", colName, err)
+		}
+	}
+
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Close()
+
+	var hasIDColumn bool
+	_ = pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 
+			FROM information_schema.columns 
+			WHERE table_schema = 'public' 
+			AND LOWER(table_name) = LOWER($1) 
+			AND column_name = 'id'
+		)
+	`, req.Table).Scan(&hasIDColumn)
+
+	columns := make([]string, 0, len(req.Values))
+	placeholders := make([]string, 0, len(req.Values))
+	values := make([]interface{}, 0, len(req.Values))
+	paramIndex := 1
+	colOrder := make([]string, 0, len(req.Values))
+	for col := range req.Values {
+		colOrder = append(colOrder, col)
+	}
+	for _, col := range colOrder {
+		val := req.Values[col]
+		columns = append(columns, pq.QuoteIdentifier(col))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
+		values = append(values, val)
+		paramIndex++
+	}
+
+	var columnsStr, placeholdersStr string
+	for i, col := range columns {
+		if i > 0 {
+			columnsStr += ", "
+			placeholdersStr += ", "
+		}
+		columnsStr += col
+		placeholdersStr += placeholders[i]
+	}
+
+	tableName := pq.QuoteIdentifier(req.Table)
+
+	if hasIDColumn {
+		queryWithReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING id",
+			tableName, columnsStr, placeholdersStr)
+		var rowID int64
+		err = pool.QueryRow(ctx, queryWithReturning, values...).Scan(&rowID)
+		if err == nil {
+			return &InsertRowResponse{RowID: rowID}, nil
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42703" {
+			// fall through
+		} else {
+			return nil, fmt.Errorf("failed to insert row into table %s: %w", req.Table, err)
+		}
+	}
+
+	queryWithoutReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		tableName, columnsStr, placeholdersStr)
+	cmdTag, execErr := pool.Exec(ctx, queryWithoutReturning, values...)
+	if execErr != nil {
+		return nil, fmt.Errorf("failed to insert row into table %s: %w", req.Table, execErr)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return nil, errors.New("no rows were inserted")
+	}
+	return &InsertRowResponse{RowID: 0}, nil
+}
+
+// DeleteRowRequest represents the request body for deleting a row.
+type DeleteRowRequest struct {
+	TableName string `json:"table_name" binding:"required"`
+}
+
+// DeleteRow deletes a row from a table by ID.
+func (s *TableService) DeleteRow(ctx context.Context, userID, projectID uuid.UUID, req DeleteRowRequest, rowID string) error {
+	if err := validateRowColumnIdentifier(req.TableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	rowIDInt, err := strconv.ParseInt(rowID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid row id: %w", err)
+	}
+	query := fmt.Sprintf(`DELETE FROM %s WHERE customer_id = $1`, pq.QuoteIdentifier(req.TableName))
+	cmdTag, err := pool.Exec(ctx, query, rowIDInt)
+	if err != nil {
+		return fmt.Errorf("failed to delete row: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return errors.New("row not found")
+	}
+	return nil
+}
+
+// AddColumnRequest represents the request body for adding a column.
+type AddColumnRequest struct {
+	TableName string      `json:"table_name" binding:"required"`
+	Name      string      `json:"name" binding:"required"`
+	Type      string      `json:"type" binding:"required"`
+	Default   interface{} `json:"default,omitempty"`
+}
+
+// AddColumnResponse represents the response for adding a column.
+type AddColumnResponse struct {
+	ColumnID int64 `json:"column_id"`
+}
+
+// AddColumn adds a column to a table.
+func (s *TableService) AddColumn(ctx context.Context, userID, projectID uuid.UUID, req AddColumnRequest) (*AddColumnResponse, error) {
+	if err := validateRowColumnIdentifier(req.TableName); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+	if err := validateRowColumnIdentifier(req.Name); err != nil {
+		return nil, fmt.Errorf("invalid column name: %w", err)
+	}
+	if req.Type == "" {
+		return nil, errors.New("column type cannot be empty")
+	}
+
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Close()
+
+	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
+	columnNameQuoted := pq.QuoteIdentifier(req.Name)
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableNameQuoted, columnNameQuoted, req.Type)
+	if req.Default != nil {
+		switch v := req.Default.(type) {
+		case string:
+			escaped := strings.ReplaceAll(v, "'", "''")
+			query += fmt.Sprintf(" DEFAULT '%s'", escaped)
+		case bool:
+			if v {
+				query += " DEFAULT TRUE"
+			} else {
+				query += " DEFAULT FALSE"
+			}
+		default:
+			query += fmt.Sprintf(" DEFAULT %v", v)
+		}
+	}
+	if _, err = pool.Exec(ctx, query); err != nil {
+		return nil, fmt.Errorf("failed to add column: %w", err)
+	}
+
+	var columnID int64
+	_ = pool.QueryRow(ctx, `
+		SELECT ordinal_position 
+		FROM information_schema.columns 
+		WHERE table_name = $1 AND column_name = $2
+	`, req.TableName, req.Name).Scan(&columnID)
+	return &AddColumnResponse{ColumnID: columnID}, nil
+}
+
+// DeleteColumnRequest represents the request body for deleting a column.
+type DeleteColumnRequest struct {
+	TableName string `json:"table_name" binding:"required"`
+}
+
+// DeleteColumn deletes a column from a table.
+func (s *TableService) DeleteColumn(ctx context.Context, userID, projectID uuid.UUID, req DeleteColumnRequest, columnName string) error {
+	if err := validateRowColumnIdentifier(req.TableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+	if err := validateRowColumnIdentifier(columnName); err != nil {
+		return fmt.Errorf("invalid column name: %w", err)
+	}
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
+	columnNameQuoted := pq.QuoteIdentifier(columnName)
+	query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", tableNameQuoted, columnNameQuoted)
+	if _, err = pool.Exec(ctx, query); err != nil {
+		return fmt.Errorf("failed to delete column: %w", err)
+	}
+	return nil
 }

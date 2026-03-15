@@ -45,15 +45,15 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		postgres.DELETE("/tables/:table", r.postgresHandler.DeleteTableByPath)
 
 		// Rows
-		postgres.GET("/tables/:table/rows", r.postgresHandler.GetRows)
-		postgres.POST("/tables/:table/rows", r.postgresHandler.InsertRowWithTable)
-		postgres.PATCH("/tables/:table/rows", r.postgresHandler.UpdateRows)
-		postgres.DELETE("/tables/:table/rows/:row_id", r.postgresHandler.DeleteRows)
-		postgres.DELETE("/tables/:table/rows", r.postgresHandler.DeleteRows)
+		postgres.GET("/tables/:table/rows", r.tableHandler.GetRows)
+		postgres.POST("/tables/:table/rows", r.tableHandler.InsertRowWithTable)
+		postgres.PATCH("/tables/:table/rows", r.tableHandler.UpdateRows)
+		postgres.DELETE("/tables/:table/rows/:row_id", r.tableHandler.DeleteRows)
+		postgres.DELETE("/tables/:table/rows", r.tableHandler.DeleteRows)
 
 		// Columns
-		postgres.POST("/tables/:table/columns", r.postgresHandler.AddColumnWithTable)
-		postgres.DELETE("/tables/:table/columns/:column", r.postgresHandler.DeleteColumnWithTable)
+		postgres.POST("/tables/:table/columns", r.tableHandler.AddColumnWithTable)
+		postgres.DELETE("/tables/:table/columns/:column", r.tableHandler.DeleteColumnWithTable)
 
 		// Schema
 		postgres.GET("/schema/visualize", r.schemaHandler.VisualizeSchema)

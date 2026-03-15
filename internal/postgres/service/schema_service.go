@@ -1,7 +1,7 @@
 package service
 
 import (
-	pgmodels "backend/internal/postgres/models"
+	"backend/internal/postgres/model"
 	"backend/internal/postgres/repository"
 	"backend/internal/utils"
 	"context"
@@ -72,16 +72,16 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 	return mermaidDiagram, nil
 }
 
-func parseTables(ctx context.Context, schemaRepo *repository.SchemaRepository, schema string) ([]pgmodels.Table, error) {
+func parseTables(ctx context.Context, schemaRepo *repository.SchemaRepository, schema string) ([]model.Table, error) {
 	tableNames, err := schemaRepo.GetTables(ctx, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	tables := make([]pgmodels.Table, 0, len(tableNames))
+	tables := make([]model.Table, 0, len(tableNames))
 
 	for _, tableName := range tableNames {
-		table := pgmodels.Table{Name: tableName}
+		table := model.Table{Name: tableName}
 
 		// Get columns
 		columns, err := schemaRepo.GetColumns(ctx, schema, tableName)
@@ -110,8 +110,8 @@ func parseTables(ctx context.Context, schemaRepo *repository.SchemaRepository, s
 	return tables, nil
 }
 
-func buildRelationshipsWithDetection(ctx context.Context, schemaRepo *repository.SchemaRepository, schema string, tables []pgmodels.Table) ([]pgmodels.Relationship, error) {
-	var relationships []pgmodels.Relationship
+func buildRelationshipsWithDetection(ctx context.Context, schemaRepo *repository.SchemaRepository, schema string, tables []model.Table) ([]model.Relationship, error) {
+	var relationships []model.Relationship
 	junctionTables := detectJunctionTables(tables)
 
 	// Collect all table-column pairs that need unique constraint checking
@@ -144,7 +144,7 @@ func buildRelationshipsWithDetection(ctx context.Context, schemaRepo *repository
 				// Handle multiple foreign keys in junction table
 				for i := 0; i < len(table.ForeignKeys); i++ {
 					for j := i + 1; j < len(table.ForeignKeys); j++ {
-						rel := pgmodels.Relationship{
+						rel := model.Relationship{
 							FromTable: table.ForeignKeys[i].ToTable,
 							ToTable:   table.ForeignKeys[j].ToTable,
 							Type:      "}o--o{",
@@ -166,7 +166,7 @@ func buildRelationshipsWithDetection(ctx context.Context, schemaRepo *repository
 				relType = "||--||" // One-to-one
 			}
 
-			rel := pgmodels.Relationship{
+			rel := model.Relationship{
 				FromTable: table.Name,
 				ToTable:   fk.ToTable,
 				Type:      relType,
@@ -178,7 +178,7 @@ func buildRelationshipsWithDetection(ctx context.Context, schemaRepo *repository
 	return relationships, nil
 }
 
-func detectJunctionTables(tables []pgmodels.Table) map[string]bool {
+func detectJunctionTables(tables []model.Table) map[string]bool {
 	junctionTables := make(map[string]bool)
 	for _, table := range tables {
 		// More flexible detection: at least 2 FKs, and all FKs are part of PK
@@ -211,7 +211,7 @@ func detectJunctionTables(tables []pgmodels.Table) map[string]bool {
 	return junctionTables
 }
 
-func generateMermaid(tables []pgmodels.Table, relationships []pgmodels.Relationship) string {
+func generateMermaid(tables []model.Table, relationships []model.Relationship) string {
 	var sb strings.Builder
 
 	sb.WriteString("erDiagram\n")
@@ -316,7 +316,7 @@ func simplifyDataType(dataType string) string {
 	}
 }
 
-func isForeignKey(fks []pgmodels.ForeignKey, colName string) bool {
+func isForeignKey(fks []model.ForeignKey, colName string) bool {
 	for _, fk := range fks {
 		if fk.FromColumn == colName {
 			return true

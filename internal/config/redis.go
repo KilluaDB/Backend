@@ -19,12 +19,12 @@ const (
 	redisKeyPrefix = "refreshtoken:"
 )
 
-// RedisClient returns a Redis client. Uses REDIS_ADDR (host:port, default localhost:6379)
-// and optional REDIS_PASSWORD, REDIS_DB (default 0).
+// RedisClient returns a Redis client. REDIS_ADDR (host:port) is required; use redis:6379 in-cluster, localhost:6379 locally.
+// Optional: REDIS_PASSWORD, REDIS_DB (default 0).
 func RedisClient() (*redis.Client, error) {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
-		addr = "localhost:6379"
+		return nil, fmt.Errorf("REDIS_ADDR is required (e.g. redis:6379 in-cluster, localhost:6379 locally)")
 	}
 	db := 0
 	if s := os.Getenv("REDIS_DB"); s != "" {

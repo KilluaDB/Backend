@@ -102,8 +102,6 @@ func NewServer() *http.Server {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
 	instanceConn := services.NewInstanceConnectionService(projectRepo, dbInstanceRepo, dbCredentialRepo, provisioner)
-	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn)
-	projectHandler := handlers.NewProjectHandler(projectService)
 
 	// Database drivers registry (Postgres + Mongo) for unified container/record/field APIs
 	pgDBDriver := pgdriver.NewDriver(pool)
@@ -115,6 +113,12 @@ func NewServer() *http.Server {
 
 	recordService := services.NewRecordService(projectRepo, driverRegistry)
 
+	// Postgres-specific: table (includes row/column ops), schema, query
+	tableRepo := postgresrepo.NewTableRepository()
+	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
+	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn, tableService)
+	projectHandler := handlers.NewProjectHandler(projectService)
+
 	// Query dependencies (split per DB type + separate history tables)
 	pgQueryHistoryRepo := postgresrepo.NewQueryHistoryRepository(pool)
 	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo)
@@ -124,12 +128,9 @@ func NewServer() *http.Server {
 	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
 	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
 
-	// Postgres-specific: table, schema repos and services, handlers
-	tableRepo := postgresrepo.NewTableRepository()
-	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
-	tableHandler := pghandler.NewTableHandler(tableService)
 	schemaService := postgressvc.NewSchemaService(instanceConn)
 	schemaHandler := pghandler.NewSchemaHandler(schemaService)
+	tableHandler := pghandler.NewTableHandler(tableService, recordService)
 	postgresHandler := pghandler.NewPostgresHandler(projectService, tableService, recordService)
 
 	// MongoDB API handler
@@ -167,19 +168,20 @@ func NewServer() *http.Server {
 
 func validateRequiredEnvVars() error {
 	required := map[string]string{
-		"PORT":                          os.Getenv("PORT"),
-		"DB_HOST":                       os.Getenv("DB_HOST"),
-		"DB_PORT":                       os.Getenv("DB_PORT"),
-		"DB_USERNAME":                   os.Getenv("DB_USERNAME"),
-		"DB_PASSWORD":                   os.Getenv("DB_PASSWORD"),
-		"DB_DATABASE":                   os.Getenv("DB_DATABASE"),
-		"DB_ADMIN_USER":                 os.Getenv("DB_ADMIN_USER"),
-		"DB_ADMIN_PASSWORD":             os.Getenv("DB_ADMIN_PASSWORD"),
-		"ACCESS_TOKEN_SECRET":           os.Getenv("ACCESS_TOKEN_SECRET"),
-		"REFRESH_TOKEN_SECRET":    os.Getenv("REFRESH_TOKEN_SECRET"),
-		"GOOGLE_CLIENT_ID":        os.Getenv("GOOGLE_CLIENT_ID"),
-		"GOOGLE_CLIENT_SECRET":          os.Getenv("GOOGLE_CLIENT_SECRET"),
-		"GOOGLE_REDIRECT_URL":           os.Getenv("GOOGLE_REDIRECT_URL"),
+		"PORT":                os.Getenv("PORT"),
+		"DB_HOST":             os.Getenv("DB_HOST"),
+		"DB_PORT":             os.Getenv("DB_PORT"),
+		"DB_USERNAME":         os.Getenv("DB_USERNAME"),
+		"DB_PASSWORD":         os.Getenv("DB_PASSWORD"),
+		"DB_DATABASE":         os.Getenv("DB_DATABASE"),
+		"DB_ADMIN_USER":       os.Getenv("DB_ADMIN_USER"),
+		"DB_ADMIN_PASSWORD":   os.Getenv("DB_ADMIN_PASSWORD"),
+		"REDIS_ADDR":          os.Getenv("REDIS_ADDR"),
+		"ACCESS_TOKEN_SECRET": os.Getenv("ACCESS_TOKEN_SECRET"),
+		"REFRESH_TOKEN_SECRET": os.Getenv("REFRESH_TOKEN_SECRET"),
+		"GOOGLE_CLIENT_ID":    os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_SECRET": os.Getenv("GOOGLE_CLIENT_SECRET"),
+		"GOOGLE_REDIRECT_URL": os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {

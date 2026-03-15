@@ -67,6 +67,9 @@ DB_ADMIN_PASSWORD=postgres
 ACCESS_TOKEN_SECRET=your-access-token-secret-change-this-in-production
 REFRESH_TOKEN_SECRET=your-refresh-token-secret-change-this-in-production
 
+# Redis (required: redis:6379 in-cluster, localhost:6379 locally)
+REDIS_ADDR=localhost:6379
+
 # Google OAuth (optional)
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
@@ -188,6 +191,7 @@ run_in_k8s() {
         --from-literal=DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}" \
         --from-literal=DB_INSTANCES_NAMESPACE_POSTGRES="$postgres_ns" \
         --from-literal=DB_INSTANCES_NAMESPACE_MONGO="$mongo_ns" \
+        --from-literal=REDIS_ADDR="${REDIS_ADDR:-redis:6379}" \
         --from-literal=GOOGLE_REDIRECT_URL="${GOOGLE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}" \
         -n default --dry-run=client -o yaml | kubectl apply -f - || { print_error "ConfigMap apply failed"; exit 1; }
 

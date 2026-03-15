@@ -1,4 +1,4 @@
-package models
+package model
 
 type Column struct {
 	Name     string
@@ -25,4 +25,3 @@ type Relationship struct {
 	ToTable   string
 	Type      string // "||--o{", "||--||", etc.
 }
-

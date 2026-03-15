@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"backend/internal/models"
+	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
 	"errors"
@@ -33,6 +34,7 @@ func projectToAPI(p *models.Project) gin.H {
 		"db_type":       dbTypeForAPI(p.DBType),
 		"resource_tier": p.ResourceTier,
 		"created_at":    p.CreatedAt,
+		"status":        p.Status,
 	}
 }
 
@@ -240,20 +242,27 @@ func (h *ProjectHandler) InsertRow(c *gin.Context) {
 		return
 	}
 
-	var req services.InsertRowRequest
+	var req service.InsertRowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
 
-	// Use table_name from URL param if not provided in body, or validate they match
 	if req.Table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is Not Provided in the request body")
+		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required in the request body")
 		return
 	}
 
 	result, err := h.projectService.InsertRow(userUUID, projectUUID, req)
 	if err != nil {
+		if errors.Is(err, services.ErrProjectNotFound) {
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		if errors.Is(err, services.ErrUnsupportedDBForRows) {
+			responses.Fail(c, http.StatusBadRequest, err, "Row and column operations are only supported for PostgreSQL projects")
+			return
+		}
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to insert row")
 		return
 	}
@@ -296,7 +305,7 @@ func (h *ProjectHandler) DeleteRow(c *gin.Context) {
 		return
 	}
 
-	var req services.DeleteRowRequest
+	var req service.DeleteRowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
@@ -304,6 +313,14 @@ func (h *ProjectHandler) DeleteRow(c *gin.Context) {
 
 	err = h.projectService.DeleteRow(userUUID, projectUUID, req, rowID)
 	if err != nil {
+		if errors.Is(err, services.ErrProjectNotFound) {
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		if errors.Is(err, services.ErrUnsupportedDBForRows) {
+			responses.Fail(c, http.StatusBadRequest, err, "Row and column operations are only supported for PostgreSQL projects")
+			return
+		}
 		if err.Error() == "row not found" {
 			responses.Fail(c, http.StatusNotFound, err, "Row not found")
 			return
@@ -349,7 +366,7 @@ func (h *ProjectHandler) AddColumn(c *gin.Context) {
 		return
 	}
 
-	var req services.AddColumnRequest
+	var req service.AddColumnRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
@@ -357,6 +374,14 @@ func (h *ProjectHandler) AddColumn(c *gin.Context) {
 
 	result, err := h.projectService.AddColumn(userUUID, projectUUID, req)
 	if err != nil {
+		if errors.Is(err, services.ErrProjectNotFound) {
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		if errors.Is(err, services.ErrUnsupportedDBForRows) {
+			responses.Fail(c, http.StatusBadRequest, err, "Row and column operations are only supported for PostgreSQL projects")
+			return
+		}
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to add column")
 		return
 	}
@@ -399,7 +424,7 @@ func (h *ProjectHandler) DeleteColumn(c *gin.Context) {
 		return
 	}
 
-	var req services.DeleteColumnRequest
+	var req service.DeleteColumnRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
@@ -407,6 +432,14 @@ func (h *ProjectHandler) DeleteColumn(c *gin.Context) {
 
 	err = h.projectService.DeleteColumn(userUUID, projectUUID, req, columnName)
 	if err != nil {
+		if errors.Is(err, services.ErrProjectNotFound) {
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		if errors.Is(err, services.ErrUnsupportedDBForRows) {
+			responses.Fail(c, http.StatusBadRequest, err, "Row and column operations are only supported for PostgreSQL projects")
+			return
+		}
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete column")
 		return
 	}

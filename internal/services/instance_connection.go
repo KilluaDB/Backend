@@ -276,4 +276,3 @@ func (s *InstanceConnectionService) GetMongoClient(ctx context.Context, userID, 
 
 	return client, nil
 }
-

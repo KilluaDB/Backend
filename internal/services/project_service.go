@@ -2,19 +2,16 @@ package services
 
 import (
 	"backend/internal/models"
+	"backend/internal/postgres/service"
 	"backend/internal/repositories"
 	"backend/internal/utils"
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/lib/pq"
 )
 
 // Sentinel errors for project operations so handlers can return proper HTTP status and messages.
@@ -23,16 +20,18 @@ var (
 	ErrInvalidUserID       = errors.New("invalid user ID")
 	ErrInvalidDBType       = errors.New("invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
 	ErrInvalidResourceTier = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
-	ErrProjectNotFound     = errors.New("project not found or access denied")
-	ErrProjectCreateDB     = errors.New("failed to create project or database instance")
+	ErrProjectNotFound      = errors.New("project not found or access denied")
+	ErrProjectCreateDB      = errors.New("failed to create project or database instance")
+	ErrUnsupportedDBForRows = errors.New("row and column operations are only supported for PostgreSQL projects")
 )
 
 type ProjectService struct {
-	projectRepo      repositories.ProjectRepository
-	provisioner      *OperatorProvisioner
-	dbInstanceRepo   *repositories.DatabaseInstanceRepository
-	dbCredentialRepo *repositories.DatabaseCredentialRepository
-	instanceConn     *InstanceConnectionService
+	projectRepo       repositories.ProjectRepository
+	provisioner       *OperatorProvisioner
+	dbInstanceRepo    *repositories.DatabaseInstanceRepository
+	dbCredentialRepo  *repositories.DatabaseCredentialRepository
+	instanceConn      *InstanceConnectionService
+	postgresTableService *service.TableService
 }
 
 func NewProjectService(
@@ -41,13 +40,15 @@ func NewProjectService(
 	dbInstanceRepo *repositories.DatabaseInstanceRepository,
 	dbCredentialRepo *repositories.DatabaseCredentialRepository,
 	instanceConn *InstanceConnectionService,
+	postgresTableService *service.TableService,
 ) *ProjectService {
 	return &ProjectService{
-		projectRepo:      projectRepo,
-		provisioner:      provisioner,
-		dbInstanceRepo:   dbInstanceRepo,
-		dbCredentialRepo: dbCredentialRepo,
-		instanceConn:     instanceConn,
+		projectRepo:         projectRepo,
+		provisioner:         provisioner,
+		dbInstanceRepo:     dbInstanceRepo,
+		dbCredentialRepo:   dbCredentialRepo,
+		instanceConn:       instanceConn,
+		postgresTableService: postgresTableService,
 	}
 }
 
@@ -302,331 +303,50 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 	return nil
 }
 
-// validateIdentifier validates SQL identifiers (table names, column names) to prevent SQL injection
-func validateIdentifier(identifier string) error {
-	// Check for empty string
-	if identifier == "" {
-		return errors.New("identifier cannot be empty")
+// InsertRow delegates to PostgreSQL row service when project is PostgreSQL.
+func (s *ProjectService) InsertRow(userID, projectID uuid.UUID, req service.InsertRowRequest) (*service.InsertRowResponse, error) {
+	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
+	if err != nil || proj == nil {
+		return nil, ErrProjectNotFound
 	}
-
-	// Allow alphanumeric characters, underscores, and hyphens
-	// Must start with a letter or underscore
-	validPattern := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_\-]*$`)
-	if !validPattern.MatchString(identifier) {
-		return errors.New("invalid identifier: must start with letter or underscore and contain only alphanumeric characters, underscores, and hyphens")
+	if proj.DBType != "postgresql" {
+		return nil, ErrUnsupportedDBForRows
 	}
-
-	return nil
+	return s.postgresTableService.InsertRow(context.Background(), userID, projectID, req)
 }
 
-// InsertRowRequest represents the request body for inserting a row
-type InsertRowRequest struct {
-	Table  string                 `json:"table" binding:"required"`
-	Values map[string]interface{} `json:"values" binding:"required"`
+// DeleteRow delegates to PostgreSQL row service when project is PostgreSQL.
+func (s *ProjectService) DeleteRow(userID, projectID uuid.UUID, req service.DeleteRowRequest, rowID string) error {
+	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
+	if err != nil || proj == nil {
+		return ErrProjectNotFound
+	}
+	if proj.DBType != "postgresql" {
+		return ErrUnsupportedDBForRows
+	}
+	return s.postgresTableService.DeleteRow(context.Background(), userID, projectID, req, rowID)
 }
 
-// InsertRowResponse represents the response for inserting a row
-type InsertRowResponse struct {
-	RowID int64 `json:"row_id"`
+// AddColumn delegates to PostgreSQL row service when project is PostgreSQL.
+func (s *ProjectService) AddColumn(userID, projectID uuid.UUID, req service.AddColumnRequest) (*service.AddColumnResponse, error) {
+	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
+	if err != nil || proj == nil {
+		return nil, ErrProjectNotFound
+	}
+	if proj.DBType != "postgresql" {
+		return nil, ErrUnsupportedDBForRows
+	}
+	return s.postgresTableService.AddColumn(context.Background(), userID, projectID, req)
 }
 
-// InsertRow inserts a row into a table
-func (s *ProjectService) InsertRow(userID uuid.UUID, projectID uuid.UUID, req InsertRowRequest) (*InsertRowResponse, error) {
-	// Validate table name
-	if err := validateIdentifier(req.Table); err != nil {
-		return nil, fmt.Errorf("invalid table name: %w", err)
+// DeleteColumn delegates to PostgreSQL row service when project is PostgreSQL.
+func (s *ProjectService) DeleteColumn(userID, projectID uuid.UUID, req service.DeleteColumnRequest, columnName string) error {
+	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
+	if err != nil || proj == nil {
+		return ErrProjectNotFound
 	}
-	// Validate that values map is not empty
-	if len(req.Values) == 0 {
-		return nil, errors.New("values cannot be empty")
+	if proj.DBType != "postgresql" {
+		return ErrUnsupportedDBForRows
 	}
-
-	// Validate column names
-	for colName := range req.Values {
-		if err := validateIdentifier(colName); err != nil {
-			return nil, fmt.Errorf("invalid column name '%s': %w", colName, err)
-		}
-	}
-
-	ctx := context.Background()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Close()
-
-	// Check if the table has an 'id' column before attempting RETURNING id
-	// PostgreSQL stores identifiers in lowercase in information_schema unless quoted
-	// So we compare using LOWER() to handle case-insensitive matching
-	// Also check the 'public' schema (default schema)
-	var hasIDColumn bool
-	err = pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 
-			FROM information_schema.columns 
-			WHERE table_schema = 'public' 
-			AND LOWER(table_name) = LOWER($1) 
-			AND column_name = 'id'
-		)
-	`, req.Table).Scan(&hasIDColumn)
-	if err != nil {
-		// If we can't check, assume no id column and proceed without RETURNING
-		hasIDColumn = false
-	}
-
-	// Build INSERT query with parameterized values
-	columns := make([]string, 0, len(req.Values))
-	placeholders := make([]string, 0, len(req.Values))
-	values := make([]interface{}, 0, len(req.Values))
-	paramIndex := 1
-
-	// Preserve column order by iterating in a deterministic way
-	colOrder := make([]string, 0, len(req.Values))
-	for col := range req.Values {
-		colOrder = append(colOrder, col)
-	}
-
-	// Build columns and values arrays
-	for _, col := range colOrder {
-		val := req.Values[col]
-		columns = append(columns, pq.QuoteIdentifier(col))
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
-		values = append(values, val)
-		paramIndex++
-	}
-
-	// Build columns and placeholders strings
-	columnsStr := ""
-	placeholdersStr := ""
-	for i, col := range columns {
-		if i > 0 {
-			columnsStr += ", "
-			placeholdersStr += ", "
-		}
-		columnsStr += col
-		placeholdersStr += placeholders[i]
-	}
-
-	// Use pq.QuoteIdentifier for table name
-	tableName := pq.QuoteIdentifier(req.Table)
-
-	// Try to use RETURNING id if the table has an id column
-	if hasIDColumn {
-		queryWithReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING id",
-			tableName, columnsStr, placeholdersStr)
-
-		var rowID int64
-		err = pool.QueryRow(ctx, queryWithReturning, values...).Scan(&rowID)
-		if err == nil {
-			// Successfully got the id
-			return &InsertRowResponse{RowID: rowID}, nil
-		}
-
-		// If QueryRow failed, check if it's a column not found error
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "42703" {
-			// Column doesn't actually exist (maybe the check was wrong), fall through to Exec
-			// This handles edge cases where information_schema check was incorrect
-		} else {
-			// Some other error occurred (constraint violation, data type mismatch, etc.)
-			// Return the error as it's likely a real problem
-			return nil, fmt.Errorf("failed to insert row into table %s: %w", req.Table, err)
-		}
-	}
-
-	// Either table doesn't have id column, or RETURNING id failed/not available
-	// Execute INSERT without RETURNING
-	queryWithoutReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		tableName, columnsStr, placeholdersStr)
-
-	cmdTag, execErr := pool.Exec(ctx, queryWithoutReturning, values...)
-	if execErr != nil {
-		return nil, fmt.Errorf("failed to insert row into table %s: %w", req.Table, execErr)
-	}
-
-	// Check if any rows were affected
-	rowsAffected := cmdTag.RowsAffected()
-
-	if rowsAffected == 0 {
-		return nil, errors.New("no rows were inserted")
-	}
-
-	// If successful but no id returned, return 0 as row_id
-	// The client will need to query the table to find the inserted row
-	return &InsertRowResponse{RowID: 0}, nil
-}
-
-type DeleteRowRequest struct {
-	TableName string `json:"table_name" binding:"required"`
-}
-
-// DeleteRow deletes a row from a table by ID
-func (s *ProjectService) DeleteRow(
-	userID uuid.UUID,
-	projectID uuid.UUID,
-	req DeleteRowRequest,
-	rowID string,
-) error {
-
-	if err := validateIdentifier(req.TableName); err != nil {
-		return fmt.Errorf("invalid table name: %w", err)
-	}
-
-	ctx := context.Background()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-
-	rowIDInt, err := strconv.ParseInt(rowID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid row id: %w", err)
-	}
-
-	query := fmt.Sprintf(
-		`DELETE FROM %s WHERE customer_id = $1`,
-		pq.QuoteIdentifier(req.TableName),
-	)
-
-	cmdTag, err := pool.Exec(ctx, query, rowIDInt)
-	if err != nil {
-		return fmt.Errorf("failed to delete row: %w", err)
-	}
-
-	rowsAffected := cmdTag.RowsAffected()
-
-	if rowsAffected == 0 {
-		return errors.New("row not found")
-	}
-
-	return nil
-}
-
-// AddColumnRequest represents the request body for adding a column
-type AddColumnRequest struct {
-	TableName string      `json:"table_name" binding:"required"`
-	Name      string      `json:"name" binding:"required"`
-	Type      string      `json:"type" binding:"required"`
-	Default   interface{} `json:"default,omitempty"`
-}
-
-// AddColumnResponse represents the response for adding a column
-type AddColumnResponse struct {
-	ColumnID int64 `json:"column_id"`
-}
-
-// AddColumn adds a column to a table
-func (s *ProjectService) AddColumn(userID uuid.UUID, projectID uuid.UUID, req AddColumnRequest) (*AddColumnResponse, error) {
-	// Validate table name
-	if err := validateIdentifier(req.TableName); err != nil {
-		return nil, fmt.Errorf("invalid table name: %w", err)
-	}
-
-	// Validate column name
-	if err := validateIdentifier(req.Name); err != nil {
-		return nil, fmt.Errorf("invalid column name: %w", err)
-	}
-
-	// Validate type is not empty
-	if req.Type == "" {
-		return nil, errors.New("column type cannot be empty")
-	}
-
-	ctx := context.Background()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Close()
-
-	// Build ALTER TABLE query
-	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
-	columnNameQuoted := pq.QuoteIdentifier(req.Name)
-
-	// Build the ALTER TABLE statement
-	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableNameQuoted, columnNameQuoted, req.Type)
-
-	// Add DEFAULT clause if provided
-	// Since default is omitempty, if it's nil, the field might not be in the JSON
-	// We'll only add DEFAULT if it's explicitly provided (handled by binding:"omitempty")
-	// For now, we'll use the value as-is in the SQL, but this is not ideal for security
-	// A better approach would be to validate and quote properly based on type
-	if req.Default != nil {
-		// Format default value based on type
-		switch v := req.Default.(type) {
-		case string:
-			// Escape single quotes in strings
-			escaped := strings.ReplaceAll(v, "'", "''")
-			query += fmt.Sprintf(" DEFAULT '%s'", escaped)
-		case bool:
-			if v {
-				query += " DEFAULT TRUE"
-			} else {
-				query += " DEFAULT FALSE"
-			}
-		default:
-			// For numbers and other types, use as-is (they should be safe)
-			query += fmt.Sprintf(" DEFAULT %v", v)
-		}
-	}
-
-	// Execute query
-	_, err = pool.Exec(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add column: %w", err)
-	}
-
-	// Get the column's ordinal position as column_id
-	// PostgreSQL stores column information in information_schema.columns
-	var columnID int64
-	err = pool.QueryRow(ctx, `
-		SELECT ordinal_position 
-		FROM information_schema.columns 
-		WHERE table_name = $1 AND column_name = $2
-	`, req.TableName, req.Name).Scan(&columnID)
-	if err != nil {
-		// If we can't get the column_id, return 0
-		columnID = 0
-	}
-
-	return &AddColumnResponse{ColumnID: columnID}, nil
-}
-
-// DeleteColumnRequest represents the request body for deleting a column
-type DeleteColumnRequest struct {
-	TableName string `json:"table_name" binding:"required"`
-}
-
-// DeleteColumn deletes a column from a table
-func (s *ProjectService) DeleteColumn(userID uuid.UUID, projectID uuid.UUID, req DeleteColumnRequest, columnName string) error {
-	// Validate table name
-	if err := validateIdentifier(req.TableName); err != nil {
-		return fmt.Errorf("invalid table name: %w", err)
-	}
-
-	// Validate column name
-	if err := validateIdentifier(columnName); err != nil {
-		return fmt.Errorf("invalid column name: %w", err)
-	}
-
-	ctx := context.Background()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-
-	// Build ALTER TABLE DROP COLUMN query
-	tableNameQuoted := pq.QuoteIdentifier(req.TableName)
-	columnNameQuoted := pq.QuoteIdentifier(columnName)
-	query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", tableNameQuoted, columnNameQuoted)
-
-	// Execute query
-	_, err = pool.Exec(ctx, query)
-	if err != nil {
-		return fmt.Errorf("failed to delete column: %w", err)
-	}
-
-	return nil
+	return s.postgresTableService.DeleteColumn(context.Background(), userID, projectID, req, columnName)
 }
