@@ -44,8 +44,8 @@ func NewProjectService(
 type CreateProjectRequest struct {
 	Name         string  `json:"name" binding:"required"`
 	Description  *string `json:"description,omitempty"`
-	DBType       string  `json:"db_type" binding:"required"`       // 'postgresql' or 'mongodb'
-	ResourceTier string  `json:"resource_tier" binding:"required"` // 'free', 'basic', or 'premium'
+	DBType       string  `json:"db_type" binding:"required"`   // 'sql' (→ postgresql) or 'nosql' (→ mongodb)
+	ResourceTier string  `json:"resource_tier,omitempty"`      // 'free', 'basic', or 'premium'; defaults to 'free'
 }
 
 func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, *models.DatabaseInstance, error) {
@@ -55,9 +55,25 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		return nil, nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	// Validate DB type
-	if req.DBType != "postgresql" && req.DBType != "mongodb" {
-		return nil, nil, fmt.Errorf("invalid db_type: must be 'postgresql' or 'mongodb'")
+	// Default resource_tier to "free" if not provided
+	if req.ResourceTier == "" {
+		req.ResourceTier = "free"
+	}
+
+	// Default description to empty string if not provided
+	if req.Description == nil {
+		emptyDesc := ""
+		req.Description = &emptyDesc
+	}
+
+	// Validate DB type: API uses "sql" and "nosql" (case-insensitive); we store and call postgresql/mongodb internally
+	dbTypeNorm := strings.ToLower(strings.TrimSpace(req.DBType))
+	if dbTypeNorm != "sql" && dbTypeNorm != "nosql" {
+		return nil, nil, fmt.Errorf("invalid db_type: must be 'sql' or 'nosql'")
+	}
+	internalDBType := "postgresql"
+	if dbTypeNorm == "nosql" {
+		internalDBType = "mongodb"
 	}
 
 	// Validate resource tier
@@ -71,7 +87,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		UserID:       userUUID,
 		Name:         req.Name,
 		Description:  req.Description,
-		DBType:       req.DBType,
+		DBType:       internalDBType,
 		ResourceTier: req.ResourceTier,
 	}
 	project.Prepare()
@@ -80,7 +96,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	cpuCores := int(cpu)
 	ramMB := int(memoryMB)
 	var port int
-	if req.DBType == "postgresql" {
+	if internalDBType == "postgresql" {
 		port = 5432
 	} else {
 		port = 27017
@@ -109,7 +125,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 
 	// Start provisioning asynchronously; status will be updated to "running"
 	// or "failed" once provisioning completes.
-	go s.provisionInstanceAsync(project.ID, dbInstance.ID, req.DBType, req.ResourceTier)
+	go s.provisionInstanceAsync(project.ID, dbInstance.ID, internalDBType, req.ResourceTier)
 
 	// Reload project and instance to ensure timestamps and other DB-managed
 	// fields are populated in the API response.

@@ -1,33 +1,46 @@
 package services
 
 import (
+	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/repositories"
 	"backend/internal/utils"
+	"context"
 	"errors"
 	"time"
+
+	"github.com/google/uuid"
+)
+
+// Sentinel errors for auth so handlers can return proper HTTP status and messages.
+var (
+	ErrUserAlreadyExists = errors.New("user already exists")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrInvalidPassword   = errors.New("invalid password")
 )
 
 const (
 	AccessTokenDuration  = 15 * time.Minute
-	RefreshTokenDuration = 30 * 24 * time.Hour // 7 days
+	RefreshTokenDuration = 30 * 24 * time.Hour // 30 days
 )
 
 type AuthService struct {
-	userRepo *repositories.UserRepository
+	userRepo    *repositories.UserRepository
+	refreshStore *config.RefreshTokenStore
 }
 
-func NewAuthService(userRepo *repositories.UserRepository) *AuthService {
+func NewAuthService(userRepo *repositories.UserRepository, refreshStore *config.RefreshTokenStore) *AuthService {
 	return &AuthService{
-		userRepo: userRepo,
+		userRepo:     userRepo,
+		refreshStore: refreshStore,
 	}
 }
 
-func (s *AuthService) Register(user *models.User) (string, string, error) {
+func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken, refreshToken string, err error) {
 	// 1. Check if user already exists
 	existing, _ := s.userRepo.FindUserByEmail(user.Email)
 	if existing != nil {
-		return "", "", errors.New("user already exists")
+		return uuid.Nil, "", "", ErrUserAlreadyExists
 	}
 
 	// 2. Hash password before saving
@@ -35,86 +48,129 @@ func (s *AuthService) Register(user *models.User) (string, string, error) {
 	if passwordToHash == "" {
 		passwordToHash = user.PasswordHash // Fallback if PasswordHash was set directly
 	}
-	hashedPassword, err := utils.Hash(passwordToHash)
-	if err != nil {
-		return "", "", err
+	hashedPassword, hashErr := utils.Hash(passwordToHash)
+	if hashErr != nil {
+		return uuid.Nil, "", "", hashErr
 	}
 	user.PasswordHash = string(hashedPassword)
 	user.Password = "" // Clear plain password
 
 	// 3. Save user in DB
-	if err := s.userRepo.Create(user); err != nil {
-		return "", "", err
+	if createErr := s.userRepo.Create(user); createErr != nil {
+		return uuid.Nil, "", "", createErr
 	}
 
 	// 4. Generate tokens (no database session - tokens are self-contained)
-	accessToken, err := utils.GenerateJWT(user.ID, AccessTokenDuration, utils.AccessTokenSecret)
-	if err != nil {
-		return "", "", err
+	accessToken, jwtErr := utils.GenerateJWT(user.ID, AccessTokenDuration, utils.AccessTokenSecret)
+	if jwtErr != nil {
+		return uuid.Nil, "", "", jwtErr
 	}
 
-	refreshToken, err := utils.GenerateJWT(user.ID, RefreshTokenDuration, utils.RefreshTokenSecret)
-	if err != nil {
-		return "", "", err
+	refreshToken, jwtErr = utils.GenerateJWT(user.ID, RefreshTokenDuration, utils.RefreshTokenSecret)
+	if jwtErr != nil {
+		return uuid.Nil, "", "", jwtErr
 	}
 
-	return accessToken, refreshToken, nil
+	if s.refreshStore != nil {
+		if setErr := s.refreshStore.Set(context.Background(), refreshToken, user.ID); setErr != nil {
+			return uuid.Nil, "", "", setErr
+		}
+	}
+
+	return user.ID, accessToken, refreshToken, nil
 }
 
-func (s *AuthService) Login(email, password string) (string, string, error) {
-	user, err := s.userRepo.FindUserByEmail(email)
-	if err != nil {
-		return "", "", errors.New("user not found")
+func (s *AuthService) Login(email, password string) (userID uuid.UUID, accessToken, refreshToken string, err error) {
+	user, findErr := s.userRepo.FindUserByEmail(email)
+	if findErr != nil {
+		return uuid.Nil, "", "", ErrUserNotFound
 	}
 
-	// Check if user is nil (user doesn't exist)
 	if user == nil {
-		return "", "", errors.New("user not found")
+		return uuid.Nil, "", "", ErrUserNotFound
 	}
 
-	if err := utils.VerifyPassword(user.PasswordHash, password); err != nil {
-		return "", "", errors.New("invalid password")
+	if verifyErr := utils.VerifyPassword(user.PasswordHash, password); verifyErr != nil {
+		return uuid.Nil, "", "", ErrInvalidPassword
 	}
 
-	// Generate access + refresh tokens (no database session - tokens are self-contained)
-	accessToken, err := utils.GenerateJWT(user.ID, AccessTokenDuration, utils.AccessTokenSecret)
-	if err != nil {
-		return "", "", err
+	accessToken, jwtErr := utils.GenerateJWT(user.ID, AccessTokenDuration, utils.AccessTokenSecret)
+	if jwtErr != nil {
+		return uuid.Nil, "", "", jwtErr
 	}
 
-	refreshToken, err := utils.GenerateJWT(user.ID, RefreshTokenDuration, utils.RefreshTokenSecret)
-	if err != nil {
-		return "", "", err
+	refreshToken, jwtErr = utils.GenerateJWT(user.ID, RefreshTokenDuration, utils.RefreshTokenSecret)
+	if jwtErr != nil {
+		return uuid.Nil, "", "", jwtErr
 	}
 
-	return accessToken, refreshToken, nil
+	if s.refreshStore != nil {
+		if setErr := s.refreshStore.Set(context.Background(), refreshToken, user.ID); setErr != nil {
+			return uuid.Nil, "", "", setErr
+		}
+	}
+
+	return user.ID, accessToken, refreshToken, nil
 }
 
-// Refresh validates the refresh token from cookie and issues a new access token.
-// Since tokens are stored in HttpOnly cookies (not database), validation is done via JWT signature only.
-func (s *AuthService) Refresh(refreshToken string) (string, string, error) {
-	// 1. Validate refresh token signature and expiration
+// Logout revokes the refresh token by removing it from the store.
+func (s *AuthService) Logout(refreshToken string) error {
+	if s.refreshStore == nil {
+		return nil
+	}
+	return s.refreshStore.Delete(context.Background(), refreshToken)
+}
+
+// Refresh validates the refresh token (JWT + Redis), then rotates it: issues new tokens and stores new refresh token in Redis.
+func (s *AuthService) Refresh(refreshToken string) (userID uuid.UUID, accessToken, newRefreshToken string, err error) {
+	ctx := context.Background()
+
+	// 1. Check token exists in Redis (persisted and not revoked/expired)
+	if s.refreshStore != nil {
+		storedID, getErr := s.refreshStore.Get(ctx, refreshToken)
+		if getErr != nil {
+			if errors.Is(getErr, config.ErrRefreshTokenNotFound) {
+				return uuid.Nil, "", "", errors.New("invalid or expired refresh token")
+			}
+			return uuid.Nil, "", "", getErr
+		}
+		_ = storedID // used implicitly by JWT validation matching same user
+	}
+
+	// 2. Validate JWT signature and expiration
 	claims, err := utils.VerifyJWT(refreshToken, utils.RefreshTokenSecret)
 	if err != nil {
-		return "", "", errors.New("invalid or expired refresh token")
+		return uuid.Nil, "", "", errors.New("invalid or expired refresh token")
 	}
 
-	// 2. Verify user still exists
+	// 3. Verify user still exists
 	user, err := s.userRepo.FindUserByID(claims.UserID)
 	if err != nil || user == nil {
-		return "", "", errors.New("user not found")
+		return uuid.Nil, "", "", errors.New("user not found")
 	}
 
-	// 3. Generate new token pair (token rotation for security)
+	// 4. Revoke old refresh token (rotation)
+	if s.refreshStore != nil {
+		_ = s.refreshStore.Delete(ctx, refreshToken)
+	}
+
+	// 5. Generate new token pair
 	newAccessToken, err := utils.GenerateJWT(claims.UserID, AccessTokenDuration, utils.AccessTokenSecret)
 	if err != nil {
-		return "", "", errors.New("could not generate new access token")
+		return uuid.Nil, "", "", errors.New("could not generate new access token")
 	}
 
-	newRefreshToken, err := utils.GenerateJWT(claims.UserID, RefreshTokenDuration, utils.RefreshTokenSecret)
+	newRefreshToken, err = utils.GenerateJWT(claims.UserID, RefreshTokenDuration, utils.RefreshTokenSecret)
 	if err != nil {
-		return "", "", errors.New("could not generate new refresh token")
+		return uuid.Nil, "", "", errors.New("could not generate new refresh token")
 	}
 
-	return newAccessToken, newRefreshToken, nil
+	// 6. Persist new refresh token in Redis
+	if s.refreshStore != nil {
+		if setErr := s.refreshStore.Set(ctx, newRefreshToken, claims.UserID); setErr != nil {
+			return uuid.Nil, "", "", setErr
+		}
+	}
+
+	return claims.UserID, newAccessToken, newRefreshToken, nil
 }

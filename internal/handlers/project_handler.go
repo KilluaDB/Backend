@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"backend/internal/models"
 	"backend/internal/responses"
 	"backend/internal/services"
 	"fmt"
@@ -10,6 +11,30 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// dbTypeForAPI returns the API db_type: "sql" for postgresql, "nosql" for mongodb.
+func dbTypeForAPI(internal string) string {
+	switch internal {
+	case "postgresql":
+		return "sql"
+	case "mongodb":
+		return "nosql"
+	default:
+		return internal
+	}
+}
+
+func projectToAPI(p *models.Project) gin.H {
+	return gin.H{
+		"id":            p.ID,
+		"user_id":       p.UserID,
+		"name":          p.Name,
+		"description":   p.Description,
+		"db_type":       dbTypeForAPI(p.DBType),
+		"resource_tier": p.ResourceTier,
+		"created_at":    p.CreatedAt,
+	}
+}
 
 type ProjectHandler struct {
 	projectService *services.ProjectService
@@ -54,16 +79,8 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		return
 	}
 
-	projectData := gin.H{
-		"id":            project.ID,
-		"user_id":       project.UserID,
-		"name":          project.Name,
-		"description":   project.Description,
-		"db_type":       project.DBType,
-		"resource_tier": project.ResourceTier,
-		"created_at":    project.CreatedAt,
-		"status":        instance.Status,
-	}
+	projectData := projectToAPI(project)
+	projectData["status"] = instance.Status
 
 	responseData := gin.H{
 		"project": projectData,
@@ -101,7 +118,7 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 		return
 	}
 
-	responses.Success(c, http.StatusOK, project, "Project retrieved successfully")
+	responses.Success(c, http.StatusOK, projectToAPI(project), "Project retrieved successfully")
 }
 
 // ListProjects handles GET /api/v1/projects
@@ -128,7 +145,11 @@ func (h *ProjectHandler) ListProjects(c *gin.Context) {
 		return
 	}
 
-	responses.Success(c, http.StatusOK, projects, "Projects retrieved successfully")
+	list := make([]gin.H, 0, len(projects))
+	for i := range projects {
+		list = append(list, projectToAPI(&projects[i]))
+	}
+	responses.Success(c, http.StatusOK, list, "Projects retrieved successfully")
 }
 
 // DeleteProject handles DELETE /api/v1/projects/:id

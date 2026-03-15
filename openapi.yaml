@@ -77,6 +77,18 @@ components:
         password:
           type: string
 
+    AuthTokenResponse:
+      type: object
+      required: [user_id, access_token]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: ID of the authenticated user
+        access_token:
+          type: string
+          description: JWT access token
+
     Project:
       type: object
       required: [id, user_id, name, db_type, resource_tier, created_at]
@@ -94,7 +106,8 @@ components:
           nullable: true
         db_type:
           type: string
-          enum: [postgresql, mongodb]
+          enum: [sql, nosql]
+          description: 'sql' uses PostgreSQL; 'nosql' uses MongoDB
         resource_tier:
           type: string
           enum: [free, basic, premium]
@@ -104,7 +117,7 @@ components:
 
     CreateProjectRequest:
       type: object
-      required: [name, db_type, resource_tier]
+      required: [name, db_type]
       properties:
         name:
           type: string
@@ -113,14 +126,16 @@ components:
         description:
           type: string
           nullable: true
+          description: Optional; defaults to empty string if omitted
         db_type:
           type: string
-          enum: [postgresql, mongodb]
-          description: Allowed values are 'postgresql' or 'mongodb'
+          enum: [sql, nosql]
+          description: 'sql' uses PostgreSQL; 'nosql' uses MongoDB
         resource_tier:
           type: string
           enum: [free, basic, premium]
-          description: Allowed values are 'free', 'basic', or 'premium'
+          default: free
+          description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
 
     ExecuteSQLQueryRequest:
       type: object
@@ -488,9 +503,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthTokenResponse'
         '400':
-          description: Invalid input
+          description: Invalid input (e.g. invalid email or password too short)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: An account with this email already exists
           content:
             application/json:
               schema:
@@ -515,15 +541,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthTokenResponse'
         '400':
-          description: Invalid input
+          description: Invalid input (e.g. invalid email or password format)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
-          description: Invalid credentials
+          description: Invalid email or password
           content:
             application/json:
               schema:
@@ -845,7 +876,7 @@ paths:
             example:
               name: "Analytics Service DB"
               description: "Primary PostgreSQL database for the analytics microservice"
-              db_type: "postgresql"
+              db_type: "sql"
               resource_tier: "basic"
       responses:
         '201':

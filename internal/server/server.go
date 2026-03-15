@@ -70,11 +70,18 @@ func NewServer() *http.Server {
 		pool: pool,
 	}
 
+	// Redis for persistent refresh tokens (client lives for process lifetime)
+	redisClient, err := config.RedisClient()
+	if err != nil {
+		log.Fatalf("failed to connect to Redis: %v", err)
+	}
+	refreshStore := config.NewRefreshTokenStore(redisClient, 30*24*time.Hour) // 30 days TTL
+
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
 	sessionRepo := repositories.NewSessionRepository(pool)
 	userService := services.NewUserService(userRepo, sessionRepo)
-	authService := services.NewAuthService(userRepo)
+	authService := services.NewAuthService(userRepo, refreshStore)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 

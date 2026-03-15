@@ -11,4 +11,5 @@ data:
   DB_USERNAME: "dbaas"
   DB_ADMIN_USER: "postgres"
   DB_INSTANCES_NAMESPACE: "default"
+  REDIS_ADDR: "redis:6379"
   GOOGLE_REDIRECT_URL: "https://api.yourdomain.com/api/v1/auth/google/callback"

@@ -4,8 +4,7 @@ import (
 	"backend/internal/models"
 	"backend/internal/responses"
 	"backend/internal/services"
-	_ "log"
-
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,16 +40,20 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:    req.Email,
 		Password: req.Password,
 	}
-	accessToken, refreshToken, err := h.authService.Register(user)
+	userID, accessToken, refreshToken, err := h.authService.Register(user)
 	if err != nil {
+		if errors.Is(err, services.ErrUserAlreadyExists) {
+			responses.Fail(c, http.StatusConflict, err, "An account with this email already exists")
+			return
+		}
 		responses.Fail(c, http.StatusInternalServerError, err, "Could not register user")
 		return
 	}
 
 	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
 
-	// 4. Return only access token in response body
 	res := gin.H{
+		"user_id":      userID.String(),
 		"access_token": accessToken,
 	}
 
@@ -64,67 +67,66 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid Format")
+		responses.Fail(c, http.StatusBadRequest, err, "Invalid email or password format")
 		return
 	}
 
-	accessToken, refreshToken, err := h.authService.Login(req.Email, req.Password)
+	userID, accessToken, refreshToken, err := h.authService.Login(req.Email, req.Password)
 	if err != nil {
-		responses.Fail(c, http.StatusUnauthorized, err, "Failed to login")
+		if errors.Is(err, services.ErrUserNotFound) || errors.Is(err, services.ErrInvalidPassword) {
+			responses.Fail(c, http.StatusUnauthorized, err, "Invalid email or password")
+			return
+		}
+		responses.Fail(c, http.StatusInternalServerError, err, "Could not complete login")
 		return
 	}
 
 	c.SetCookie("refresh_token", refreshToken, 30*24*3600, "/", "", true, true)
 
 	res := gin.H{
+		"user_id":      userID.String(),
 		"access_token": accessToken,
 	}
 
-	responses.Success(c, http.StatusOK, res, "User Login Successfully!")
+	responses.Success(c, http.StatusOK, res, "User logged in successfully")
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// refreshToken, err := c.Cookie("refresh_token")
-	// if err != nil {
-	// 	responses.Fail(c, http.StatusBadRequest, nil, "Missing refresh token")
-	// 	return
-	// }
+	refreshToken, err := c.Cookie(RefreshTokenCookieName)
+	if err != nil {
+		// No cookie is acceptable (e.g. already logged out); clear cookie and succeed
+		c.SetCookie(RefreshTokenCookieName, "", -1, "/", "", true, true)
+		responses.Success(c, http.StatusOK, nil, "Logged out successfully")
+		return
+	}
 
-	// _, exists := c.Get("userId") // Extracted from access token
-	// if !exists {
-	// 	responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-	// 	return
-	// }
+	if revokeErr := h.authService.Logout(refreshToken); revokeErr != nil {
+		responses.Fail(c, http.StatusInternalServerError, revokeErr, "Could not revoke session")
+		return
+	}
 
-	// if err := h.userService.Logout(refreshToken); err != nil {
-	// 	responses.Fail(c, http.StatusUnauthorized, err, "Could not revoke token")
-	// 	return
-	// }
-
-	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
-
+	c.SetCookie(RefreshTokenCookieName, "", -1, "/", "", true, true)
 	responses.Success(c, http.StatusOK, nil, "Logged out successfully")
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	// 1. Get refresh token from HttpOnly cookie
 	refreshToken, err := c.Cookie(RefreshTokenCookieName)
 	if err != nil {
 		responses.Fail(c, http.StatusBadRequest, err, "Missing refresh token")
 		return
 	}
 
-	// 2. Validate and generate new tokens (with rotation)
-	accessToken, newRefreshToken, err := h.authService.Refresh(refreshToken)
+	userID, accessToken, newRefreshToken, err := h.authService.Refresh(refreshToken)
 	if err != nil {
-		c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+		c.SetCookie(RefreshTokenCookieName, "", -1, "/", "", true, true)
 		responses.Fail(c, http.StatusUnauthorized, err, "Invalid or expired refresh token")
 		return
 	}
 
-	c.SetCookie("refresh_token", newRefreshToken, 30*24*3600, "/", "", true, true)
+	c.SetCookie(RefreshTokenCookieName, newRefreshToken, RefreshTokenMaxAge, "/", "", true, true)
 
 	res := gin.H{
+		"user_id":      userID.String(),
 		"access_token": accessToken,
 	}
 
