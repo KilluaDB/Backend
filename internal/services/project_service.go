@@ -17,6 +17,16 @@ import (
 	"github.com/lib/pq"
 )
 
+// Sentinel errors for project operations so handlers can return proper HTTP status and messages.
+var (
+	ErrInvalidProjectID    = errors.New("invalid project ID")
+	ErrInvalidUserID       = errors.New("invalid user ID")
+	ErrInvalidDBType       = errors.New("invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
+	ErrInvalidResourceTier = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+	ErrProjectNotFound     = errors.New("project not found or access denied")
+	ErrProjectCreateDB     = errors.New("failed to create project or database instance")
+)
+
 type ProjectService struct {
 	projectRepo      repositories.ProjectRepository
 	provisioner      *OperatorProvisioner
@@ -44,41 +54,37 @@ func NewProjectService(
 type CreateProjectRequest struct {
 	Name         string  `json:"name" binding:"required"`
 	Description  *string `json:"description,omitempty"`
-	DBType       string  `json:"db_type" binding:"required"`   // 'sql' (→ postgresql) or 'nosql' (→ mongodb)
+	DBType       string  `json:"db_type" binding:"required"`   // 'postgresql'|'sql' (→ postgresql) or 'mongodb'|'nosql' (→ mongodb)
 	ResourceTier string  `json:"resource_tier,omitempty"`      // 'free', 'basic', or 'premium'; defaults to 'free'
 }
 
 func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, *models.DatabaseInstance, error) {
-	// Parse user ID
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid user ID: %w", err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
-	// Default resource_tier to "free" if not provided
 	if req.ResourceTier == "" {
 		req.ResourceTier = "free"
 	}
-
-	// Default description to empty string if not provided
 	if req.Description == nil {
 		emptyDesc := ""
 		req.Description = &emptyDesc
 	}
 
-	// Validate DB type: API uses "sql" and "nosql" (case-insensitive); we store and call postgresql/mongodb internally
 	dbTypeNorm := strings.ToLower(strings.TrimSpace(req.DBType))
-	if dbTypeNorm != "sql" && dbTypeNorm != "nosql" {
-		return nil, nil, fmt.Errorf("invalid db_type: must be 'sql' or 'nosql'")
-	}
-	internalDBType := "postgresql"
-	if dbTypeNorm == "nosql" {
+	var internalDBType string
+	switch dbTypeNorm {
+	case "postgresql", "sql":
+		internalDBType = "postgresql"
+	case "mongodb", "nosql":
 		internalDBType = "mongodb"
+	default:
+		return nil, nil, ErrInvalidDBType
 	}
 
-	// Validate resource tier
 	if req.ResourceTier != "free" && req.ResourceTier != "basic" && req.ResourceTier != "premium" {
-		return nil, nil, fmt.Errorf("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+		return nil, nil, ErrInvalidResourceTier
 	}
 
 	// Build project and instance; project and instance are persisted before
@@ -113,14 +119,12 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	}
 	dbInstance.Prepare()
 
-	// Persist project and instance with status "creating" before kicking off
-	// background provisioning.
 	if err := s.projectRepo.Create(context.Background(), project); err != nil {
-		return nil, nil, fmt.Errorf("failed to save project to database: %w", err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
 	}
 	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
 		_ = s.projectRepo.Delete(context.Background(), project.ID)
-		return nil, nil, fmt.Errorf("failed to save database instance: %w", err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
 	}
 
 	// Start provisioning asynchronously; status will be updated to "running"
@@ -194,12 +198,12 @@ func (s *ProjectService) GetProjectByID(projectID string) (*models.Project, erro
 func (s *ProjectService) GetProjectByIDAndUserID(projectID string, userID string) (*models.Project, error) {
 	projectUUID, err := utils.ParseUUID(projectID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid project ID: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
 	}
 
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
 	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
@@ -208,7 +212,7 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID string, userID string
 	}
 
 	if project == nil {
-		return nil, fmt.Errorf("project not found or access denied")
+		return nil, ErrProjectNotFound
 	}
 
 	// Populate status from the project's database instance
@@ -265,21 +269,20 @@ func (s *ProjectService) DeleteProject(projectID string) error {
 func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID string) error {
 	projectUUID, err := utils.ParseUUID(projectID)
 	if err != nil {
-		return fmt.Errorf("invalid project ID: %w", err)
+		return fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
 	}
 
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
-		return fmt.Errorf("invalid user ID: %w", err)
+		return fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
-	// Verify project belongs to user
 	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
 	if err != nil {
 		return fmt.Errorf("failed to get project: %w", err)
 	}
 	if project == nil {
-		return fmt.Errorf("project not found or access denied")
+		return ErrProjectNotFound
 	}
 
 	// Delete K8s DB resource by project ID (discover resource ref from cluster name convention)
@@ -292,12 +295,10 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 		fmt.Printf("Successfully deleted K8s DB resource %s for project %s\n", resourceRef, projectID)
 	}
 
-	// Delete project from database (CASCADE will handle database_instances and credentials)
 	err = s.projectRepo.DeleteByIDAndUserID(context.Background(), projectUUID, userUUID)
 	if err != nil {
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
-
 	return nil
 }
 

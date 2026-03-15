@@ -4,23 +4,23 @@ import (
 	"backend/internal/models"
 	"backend/internal/responses"
 	"backend/internal/services"
+	"errors"
 	"fmt"
-
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// dbTypeForAPI returns the API db_type: "sql" for postgresql, "nosql" for mongodb.
-func dbTypeForAPI(internal string) string {
-	switch internal {
-	case "postgresql":
+// dbTypeForAPI normalizes db_type for API responses.
+func dbTypeForAPI(dbType string) string {
+	switch dbType {
+	case "postgresql", "sql":
 		return "sql"
-	case "mongodb":
+	case "mongodb", "nosql":
 		return "nosql"
 	default:
-		return internal
+		return dbType
 	}
 }
 
@@ -74,9 +74,23 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 
 	project, instance, err := h.projectService.CreateProject(userIDStr, req)
 	if err != nil {
-		fmt.Printf("ERROR in CreateProject handler: %v\n", err)
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project")
-		return
+		switch {
+		case errors.Is(err, services.ErrInvalidUserID):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid user context")
+			return
+		case errors.Is(err, services.ErrInvalidDBType):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
+			return
+		case errors.Is(err, services.ErrInvalidResourceTier):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid resource_tier: must be 'free', 'basic', or 'premium'")
+			return
+		case errors.Is(err, services.ErrProjectCreateDB):
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project or database instance")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project")
+			return
+		}
 	}
 
 	projectData := projectToAPI(project)
@@ -111,10 +125,13 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	// Get project and verify it belongs to the authenticated user
 	project, err := h.projectService.GetProjectByIDAndUserID(projectID, userIDStr)
 	if err != nil {
-		responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+		if errors.Is(err, services.ErrProjectNotFound) || errors.Is(err, services.ErrInvalidProjectID) || errors.Is(err, services.ErrInvalidUserID) {
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve project")
 		return
 	}
 
@@ -174,11 +191,16 @@ func (h *ProjectHandler) DeleteProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	// Delete project and verify it belongs to the authenticated user
 	err := h.projectService.DeleteProjectByIDAndUserID(projectID, userIDStr)
 	if err != nil {
-		responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
-		return
+		switch {
+		case errors.Is(err, services.ErrProjectNotFound), errors.Is(err, services.ErrInvalidProjectID), errors.Is(err, services.ErrInvalidUserID):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete project")
+			return
+		}
 	}
 
 	responses.Success(c, http.StatusOK, nil, "Project deleted successfully")
