@@ -5,6 +5,7 @@ import (
 	"backend/internal/postgres/repository"
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -25,6 +26,11 @@ type QueryResult struct {
 type ExecuteQueryRequest struct {
 	Query string `json:"query" binding:"required"`
 }
+
+// Sentinel errors for query operations so handlers can return proper HTTP status.
+var (
+	ErrInvalidQuery = errors.New("invalid or disallowed query")
+)
 
 type QueryService struct {
 	instanceConn InstanceConnectionService
@@ -109,34 +115,22 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 		if instanceID != uuid.Nil {
 			_ = s.execRepo.Create(exec)
 		}
-		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
+		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 	}
 
 	pool, instanceID2, err := s.instanceConn.GetPoolWithMeta(ctx, userID, projectId)
 	if err != nil {
-		execTime := time.Since(startTime).Milliseconds()
-		success := false
-		execTimeInt := int(execTime)
-		exec := &models.QueryHistory{
-			DBInstanceID:    instanceID2,
-			UserID:          userID,
-			QueryText:       req.Query,
-			ExecutedAt:      time.Now(),
-			Success:         &success,
-			ExecutionTimeMs: &execTimeInt,
-		}
-		if instanceID2 != uuid.Nil {
-			_ = s.execRepo.Create(exec)
-		}
-		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, nil
+		return nil, nil, err
 	}
 	defer pool.Close()
 
 	result, err := s.executeSQLQuery(ctx, pool, req.Query)
 	execTime := time.Since(startTime).Milliseconds()
-	result.ExecutionTime = execTime
+	if result != nil {
+		result.ExecutionTime = execTime
+	}
 
-	success := err == nil && result.Error == ""
+	success := err == nil && (result == nil || result.Error == "")
 	execTimeInt := int(execTime)
 	exec := &models.QueryHistory{
 		DBInstanceID:    instanceID2,
@@ -146,14 +140,19 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 		Success:         &success,
 		ExecutionTimeMs: &execTimeInt,
 	}
-
-	if err != nil || result.Error != "" {
-		if err != nil {
-			result.Error = err.Error()
-		}
-	}
 	if instanceID2 != uuid.Nil {
 		_ = s.execRepo.Create(exec)
+	}
+
+	if err != nil {
+		if result == nil {
+			result = &QueryResult{ExecutionTime: execTime}
+		}
+		result.Error = err.Error()
+		return result, exec, err
+	}
+	if result != nil && result.Error != "" {
+		return result, exec, errors.New(result.Error)
 	}
 	return result, exec, nil
 }

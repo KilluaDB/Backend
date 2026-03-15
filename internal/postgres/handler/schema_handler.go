@@ -3,7 +3,8 @@ package handler
 import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
-	"fmt"
+	"backend/internal/services"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -56,12 +57,19 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 		return
 	}
 
-	// Generate visualization
 	mermaidDiagram, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
 	if err != nil {
-		fmt.Printf("ERROR in VisualizeSchema handler: %v\n", err)
-		responses.Fail(c, http.StatusInternalServerError, err, fmt.Sprintf("Failed to visualize schema: %v", err))
-		return
+		switch {
+		case errors.Is(err, service.ErrInvalidSchema):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid schema name")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
+			return
+		}
 	}
 
 	responses.Success(c, http.StatusOK, gin.H{

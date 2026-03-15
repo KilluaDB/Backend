@@ -3,6 +3,8 @@ package handler
 import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
+	"backend/internal/services"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -68,8 +70,25 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 
 	result, exec, err := h.queryService.ExecuteSQLQuery(userUUID, &req, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to execute query")
-		return
+		switch {
+		case errors.Is(err, service.ErrInvalidQuery):
+			if result != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Invalid or disallowed query", "data": result})
+			} else {
+				responses.Fail(c, http.StatusBadRequest, err, "Invalid or disallowed query")
+			}
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			if result != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Query execution failed", "data": result})
+			} else {
+				responses.Fail(c, http.StatusInternalServerError, err, "Query execution failed")
+			}
+			return
+		}
 	}
 
 	execMs := int64(result.ExecutionTime)
@@ -120,7 +139,7 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 
 	history, err := h.queryService.GetQueryHistory(userUUID, limit)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to get query history")
+		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve query history")
 		return
 	}
 

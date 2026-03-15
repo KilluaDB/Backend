@@ -5,11 +5,18 @@ import (
 	"backend/internal/postgres/repository"
 	"backend/internal/utils"
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// Sentinel errors for schema operations so handlers can return proper HTTP status.
+var (
+	ErrInvalidSchema = errors.New("invalid schema name")
 )
 
 const (
@@ -28,18 +35,30 @@ func NewSchemaService(instanceConn InstanceConnectionService) *SchemaService {
 	}
 }
 
+// isValidSchemaName checks PostgreSQL schema name (similar to identifier rules).
+func isValidSchemaName(name string) bool {
+	if name == "" || len(name) > 63 {
+		return false
+	}
+	matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_$]*$`, name)
+	return matched
+}
+
 // VisualizeSchema generates a Mermaid ER diagram for a project's database schema
 func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, schema string) (string, error) {
+	if schema == "" {
+		schema = "public"
+	}
+	if !isValidSchemaName(schema) {
+		return "", ErrInvalidSchema
+	}
+
 	ctx := context.Background()
 	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return "", err
 	}
 	defer pool.Close()
-
-	if schema == "" {
-		schema = "public"
-	}
 
 	schemaRepo := repository.NewSchemaRepository(pool)
 
