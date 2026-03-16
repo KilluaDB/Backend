@@ -77,6 +77,9 @@ func (s *TableService) CreateTable(req *model.CreateTableRequest, userId uuid.UU
 }
 
 func (s *TableService) DeleteTable(req *model.DeleteTableRequest, userId uuid.UUID, projectId uuid.UUID) (*model.TableOpResult, error) {
+	if req.Schema == "" {
+		req.Schema = "public"
+	}
 	if !isValidIdentifier(req.Schema) {
 		return nil, fmt.Errorf("%w: invalid schema name", ErrInvalidTableRequest)
 	}
@@ -152,10 +155,14 @@ func (s *TableService) parseCreateQuery(req *model.CreateTableRequest) (string, 
 	}
 
 	if req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0 {
+		fkSchema := req.ForeignKeys.Schema
+		if fkSchema == "" {
+			fkSchema = "public"
+		}
 		for i, fk := range req.ForeignKeys.References {
 			fkDef := fmt.Sprintf("  FOREIGN KEY (\"%s\") REFERENCES \"%s\".\"%s\"(\"%s\")",
 				fk.LocalColumn,
-				req.ForeignKeys.Schema,
+				fkSchema,
 				req.ForeignKeys.Table,
 				fk.ForeignColumn,
 			)
@@ -224,6 +231,9 @@ func (s *TableService) validateCreateTableRequest(req *model.CreateTableRequest)
 
 	// Validate foreign keys if present
 	if req.ForeignKeys != nil {
+		if req.ForeignKeys.Schema == "" {
+			req.ForeignKeys.Schema = "public"
+		}
 		if !isValidIdentifier(req.ForeignKeys.Schema) {
 			return errors.New("invalid foreign key schema name")
 		}

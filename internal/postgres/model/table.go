@@ -26,14 +26,14 @@ type ForeignKeyRef struct {
 
 // TableForeignKeyDef is foreign key definition for create/update table requests.
 type TableForeignKeyDef struct {
-	Schema     string          `json:"schema" binding:"required"`
+	Schema     string          `json:"schema"` // Optional; defaults to "public"
 	Table      string          `json:"table" binding:"required"`
 	References []ForeignKeyRef `json:"references" binding:"required,min=1"`
 }
 
 // CreateTableRequest is the request body for creating a table.
 type CreateTableRequest struct {
-	Schema      string               `json:"schema" binding:"required"`
+	Schema      string               `json:"schema"` // Optional; defaults to "public"
 	Table       string               `json:"table" binding:"required"`
 	Columns     []TableColumnDef     `json:"columns" binding:"required"`
 	ForeignKeys *TableForeignKeyDef  `json:"foreign_keys"`
@@ -49,6 +49,6 @@ type UpdateTableRequest struct {
 
 // DeleteTableRequest is the request body for deleting a table.
 type DeleteTableRequest struct {
-	Schema string `json:"schema" binding:"required"`
+	Schema string `json:"schema"` // Optional; defaults to "public"
 	Table  string `json:"table" binding:"required"`
 }

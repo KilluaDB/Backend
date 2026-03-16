@@ -121,7 +121,8 @@ func NewServer() *http.Server {
 
 	// Query dependencies (split per DB type + separate history tables)
 	pgQueryHistoryRepo := postgresrepo.NewQueryHistoryRepository(pool)
-	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo)
+	const maxPostgresQueryLimit = 50
+	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo, maxPostgresQueryLimit)
 	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
 	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)

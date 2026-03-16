@@ -217,12 +217,15 @@ CREATE INDEX IF NOT EXISTS idx_mongo_query_history_executed_at ON mongo_query_hi
 `
 
 const preventHardDeleteUsers = `
--- Prevent hard delete of users (enforce soft-delete only)
+-- Prevent hard delete of active users (allow hard delete of soft-deleted rows for re-registration)
 -- Create or replace function (safe to run multiple times)
 CREATE OR REPLACE FUNCTION prevent_hard_delete_users()
 RETURNS trigger AS $$
 BEGIN
-  RAISE EXCEPTION 'Hard delete of users is not allowed. Use soft-delete instead.';
+  IF OLD.deleted_at IS NULL THEN
+    RAISE EXCEPTION 'Hard delete of users is not allowed. Use soft-delete instead.';
+  END IF;
+  RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
 

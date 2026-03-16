@@ -1,11 +1,17 @@
 openapi: 3.0.3
 info:
   title: DBaaS Backend API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     REST API for a database-as-a-service backend.
-    This version documents the new PostgreSQL and MongoDB namespaced endpoints
-    under `/api/v1/projects/{id}/postgres/*` and `/api/v1/projects/{id}/mongodb/*`.
+    PostgreSQL and MongoDB are namespaced under `/api/v1/projects/{id}/postgres/*`
+    and `/api/v1/projects/{id}/mongodb/*`.
+
+    Latest changes (v1.2.0):
+    - Aligned with implementation: table delete is only via path
+      `DELETE /projects/{id}/postgres/tables/{table}` (public schema).
+    - Query execute and query history responses now documented as standard
+      APIResponse (status, message, data) with result/history in `data`.
 
 servers:
   - url: http://localhost:8080
@@ -107,7 +113,7 @@ components:
         db_type:
           type: string
           enum: [sql, nosql]
-          description: 'sql' uses PostgreSQL; 'nosql' uses MongoDB
+          description: "'sql' uses PostgreSQL; 'nosql' uses MongoDB"
         resource_tier:
           type: string
           enum: [free, basic, premium]
@@ -130,7 +136,7 @@ components:
         db_type:
           type: string
           enum: [sql, nosql]
-          description: 'sql' uses PostgreSQL; 'nosql' uses MongoDB
+          description: "'sql' uses PostgreSQL; 'nosql' uses MongoDB"
         resource_tier:
           type: string
           enum: [free, basic, premium]
@@ -341,12 +347,13 @@ components:
 
     ForeignKey:
       type: object
-      required: [schema, table, references]
+      required: [table, references]
       properties:
         schema:
           type: string
+          default: public
           pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-          description: Schema name of the referenced table (e.g. public).
+          description: Schema name of the referenced table. Defaults to "public" if omitted.
         table:
           type: string
           pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
@@ -359,7 +366,7 @@ components:
 
     CreateTableRequestBody:
       type: object
-      required: [schema, table, columns]
+      required: [table, columns]
       properties:
         schema:
           type: string
@@ -367,7 +374,7 @@ components:
           pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
           description: >
             Schema name to create the table in. Must be a valid PostgreSQL identifier.
-            Defaults to "public" if omitted.
+            Optional; defaults to "public" if omitted.
         table:
           type: string
           minLength: 1
@@ -388,12 +395,13 @@ components:
 
     DeleteTableRequestBody:
       type: object
-      required: [schema, table]
+      required: [table]
       properties:
         schema:
           type: string
+          default: public
           pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-          description: Schema name of the table to delete.
+          description: Schema name of the table to delete. Optional; defaults to "public" if omitted.
         table:
           type: string
           minLength: 1
@@ -1023,7 +1031,6 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateTableRequestBody'
             example:
-              schema: "public"
               table: "customers"
               columns:
                 - name: "id"
@@ -1066,39 +1073,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      tags: [Postgres]
-      summary: Delete a PostgreSQL table (by body)
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DeleteTableRequestBody'
-            example:
-              schema: "public"
-              table: "old_customers_backup"
-      responses:
-        '200':
-          description: Table deleted successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIResponse'
-        '400':
-          description: Invalid request body or project ID
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /api/v1/projects/{id}/postgres/tables/{table}:
     parameters:
@@ -1113,9 +1087,10 @@ paths:
         required: true
         schema:
           type: string
+        description: Table name (in default schema "public")
     delete:
       tags: [Postgres]
-      summary: Delete a PostgreSQL table by name
+      summary: Delete a PostgreSQL table by name (public schema)
       security:
         - BearerAuth: []
       responses:
@@ -1480,16 +1455,22 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    $ref: '#/components/schemas/SQLQueryResult'
-                  execution_id:
-                    type: string
-                  execution_time_ms:
-                    type: integer
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          result:
+                            $ref: '#/components/schemas/SQLQueryResult'
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
         '400':
-          description: Invalid input (missing query or invalid project ID)
+          description: Invalid input (missing query, invalid project ID, or disallowed SQL such as SELECT without LIMIT or LIMIT above the allowed maximum)
           content:
             application/json:
               schema:
@@ -1536,9 +1517,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/QueryHistoryItem'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QueryHistoryItem'
         '401':
           description: Unauthorized
           content:
@@ -1916,14 +1902,21 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                  execution_id:
-                    type: string
-                  execution_time_ms:
-                    type: integer
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          result:
+                            type: object
+                            description: Operation result (e.g. documents for find, modifiedCount for updateMany/deleteMany)
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
         '400':
           description: Invalid request body or project ID
           content:
@@ -1972,9 +1965,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/QueryHistoryItem'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QueryHistoryItem'
         '401':
           description: Unauthorized
           content:

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Sentinel errors for auth so handlers can return proper HTTP status and messages.
@@ -25,7 +26,7 @@ const (
 )
 
 type AuthService struct {
-	userRepo    *repositories.UserRepository
+	userRepo     *repositories.UserRepository
 	refreshStore *config.RefreshTokenStore
 }
 
@@ -37,13 +38,20 @@ func NewAuthService(userRepo *repositories.UserRepository, refreshStore *config.
 }
 
 func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken, refreshToken string, err error) {
-	// 1. Check if user already exists
+	// 1. Check if active user already exists
 	existing, _ := s.userRepo.FindUserByEmail(user.Email)
 	if existing != nil {
 		return uuid.Nil, "", "", ErrUserAlreadyExists
 	}
 
-	// 2. Hash password before saving
+	// 2. If a soft-deleted user exists with this email, hard-delete so we can create a new user
+	if deleted, _ := s.userRepo.FindUserByEmailIncludingDeleted(user.Email); deleted != nil && deleted.DeletedAt != nil {
+		if delErr := s.userRepo.HardDeleteSoftDeletedByEmail(user.Email); delErr != nil {
+			return uuid.Nil, "", "", delErr
+		}
+	}
+
+	// 3. Hash password before saving
 	passwordToHash := user.Password
 	if passwordToHash == "" {
 		passwordToHash = user.PasswordHash // Fallback if PasswordHash was set directly
@@ -55,12 +63,16 @@ func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken
 	user.PasswordHash = string(hashedPassword)
 	user.Password = "" // Clear plain password
 
-	// 3. Save user in DB
+	// 4. Save user in DB
 	if createErr := s.userRepo.Create(user); createErr != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(createErr, &pgErr) && pgErr.Code == "23505" {
+			return uuid.Nil, "", "", ErrUserAlreadyExists
+		}
 		return uuid.Nil, "", "", createErr
 	}
 
-	// 4. Generate tokens (no database session - tokens are self-contained)
+	// 5. Generate tokens (no database session - tokens are self-contained)
 	accessToken, jwtErr := utils.GenerateJWT(user.ID, AccessTokenDuration, utils.AccessTokenSecret)
 	if jwtErr != nil {
 		return uuid.Nil, "", "", jwtErr

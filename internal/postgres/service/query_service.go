@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,12 +36,17 @@ var (
 type QueryService struct {
 	instanceConn InstanceConnectionService
 	execRepo     *repository.QueryHistoryRepository
+	maxLimit     int
 }
 
-func NewQueryService(instanceConn InstanceConnectionService, execRepo *repository.QueryHistoryRepository) *QueryService {
+func NewQueryService(instanceConn InstanceConnectionService, execRepo *repository.QueryHistoryRepository, maxLimit int) *QueryService {
+	if maxLimit <= 0 {
+		maxLimit = 50
+	}
 	return &QueryService{
 		instanceConn: instanceConn,
 		execRepo:     execRepo,
+		maxLimit:     maxLimit,
 	}
 }
 
@@ -87,6 +93,25 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 		}
 		if nonEmptyParts > 1 {
 			return errors.New("multiple statements are not allowed for security reasons")
+		}
+	}
+
+	// Enforce LIMIT for SELECT queries to avoid unbounded result sets.
+	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
+	if isSelect {
+		// Simple detection of LIMIT <number> ignoring comments (already stripped above).
+		limitRegex := regexp.MustCompile(`\bLIMIT\s+(\d+)\b`)
+		matches := limitRegex.FindStringSubmatch(normalized)
+		if len(matches) < 2 {
+			return fmt.Errorf("SELECT queries must include a LIMIT clause with value <= %d", s.maxLimit)
+		}
+		limitValueStr := matches[1]
+		limitValue, err := strconv.Atoi(limitValueStr)
+		if err != nil {
+			return fmt.Errorf("unable to parse LIMIT value: %v", err)
+		}
+		if limitValue > s.maxLimit {
+			return fmt.Errorf("LIMIT value %d exceeds the maximum allowed (%d)", limitValue, s.maxLimit)
 		}
 	}
 

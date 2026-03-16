@@ -108,6 +108,46 @@ func (r *UserRepository) FindUserByEmail(email string) (*models.User, error) {
 	return &user, nil
 }
 
+// FindUserByEmailIncludingDeleted returns a user by email whether active or soft-deleted.
+// If multiple rows exist for the same email (e.g. multiple soft-deleted), returns one (most recently deleted).
+func (r *UserRepository) FindUserByEmailIncludingDeleted(email string) (*models.User, error) {
+	ctx := context.Background()
+
+	query := `SELECT id, email, password_hash, role, status, created_at, last_login_at, deleted_at
+		FROM users WHERE email = $1
+		ORDER BY deleted_at DESC NULLS LAST
+		LIMIT 1`
+
+	var user models.User
+	err := r.pool.QueryRow(ctx, query, email).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.Role,
+		&user.Status,
+		&user.CreatedAt,
+		&user.LastLoginAt,
+		&user.DeletedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+// HardDeleteSoftDeletedByEmail removes soft-deleted user(s) with the given email so the email can be reused on register.
+func (r *UserRepository) HardDeleteSoftDeletedByEmail(email string) error {
+	ctx := context.Background()
+	query := `DELETE FROM users WHERE email = $1 AND deleted_at IS NOT NULL`
+	_, err := r.pool.Exec(ctx, query, email)
+	return err
+}
+
 func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
 	// This method is not used but kept for compatibility
 	// If you need it, you can implement it similar to FindUserByEmail

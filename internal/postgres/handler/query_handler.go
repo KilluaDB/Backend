@@ -72,10 +72,14 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidQuery):
+			message := "Invalid or disallowed query"
+			if result != nil && result.Error != "" {
+				message = result.Error
+			}
 			if result != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Invalid or disallowed query", "data": result})
+				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": message, "data": result})
 			} else {
-				responses.Fail(c, http.StatusBadRequest, err, "Invalid or disallowed query")
+				responses.Fail(c, http.StatusBadRequest, err, message)
 			}
 			return
 		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
