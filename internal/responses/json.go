@@ -37,12 +37,10 @@ func Success(c *gin.Context, statusCode int, data interface{}, message string) {
 
 func Fail(c *gin.Context, statusCode int, err error, message string) {
 	if err != nil {
-		log.Printf("Error: %v", err) 
+		log.Printf("Error: %v", err)
 	}
-
 	c.JSON(statusCode, APIResponse{
 		Status:  "error",
 		Message: message,
-		// Error:   err.Error(),
 	})
 }

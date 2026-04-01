@@ -1,9 +1,9 @@
 package repositories
 
 import (
+	"backend/internal/models"
 	"context"
 	"errors"
-	"my_project/internal/models"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +27,33 @@ func (r *DatabaseCredentialRepository) Create(credential *models.DatabaseCredent
 	query := `
 		INSERT INTO database_credentials (id, db_instance_id, username, password_encrypted, created_at)
 		VALUES ($1, $2, $3, $4, $5)
+	`
+
+	now := time.Now()
+	_, err := r.pool.Exec(ctx, query,
+		credential.ID,
+		credential.DBInstanceID,
+		credential.Username,
+		credential.PasswordEncrypted,
+		now,
+	)
+
+	return err
+}
+
+// Upsert creates or updates a credential for the given instance and username.
+// It guarantees at most one row per (db_instance_id, username) when used
+// together with the unique index on these columns.
+func (r *DatabaseCredentialRepository) Upsert(credential *models.DatabaseCredential) error {
+	ctx := context.Background()
+
+	credential.Prepare()
+
+	query := `
+		INSERT INTO database_credentials (id, db_instance_id, username, password_encrypted, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (db_instance_id, username)
+		DO UPDATE SET password_encrypted = EXCLUDED.password_encrypted
 	`
 
 	now := time.Now()
@@ -138,4 +165,3 @@ func (r *DatabaseCredentialRepository) Delete(id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, query, id)
 	return err
 }
-

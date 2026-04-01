@@ -1,0 +1,62 @@
+# ServiceAccount for the backend (used by Deployment in default).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend
+  namespace: default
+---
+# Postgres instances namespace: backend can create/manage Cluster and secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-db-instances
+  namespace: postgres-instances
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-db-instances
+  namespace: postgres-instances
+subjects:
+  - kind: ServiceAccount
+    name: backend
+    namespace: default
+roleRef:
+  kind: Role
+  name: backend-db-instances
+  apiGroup: rbac.authorization.k8s.io
+---
+# MongoDB instances namespace: backend can create/manage MongoDBCommunity and secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-db-instances
+  namespace: mongodb-instances
+rules:
+  - apiGroups: ["mongodbcommunity.mongodb.com"]
+    resources: ["mongodbcommunity"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-db-instances
+  namespace: mongodb-instances
+subjects:
+  - kind: ServiceAccount
+    name: backend
+    namespace: default
+roleRef:
+  kind: Role
+  name: backend-db-instances
+  apiGroup: rbac.authorization.k8s.io

@@ -21,10 +21,12 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		createDatabaseInstancesTable,
 		createDatabaseCredentialsTable,
 		createAPIKeysTable,
-		createQueryHistoryTable,
-		fixQueryHistoryForeignKey,
+		createPostgresQueryHistoryTable,
+		createMongoQueryHistoryTable,
 		createUsageMetricsTable,
 		preventHardDeleteUsers,
+		addHostToDatabaseInstances,
+		addResourceTierToProjects,
 	}
 
 	for i, migration := range migrations {
@@ -43,7 +45,7 @@ const createEnumTypes = `
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'db_type_t') THEN
-    CREATE TYPE db_type_t AS ENUM ('postgres', 'mongodb');
+    CREATE TYPE db_type_t AS ENUM ('postgresql', 'mongodb');
   END IF;
 END$$;
 
@@ -143,14 +145,13 @@ CREATE TABLE IF NOT EXISTS database_instances (
   status instance_status_t NOT NULL DEFAULT 'creating',
   endpoint TEXT,
   port INT,
-  container_id TEXT,
+  host TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
-CREATE INDEX IF NOT EXISTS idx_database_instances_container_id ON database_instances(container_id);
 `
 
 const createDatabaseCredentialsTable = `
@@ -164,6 +165,7 @@ CREATE TABLE IF NOT EXISTS database_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_database_credentials_db_instance_id ON database_credentials(db_instance_id);
 CREATE INDEX IF NOT EXISTS idx_database_credentials_username ON database_credentials(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_database_credentials_instance_username ON database_credentials(db_instance_id, username);
 `
 
 const createAPIKeysTable = `
@@ -182,8 +184,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_revoked ON api_keys(revoked);
 CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at);
 `
 
-const createQueryHistoryTable = `
-CREATE TABLE IF NOT EXISTS query_history (
+const createPostgresQueryHistoryTable = `
+CREATE TABLE IF NOT EXISTS postgres_query_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
@@ -193,49 +195,37 @@ CREATE TABLE IF NOT EXISTS query_history (
   execution_time_ms INT
 );
 
-CREATE INDEX IF NOT EXISTS idx_query_history_db_instance_id ON query_history(db_instance_id);
-CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_query_history_executed_at ON query_history(executed_at);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_db_instance_id ON postgres_query_history(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_user_id ON postgres_query_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_postgres_query_history_executed_at ON postgres_query_history(executed_at);
 `
 
-const fixQueryHistoryForeignKey = `
--- Fix query_history foreign key to use RESTRICT instead of SET NULL
-DO $$
-BEGIN
-  -- Drop existing constraint if it exists
-  IF EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'query_history_user_id_fkey' 
-    AND table_name = 'query_history'
-  ) THEN
-    ALTER TABLE query_history DROP CONSTRAINT query_history_user_id_fkey;
-  END IF;
+const createMongoQueryHistoryTable = `
+CREATE TABLE IF NOT EXISTS mongo_query_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  query_text TEXT NOT NULL,
+  executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  success BOOLEAN,
+  execution_time_ms INT
+);
 
-  -- Ensure user_id is NOT NULL
-  ALTER TABLE query_history ALTER COLUMN user_id SET NOT NULL;
-
-  -- Add correct foreign key with RESTRICT
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'query_history_user_fk' 
-    AND table_name = 'query_history'
-  ) THEN
-    ALTER TABLE query_history
-    ADD CONSTRAINT query_history_user_fk
-    FOREIGN KEY (user_id)
-    REFERENCES users(id)
-    ON DELETE RESTRICT;
-  END IF;
-END$$;
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_db_instance_id ON mongo_query_history(db_instance_id);
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_user_id ON mongo_query_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_mongo_query_history_executed_at ON mongo_query_history(executed_at);
 `
 
 const preventHardDeleteUsers = `
--- Prevent hard delete of users (enforce soft-delete only)
+-- Prevent hard delete of active users (allow hard delete of soft-deleted rows for re-registration)
 -- Create or replace function (safe to run multiple times)
 CREATE OR REPLACE FUNCTION prevent_hard_delete_users()
 RETURNS trigger AS $$
 BEGIN
-  RAISE EXCEPTION 'Hard delete of users is not allowed. Use soft-delete instead.';
+  IF OLD.deleted_at IS NULL THEN
+    RAISE EXCEPTION 'Hard delete of users is not allowed. Use soft-delete instead.';
+  END IF;
+  RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -246,6 +236,41 @@ CREATE TRIGGER no_user_hard_delete
 BEFORE DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION prevent_hard_delete_users();
+`
+
+const addHostToDatabaseInstances = `
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'database_instances' AND column_name = 'host'
+  ) THEN
+    ALTER TABLE database_instances ADD COLUMN host TEXT;
+    CREATE INDEX IF NOT EXISTS idx_database_instances_host ON database_instances(host);
+  END IF;
+END$$;
+`
+
+const addResourceTierToProjects = `
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resource_tier_t') THEN
+    CREATE TYPE resource_tier_t AS ENUM ('free', 'basic', 'premium');
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'projects' AND column_name = 'resource_tier'
+  ) THEN
+    ALTER TABLE projects
+    ADD COLUMN resource_tier resource_tier_t NOT NULL DEFAULT 'free';
+  END IF;
+END$$;
+
+CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
 `
 
 const createUsageMetricsTable = `

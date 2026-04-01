@@ -1,16 +1,15 @@
 package services
 
 import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/utils"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
-
-	"my_project/internal/models"
-	"my_project/internal/repositories"
-	"my_project/internal/utils"
 
 	"golang.org/x/oauth2"
 )
@@ -20,13 +19,13 @@ const (
 )
 
 type GoogleAuthService struct {
-	userRepo    *repositories.UserRepository
+	userRepo *repositories.UserRepository
 	// sessionRepo *repositories.SessionRepository
 }
 
 func NewGoogleAuthService(userRepo *repositories.UserRepository) *GoogleAuthService {
 	return &GoogleAuthService{
-		userRepo:    userRepo,
+		userRepo: userRepo,
 		// sessionRepo: sessionRepo,
 	}
 }

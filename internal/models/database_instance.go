@@ -7,17 +7,16 @@ import (
 )
 
 type DatabaseInstance struct {
-	ID          uuid.UUID `json:"id"`
-	ProjectID   uuid.UUID `json:"project_id"`
-	CPUCores    *int      `json:"cpu_cores,omitempty"`
-	RAMMB       *int      `json:"ram_mb,omitempty"`
-	StorageGB   *int      `json:"storage_gb,omitempty"`
-	Status      string    `json:"status"` // 'creating', 'running', 'failed', 'paused', 'deleted'
-	Endpoint    *string   `json:"endpoint,omitempty"`
-	Port        *int      `json:"port,omitempty"`
-	ContainerID *string   `json:"container_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
+	CPUCores  *int      `json:"cpu_cores,omitempty"`
+	RAMMB     *int      `json:"ram_mb,omitempty"`
+	StorageGB *int      `json:"storage_gb,omitempty"`
+	Status    string    `json:"status"` // 'creating', 'running', 'failed', 'paused', 'deleted'
+	Port      *int      `json:"port,omitempty"`
+	Host      *string   `json:"host,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (d *DatabaseInstance) Prepare() {
@@ -28,4 +27,3 @@ func (d *DatabaseInstance) Prepare() {
 		d.Status = "creating"
 	}
 }
-

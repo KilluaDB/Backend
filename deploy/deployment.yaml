@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: default
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      dnsPolicy: ClusterFirst
+      serviceAccountName: backend
+      containers:
+        - name: api
+          # For local k3d: build and load with same name, e.g. docker build -t backend-api:latest . && k3d image import backend-api:latest -c <cluster-name>
+          # For AWS: use your ECR URL, e.g. 123456789012.dkr.ecr.region.amazonaws.com/backend:latest
+          image: backend-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          env:
+            # Redis in-cluster service (override ConfigMap if missing)
+            - name: REDIS_ADDR
+              value: "redis:6379"
+            # Plain postgres (start.sh): uses postgres-secrets. For CNPG meta-db use meta-db-app / meta-db-superuser with key password.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DB_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: ACCESS_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: ACCESS_TOKEN_SECRET
+            - name: REFRESH_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: REFRESH_TOKEN_SECRET
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            - name: DB_CRED_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: DB_CRED_ENCRYPTION_KEY
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

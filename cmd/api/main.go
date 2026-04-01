@@ -1,7 +1,7 @@
 package main
 
-
 import (
+	"backend/internal/server"
 	"context"
 	"fmt"
 	"log"
@@ -10,8 +10,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"my_project/internal/server"
 )
 
 func main() {

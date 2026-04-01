@@ -1,8 +1,8 @@
 package middlewares
 
 import (
+	"backend/internal/repositories"
 	"net/http"
-	"my_project/internal/repositories"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -54,4 +54,3 @@ func RequireAdmin(userRepo *repositories.UserRepository) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

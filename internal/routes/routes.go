@@ -1,8 +1,12 @@
 package routes
 
 import (
-	"my_project/internal/handlers"
-	"my_project/internal/repositories"
+	"backend/internal/handlers"
+	mongodbhandler "backend/internal/mongodb/handler"
+	mongodbroutes "backend/internal/mongodb/routes"
+	postgreshandler "backend/internal/postgres/handler"
+	postgresroutes "backend/internal/postgres/routes"
+	"backend/internal/repositories"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,15 +15,19 @@ import (
 func RegisterRoutes(
 	router *gin.Engine,
 	authHandler *handlers.AuthHandler,
-	userHandler *handlers.UserHandler,
-	projectHandler *handlers.ProjectHandler,
-	queryHandler *handlers.QueryHandler,
-	textToSqlHandler *handlers.TextToSQLHandler,
 	googleAuthHandler *handlers.GoogleAuthHandler,
-	tableHandler *handlers.TableHandler,
+	userHandler *handlers.UserHandler,
 	userRepo *repositories.UserRepository,
+	projectHandler *handlers.ProjectHandler,
+	schemaHandler *postgreshandler.SchemaHandler,
+	tableHandler *postgreshandler.TableHandler,
+	projectRepo repositories.ProjectRepository,
+	postgresHandler *postgreshandler.PostgresHandler,
+	postgresQueryHandler *postgreshandler.QueryHandler,
+	mongodbHandler *mongodbhandler.MongoDBHandler,
+	mongoQueryHandler *mongodbhandler.QueryHandler,
+	textToSqlHandler *postgreshandler.TextToSQLHandler,
 ) {
-
 	api := router.Group("/api/v1")
 
 	authRoutes := NewAuthRoutes(authHandler, googleAuthHandler)
@@ -28,8 +36,8 @@ func RegisterRoutes(
 	userRoutes := NewUserRoutes(userHandler, userRepo)
 	userRoutes.RegisterRoutes(api)
 
-	queryRoutes := NewQueryRoutes(queryHandler)
-	queryRoutes.RegisterRoutes(api)
+	// queryRoutes := NewQueryRoutes(queryHandler)
+	// queryRoutes.RegisterRoutes(api)
 
 	textToSqlRoutes := NewTextToSqlRoutes(textToSqlHandler)
 	textToSqlRoutes.RegisterRoutes(api)
@@ -37,10 +45,13 @@ func RegisterRoutes(
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
 
-	tableRoutes := NewTableRoutes(tableHandler)
-	tableRoutes.RegisterRoutes(api)
+	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, postgresQueryHandler)
+	postgresRoutes.RegisterRoutes(api)
 
-	router.GET("/", func(c *gin.Context) {
+	mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
+	mongodbRoutes.RegisterRoutes(api)
+
+	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 		})

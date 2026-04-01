@@ -1,17 +1,17 @@
 package routes
 
 import (
-	"my_project/internal/handlers"
-	"my_project/internal/middlewares"
+	"backend/internal/postgres/handler"
+	"backend/internal/middlewares"
 
 	"github.com/gin-gonic/gin"
 )
 
 type TextToSqlRoutes struct {
-	handler *handlers.TextToSQLHandler
+	handler *handler.TextToSQLHandler
 }
 
-func NewTextToSqlRoutes(handler *handlers.TextToSQLHandler) *TextToSqlRoutes {
+func NewTextToSqlRoutes(handler *handler.TextToSQLHandler) *TextToSqlRoutes {
 	return &TextToSqlRoutes{handler: handler}
 }
 

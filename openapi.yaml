@@ -1,19 +1,29 @@
 openapi: 3.0.3
 info:
   title: DBaaS Backend API
-  version: 1.0.0
+  version: 1.2.0
   description: |
     REST API for a database-as-a-service backend.
-    Authentication uses JWT access tokens (Bearer) and HTTP-only refresh-token cookies.
+    PostgreSQL and MongoDB are namespaced under `/api/v1/projects/{id}/postgres/*`
+    and `/api/v1/projects/{id}/mongodb/*`.
+
+    Latest changes (v1.2.0):
+    - Aligned with implementation: table delete is only via path
+      `DELETE /projects/{id}/postgres/tables/{table}` (public schema).
+    - Query execute and query history responses now documented as standard
+      APIResponse (status, message, data) with result/history in `data`.
 
 servers:
   - url: http://localhost:8080
     description: Local development server
 
 tags:
+  - name: Health
   - name: Auth
+  - name: Users
   - name: Projects
-  - name: Queries
+  - name: Postgres
+  - name: MongoDB
 
 components:
   securitySchemes:
@@ -23,9 +33,29 @@ components:
       bearerFormat: JWT
 
   schemas:
+    APIResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+        message:
+          type: string
+        data:
+          type: object
+          nullable: true
+        error:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
+      required: [status, message]
       properties:
+        status:
+          type: string
+          enum: [error]
         message:
           type: string
         error:
@@ -53,22 +83,21 @@ components:
         password:
           type: string
 
-    AuthTokensResponse:
+    AuthTokenResponse:
       type: object
+      required: [user_id, access_token]
       properties:
+        user_id:
+          type: string
+          format: uuid
+          description: ID of the authenticated user
         access_token:
           type: string
-        refresh_token:
-          type: string
-        access_token_expires_in:
-          type: string
-          example: "15m"
-        refresh_token_expires_in:
-          type: string
-          example: "24h"
+          description: JWT access token
 
     Project:
       type: object
+      required: [id, user_id, name, db_type, resource_tier, created_at]
       properties:
         id:
           type: string
@@ -83,7 +112,11 @@ components:
           nullable: true
         db_type:
           type: string
-          enum: [postgres, mongodb]
+          enum: [sql, nosql]
+          description: "'sql' uses PostgreSQL; 'nosql' uses MongoDB"
+        resource_tier:
+          type: string
+          enum: [free, basic, premium]
         created_at:
           type: string
           format: date-time
@@ -94,23 +127,32 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          description: Project display name
         description:
           type: string
           nullable: true
+          description: Optional; defaults to empty string if omitted
         db_type:
           type: string
-          description: "'postgres' or 'mongodb'"
-          enum: [postgres, mongodb]
+          enum: [sql, nosql]
+          description: "'sql' uses PostgreSQL; 'nosql' uses MongoDB"
+        resource_tier:
+          type: string
+          enum: [free, basic, premium]
+          default: free
+          description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
 
-    ExecuteQueryRequest:
+    ExecuteSQLQueryRequest:
       type: object
       required: [query]
       properties:
         query:
           type: string
 
-    QueryResult:
+    SQLQueryResult:
       type: object
+      required: [columns, rows, row_count, execution_time_ms]
       properties:
         columns:
           type: array
@@ -133,6 +175,7 @@ components:
 
     QueryHistoryItem:
       type: object
+      required: [id, db_instance_id, user_id, query_text, executed_at]
       properties:
         id:
           type: string
@@ -155,11 +198,288 @@ components:
           type: integer
           nullable: true
 
+    User:
+      type: object
+      required: [id, email, role, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, deleted]
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: New email for the user
+        role:
+          type: string
+          enum: [user, admin]
+          description: New role; only admins may change roles
+
+    PostgresInsertRowRequest:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+          description: Key-value pairs where keys are column names and values are the data to insert
+
+    PostgresUpdateRowsRequest:
+      type: object
+      required: [update]
+      properties:
+        filter:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: Optional JSON filter applied to rows
+        update:
+          type: object
+          additionalProperties: true
+          description: Fields to update
+
+    PostgresAddColumnRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            New column name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
+        type:
+          type: string
+          description: >
+            PostgreSQL column type. Common allowed prefixes include:
+            INT, INTEGER, BIGINT, SMALLINT, SERIAL, BIGSERIAL, DECIMAL, NUMERIC,
+            REAL, DOUBLE PRECISION, BOOLEAN/BOOL, CHAR, VARCHAR, TEXT, DATE,
+            TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
+            Parameterized variants like VARCHAR(50) are also accepted.
+        default:
+          description: Default value for the column (any JSON value)
+          nullable: true
+
+    TableColumn:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Column name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
+        type:
+          type: string
+          description: >
+            PostgreSQL column type. Common allowed prefixes include:
+            INT, INTEGER, BIGINT, SMALLINT, SERIAL, BIGSERIAL, DECIMAL, NUMERIC,
+            REAL, DOUBLE PRECISION, BOOLEAN/BOOL, CHAR, VARCHAR, TEXT, DATE,
+            TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
+            Parameterized variants like VARCHAR(50) are also accepted.
+        default:
+          type: string
+          nullable: true
+          description: Raw SQL default expression (e.g. 'NOW()', '0', 'true').
+        primary:
+          type: boolean
+          default: false
+          description: Whether this column is part of the primary key.
+        is_unique:
+          type: boolean
+          default: false
+          description: Whether this column has a UNIQUE constraint.
+        is_identity:
+          type: boolean
+          default: false
+          description: Whether this column is GENERATED ALWAYS AS IDENTITY.
+        nullable:
+          type: boolean
+          default: true
+          description: Whether this column allows NULL values.
+
+    ForeignKeyRef:
+      type: object
+      required: [local_column, foreign_column]
+      properties:
+        local_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Local column name in the created table.
+        foreign_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Referenced column name in the target table.
+        on_update:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION"]
+          description: Optional ON UPDATE action. If omitted, database default is used.
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION", "SET NULL", "SET DEFAULT"]
+          description: Optional ON DELETE action. If omitted, database default is used.
+
+    ForeignKey:
+      type: object
+      required: [table, references]
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema name of the referenced table. Defaults to "public" if omitted.
+        table:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Target table name for the foreign key.
+        references:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ForeignKeyRef'
+
+    CreateTableRequestBody:
+      type: object
+      required: [table, columns]
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Schema name to create the table in. Must be a valid PostgreSQL identifier.
+            Optional; defaults to "public" if omitted.
+        table:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: >
+            Table name. Must be a valid PostgreSQL identifier:
+            starts with a letter or underscore, followed by letters, digits, underscores, or dollar signs.
+        columns:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TableColumn'
+          description: At least one column definition is required.
+        foreign_keys:
+          $ref: '#/components/schemas/ForeignKey'
+          nullable: true
+          description: Optional foreign key configuration for the table.
+
+    DeleteTableRequestBody:
+      type: object
+      required: [table]
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema name of the table to delete. Optional; defaults to "public" if omitted.
+        table:
+          type: string
+          minLength: 1
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Table name to delete.
+
+    MongoCreateCollectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Collection name
+
+    MongoInsertDocumentRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: Arbitrary document fields to insert
+
+    MongoUpdateDocumentsRequest:
+      type: object
+      required: [update]
+      properties:
+        filter:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: Optional JSON filter applied to documents
+        update:
+          type: object
+          additionalProperties: true
+          description: Fields to update on matched documents
+
+    MongoAddFieldRequest:
+      type: object
+      required: [field]
+      properties:
+        field:
+          type: string
+          minLength: 1
+          description: Field name to add
+        field_type:
+          type: string
+          description: Optional type description or hint for the new field
+
+    MongoQueryRequest:
+      type: object
+      required: [collection, operation]
+      properties:
+        collection:
+          type: string
+          minLength: 1
+          description: Target collection name
+        operation:
+          type: string
+          enum: [find, insertOne, updateMany, deleteMany]
+          description: MongoDB operation; allowed values are 'find', 'insertOne', 'updateMany', 'deleteMany'
+        filter:
+          type: object
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties: true
+        limit:
+          type: integer
+          minimum: 1
+          description: Optional limit for find operations
+
 paths:
-  /:
+  /health:
     get:
       summary: Health check
-      tags: [Misc]
+      tags: [Health]
       responses:
         '200':
           description: Service is running
@@ -182,15 +502,29 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AuthRegisterRequest'
+            example:
+              email: "alice@example.com"
+              password: "SecurePass123!"
       responses:
         '201':
           description: User registered successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthTokensResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthTokenResponse'
         '400':
-          description: Invalid input
+          description: Invalid input (e.g. invalid email or password too short)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: An account with this email already exists
           content:
             application/json:
               schema:
@@ -206,24 +540,29 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AuthLoginRequest'
+            example:
+              email: "alice@example.com"
+              password: "SecurePass123!"
       responses:
         '200':
           description: Login successful
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthTokenResponse'
         '400':
-          description: Invalid input
+          description: Invalid input (e.g. invalid email or password format)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
-          description: Invalid credentials
+          description: Invalid email or password
           content:
             application/json:
               schema:
@@ -238,12 +577,10 @@ paths:
       responses:
         '200':
           description: Logged out successfully
-        '400':
-          description: Missing refresh token
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/APIResponse'
         '401':
           description: Unauthorized
           content:
@@ -261,12 +598,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
-                  message:
-                    type: string
+                $ref: '#/components/schemas/APIResponse'
         '400':
           description: Missing refresh token
           content:
@@ -275,6 +607,263 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/google/login:
+    get:
+      tags: [Auth]
+      summary: Initiate Google OAuth login flow
+      responses:
+        '302':
+          description: Redirect to Google OAuth consent screen
+
+  /api/v1/auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Handle Google OAuth callback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "4/0AY0e-g7ExampleAuthCode123456789"
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "csrf-protection-random-state-uuid"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current authenticated user's information
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Users]
+      summary: Update current authenticated user's information
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              email: "alice.new@example.com"
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Users]
+      summary: Delete current authenticated user's account
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List all users (Admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of users retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Users]
+      summary: Get a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Users]
+      summary: Update a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              email: "user+admin@example.com"
+              role: "admin"
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body or user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required or policy violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Users]
+      summary: Delete a user by ID (Admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: User deleted successfully
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Admin access required or policy violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
           content:
             application/json:
               schema:
@@ -292,13 +881,18 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateProjectRequest'
+            example:
+              name: "Analytics Service DB"
+              description: "Primary PostgreSQL database for the analytics microservice"
+              db_type: "sql"
+              resource_tier: "basic"
       responses:
         '201':
           description: Project created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
         '400':
           description: Invalid request body
           content:
@@ -317,7 +911,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
     get:
       tags: [Projects]
       summary: List projects for the authenticated user
@@ -329,9 +922,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
         '401':
           description: Unauthorized
           content:
@@ -340,25 +931,25 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   /api/v1/projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
     get:
       tags: [Projects]
       summary: Get a project by ID
       security:
         - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
       responses:
         '200':
           description: Project details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
+                $ref: '#/components/schemas/APIResponse'
         '401':
           description: Unauthorized
           content:
@@ -371,22 +962,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
     delete:
       tags: [Projects]
       summary: Delete a project by ID
       security:
         - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
       responses:
         '200':
           description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
         '401':
           description: Unauthorized
           content:
@@ -400,42 +987,490 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/projects/{id}/query/execute:
-    post:
-      tags: [Queries]
-      summary: Execute a SQL query against a project database
+  /api/v1/projects/{id}/postgres/tables:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Postgres]
+      summary: List PostgreSQL tables for a project
       security:
         - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      responses:
+        '200':
+          description: Tables retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Postgres]
+      summary: Create a new PostgreSQL table
+      security:
+        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ExecuteQueryRequest'
+              $ref: '#/components/schemas/CreateTableRequestBody'
+            example:
+              table: "customers"
+              columns:
+                - name: "id"
+                  type: "UUID"
+                  primary: true
+                  is_identity: true
+                  nullable: false
+                - name: "email"
+                  type: "VARCHAR(255)"
+                  is_unique: true
+                  nullable: false
+                - name: "created_at"
+                  type: "TIMESTAMPTZ"
+                  default: "NOW()"
+                  nullable: false
+              foreign_keys:
+                schema: "public"
+                table: "accounts"
+                references:
+                  - local_column: "account_id"
+                    foreign_column: "id"
+                    on_update: "CASCADE"
+                    on_delete: "CASCADE"
+      responses:
+        '200':
+          description: Table created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/tables/{table}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: table
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Table name (in default schema "public")
+    delete:
+      tags: [Postgres]
+      summary: Delete a PostgreSQL table by name (public schema)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Table deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/tables/{table}/rows:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: table
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Postgres]
+      summary: Get rows from a PostgreSQL table
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: URL-encoded JSON filter applied to rows
+          example: "%7B%22status%22%3A%22active%22%2C%22country%22%3A%22US%22%7D"
+      responses:
+        '200':
+          description: Rows retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Postgres]
+      summary: Insert a row into a PostgreSQL table
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostgresInsertRowRequest'
+            example:
+              values:
+                id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                email: "bob@example.com"
+                status: "active"
+                created_at: "2026-03-14T10:15:00Z"
+      responses:
+        '201':
+          description: Row inserted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Postgres]
+      summary: Update rows in a PostgreSQL table
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostgresUpdateRowsRequest'
+            example:
+              filter:
+                status: "pending"
+              update:
+                status: "processed"
+                processed_at: "2026-03-14T12:00:00Z"
+      responses:
+        '200':
+          description: Rows updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Postgres]
+      summary: Delete rows from a PostgreSQL table (by filter)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: URL-encoded JSON filter applied to rows; if omitted, all rows are deleted
+          example: "%7B%22status%22%3A%22inactive%22%7D"
+      responses:
+        '204':
+          description: Rows deleted successfully
+        '400':
+          description: Invalid project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/tables/{table}/rows/{row_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: table
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: row_id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Postgres]
+      summary: Delete a single row from a PostgreSQL table
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Row deleted successfully
+        '400':
+          description: Invalid project ID, table name, or row ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Row not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/tables/{table}/columns:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: table
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Postgres]
+      summary: Add a column to a PostgreSQL table
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostgresAddColumnRequest'
+      responses:
+        '200':
+          description: Column added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or table name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/tables/{table}/columns/{column}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: table
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Postgres]
+      summary: Delete a column from a PostgreSQL table
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Column deleted successfully
+        '400':
+          description: Invalid project ID, table name, or column name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/schema/visualize:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Postgres]
+      summary: Generate a Mermaid ER diagram visualization of the PostgreSQL schema
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: schema
+          in: query
+          required: false
+          schema:
+            type: string
+            default: public
+            example: "public"
+      responses:
+        '200':
+          description: Schema visualization generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID or schema name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/query/execute:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Postgres]
+      summary: Execute a SQL query against a PostgreSQL project database
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteSQLQueryRequest'
+            example:
+              query: "SELECT id, email, status FROM public.customers WHERE status = 'active' ORDER BY created_at DESC LIMIT 50;"
       responses:
         '200':
           description: Query executed successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    $ref: '#/components/schemas/QueryResult'
-                  execution_id:
-                    type: string
-                    format: uuid
-                  execution_time_ms:
-                    type: integer
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          result:
+                            $ref: '#/components/schemas/SQLQueryResult'
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
         '400':
-          description: Invalid input (missing query or invalid project ID)
+          description: Invalid input (missing query, invalid project ID, or disallowed SQL such as SELECT without LIMIT or LIMIT above the allowed maximum)
           content:
             application/json:
               schema:
@@ -453,19 +1488,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/projects/{id}/query/history:
+  /api/v1/projects/{id}/postgres/query/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
     get:
-      tags: [Queries]
-      summary: Get query execution history for the authenticated user
+      tags: [Postgres]
+      summary: Get PostgreSQL query execution history for the authenticated user
       security:
         - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
         - name: limit
           in: query
           required: false
@@ -474,15 +1510,21 @@ paths:
             minimum: 1
             maximum: 30
           description: Max number of history items to return (default 10, max 30)
+          example: 10
       responses:
         '200':
           description: Query history
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/QueryHistoryItem'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QueryHistoryItem'
         '401':
           description: Unauthorized
           content:
@@ -496,4 +1538,451 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/projects/{id}/mongodb/collections:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [MongoDB]
+      summary: List MongoDB collections for a project
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Collections retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [MongoDB]
+      summary: Create a MongoDB collection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoCreateCollectionRequest'
+            example:
+              name: "orders"
+      responses:
+        '201':
+          description: Collection created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/collections/{collection}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collection
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [MongoDB]
+      summary: Delete a MongoDB collection
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Collection deleted successfully
+        '400':
+          description: Invalid project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/collections/{collection}/documents:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collection
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [MongoDB]
+      summary: Get documents from a MongoDB collection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: URL-encoded JSON filter applied to documents
+          example: "%7B%22status%22%3A%22pending%22%7D"
+      responses:
+        '200':
+          description: Documents retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [MongoDB]
+      summary: Insert a document into a MongoDB collection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoInsertDocumentRequest'
+            example:
+              data:
+                orderId: "ORD-2026-0001"
+                customerEmail: "alice@example.com"
+                totalAmount: 129.99
+                currency: "USD"
+                status: "pending"
+                createdAt: "2026-03-14T09:30:00Z"
+      responses:
+        '201':
+          description: Document inserted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [MongoDB]
+      summary: Update documents in a MongoDB collection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoUpdateDocumentsRequest'
+            example:
+              filter:
+                status: "pending"
+              update:
+                status: "shipped"
+                shippedAt: "2026-03-15T14:00:00Z"
+      responses:
+        '200':
+          description: Documents updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [MongoDB]
+      summary: Delete documents from a MongoDB collection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: URL-encoded JSON filter applied to documents; if omitted, all documents are deleted
+          example: "%7B%22status%22%3A%22cancelled%22%7D"
+      responses:
+        '204':
+          description: Documents deleted successfully
+        '400':
+          description: Invalid project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/collections/{collection}/fields:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collection
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [MongoDB]
+      summary: Add a field to all documents in a MongoDB collection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoAddFieldRequest'
+            example:
+              field: "isArchived"
+              field_type: "boolean"
+      responses:
+        '200':
+          description: Field added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '400':
+          description: Invalid request body, project ID or collection name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/collections/{collection}/fields/{field}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collection
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: field
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [MongoDB]
+      summary: Remove a field from all documents in a MongoDB collection
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Field removed successfully
+        '400':
+          description: Invalid project ID, collection name, or field name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/query/execute:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [MongoDB]
+      summary: Execute a MongoDB query operation for a MongoDB project
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoQueryRequest'
+            example:
+              collection: "orders"
+              operation: "find"
+              filter:
+                status: "pending"
+              limit: 20
+      responses:
+        '200':
+          description: Query executed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          result:
+                            type: object
+                            description: Operation result (e.g. documents for find, modifiedCount for updateMany/deleteMany)
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
+        '400':
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to execute query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/query/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [MongoDB]
+      summary: Get MongoDB query execution history for the authenticated user
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+          description: Max number of history items to return (default 10, max 30)
+          example: 10
+      responses:
+        '200':
+          description: Query history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QueryHistoryItem'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to get query history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 

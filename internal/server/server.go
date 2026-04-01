@@ -1,6 +1,21 @@
 package server
 
 import (
+	"backend/internal/config"
+	"backend/internal/database"
+	dbdrivers "backend/internal/database"
+	"backend/internal/handlers"
+	mgodriver "backend/internal/mongodb/driver"
+	mongodbhandler "backend/internal/mongodb/handler"
+	mongorepo "backend/internal/mongodb/repository"
+	mongosvc "backend/internal/mongodb/service"
+	pgdriver "backend/internal/postgres/driver"
+	pghandler "backend/internal/postgres/handler"
+	postgresrepo "backend/internal/postgres/repository"
+	postgressvc "backend/internal/postgres/service"
+	"backend/internal/repositories"
+	"backend/internal/routes"
+	"backend/internal/services"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,13 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
-
-	"my_project/internal/config"
-	"my_project/internal/database"
-	"my_project/internal/handlers"
-	"my_project/internal/repositories"
-	"my_project/internal/routes"
-	"my_project/internal/services"
 )
 
 type Server struct {
@@ -62,47 +70,86 @@ func NewServer() *http.Server {
 		pool: pool,
 	}
 
-	cfg, _ := config.OAuthConfig()
+	// Redis for persistent refresh tokens (client lives for process lifetime)
+	redisClient, err := config.RedisClient()
+	if err != nil {
+		log.Fatalf("failed to connect to Redis: %v", err)
+	}
+	refreshStore := config.NewRefreshTokenStore(redisClient, 30*24*time.Hour) // 30 days TTL
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-
+	// sessionRepo := repositories.NewSessionRepository(pool)
 	userService := services.NewUserService(userRepo)
+	authService := services.NewAuthService(userRepo, refreshStore)
+	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 
-	authService := services.NewAuthService(userRepo)
+	// Google Auth dependencies
 	googleAuthService := services.NewGoogleAuthService(userRepo)
-	authHandler := handlers.NewAuthHandler(authService)
+	oauthConfig, err := config.OAuthConfig()
+	if err != nil {
+		log.Fatalf("failed to initialize OAuth config: %v", err)
+	}
+	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
-	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, cfg)
-
-	// Project dependencies
-	projectRepo := repositories.NewProjectRepository(pool)
+	// Project dependencies (provisioner uses K8s operators for DB instances)
+	projectRepo := postgresrepo.NewProjectRepository(pool)
 	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
 	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
-	orchestratorService, err := services.NewOrchestratorService()
+	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
-		log.Fatalf("failed to initialize orchestrator: %v", err)
+		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
-	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
+	instanceConn := services.NewInstanceConnectionService(projectRepo, dbInstanceRepo, dbCredentialRepo, provisioner)
+
+	// Database drivers registry (Postgres + Mongo) for unified container/record/field APIs
+	pgDBDriver := pgdriver.NewDriver(pool)
+	mongoDBDriver := mgodriver.NewDriver(pool)
+	driverRegistry := dbdrivers.NewInMemoryDriverRegistry(map[string]dbdrivers.DatabaseDriver{
+		"postgresql": pgDBDriver,
+		"mongodb":    mongoDBDriver,
+	})
+
+	recordService := services.NewRecordService(projectRepo, driverRegistry)
+
+	// Postgres-specific: table (includes row/column ops), schema, query
+	tableRepo := postgresrepo.NewTableRepository()
+	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
+	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn, tableService)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
-	// Query dependencies
-	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
-	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
-	queryHandler := handlers.NewQueryHandler(queryService)
+	// Query dependencies (split per DB type + separate history tables)
+	pgQueryHistoryRepo := postgresrepo.NewQueryHistoryRepository(pool)
+	const maxPostgresQueryLimit = 50
+	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo, maxPostgresQueryLimit)
+	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
 	// textToSqlRepo := repositories.NewQueryHistoryRepository(pool)
-	textToSqlService := services.NewTextToSQLService(dbInstanceRepo, dbCredentialRepo, projectRepo)
-	textToSqlHandler := handlers.NewTextToSQLHandler(textToSqlService, queryService)
+	textToSqlService := postgressvc.NewTextToSQLService(dbInstanceRepo, dbCredentialRepo, projectRepo)
+	textToSqlHandler := pghandler.NewTextToSQLHandler(textToSqlService, pgQueryService)
 
 	//
-	tableRepo := repositories.NewTableRepository(pool)
-	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
-	tableHandler := handlers.NewTableHandler(tableService)
+	// tableRepo := repositories.NewTableRepository(pool)
+	// tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
+	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
+	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
+	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
 
-	// Initialize Gin router
-	router := gin.Default()
+	schemaService := postgressvc.NewSchemaService(instanceConn)
+	schemaHandler := pghandler.NewSchemaHandler(schemaService)
+	tableHandler := pghandler.NewTableHandler(tableService, recordService)
+	postgresHandler := pghandler.NewPostgresHandler(projectService, tableService, recordService)
+
+	// MongoDB API handler
+	mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
+
+	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		Skip: func(c *gin.Context) bool { return c.Request.URL.Path == "/health" },
+	}))
+	router.Use(gin.Recovery())
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
@@ -113,10 +160,9 @@ func NewServer() *http.Server {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, textToSqlHandler, googleAuthHandler, tableHandler, userRepo) // register all routes
-
+	// Register all routes
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, schemaHandler, tableHandler, projectRepo, postgresHandler, pgQueryHandler, mongodbHandler, mongoQueryHandler, textToSqlHandler)
 	// Create and configure the HTTP server
-	// WriteTimeout is set to 5 minutes to accommodate long-running database queries
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
 		Handler:      router,
@@ -130,24 +176,20 @@ func NewServer() *http.Server {
 
 func validateRequiredEnvVars() error {
 	required := map[string]string{
-		"PORT":                          os.Getenv("PORT"),
-		"DB_HOST":                       os.Getenv("DB_HOST"),
-		"DB_PORT":                       os.Getenv("DB_PORT"),
-		"DB_USERNAME":                   os.Getenv("DB_USERNAME"),
-		"DB_PASSWORD":                   os.Getenv("DB_PASSWORD"),
-		"DB_DATABASE":                   os.Getenv("DB_DATABASE"),
-		"DB_ADMIN_USER":                 os.Getenv("DB_ADMIN_USER"),
-		"DB_ADMIN_PASSWORD":             os.Getenv("DB_ADMIN_PASSWORD"),
-		"ACCESS_TOKEN_SECRET":           os.Getenv("ACCESS_TOKEN_SECRET"),
-		"REFRESH_TOKEN_SECRET":          os.Getenv("REFRESH_TOKEN_SECRET"),
-		"REDIS_ADDR":                    os.Getenv("REDIS_ADDR"),
-		"ORCHESTRATOR_NETWORK_NAME":     os.Getenv("ORCHESTRATOR_NETWORK_NAME"),
-		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
-		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
-		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
-		"GOOGLE_CLIENT_ID":              os.Getenv("GOOGLE_CLIENT_ID"),
-		"GOOGLE_CLIENT_SECRET":          os.Getenv("GOOGLE_CLIENT_SECRET"),
-		"GOOGLE_REDIRECT_URL":           os.Getenv("GOOGLE_REDIRECT_URL"),
+		"PORT":                os.Getenv("PORT"),
+		"DB_HOST":             os.Getenv("DB_HOST"),
+		"DB_PORT":             os.Getenv("DB_PORT"),
+		"DB_USERNAME":         os.Getenv("DB_USERNAME"),
+		"DB_PASSWORD":         os.Getenv("DB_PASSWORD"),
+		"DB_DATABASE":         os.Getenv("DB_DATABASE"),
+		"DB_ADMIN_USER":       os.Getenv("DB_ADMIN_USER"),
+		"DB_ADMIN_PASSWORD":   os.Getenv("DB_ADMIN_PASSWORD"),
+		"REDIS_ADDR":          os.Getenv("REDIS_ADDR"),
+		"ACCESS_TOKEN_SECRET": os.Getenv("ACCESS_TOKEN_SECRET"),
+		"REFRESH_TOKEN_SECRET": os.Getenv("REFRESH_TOKEN_SECRET"),
+		"GOOGLE_CLIENT_ID":    os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_SECRET": os.Getenv("GOOGLE_CLIENT_SECRET"),
+		"GOOGLE_REDIRECT_URL": os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {
@@ -155,6 +197,6 @@ func validateRequiredEnvVars() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-
+	// K8s provisioner: DB_INSTANCES_NAMESPACE_POSTGRES, DB_INSTANCES_NAMESPACE_MONGO (optional), KUBECONFIG (optional)
 	return nil
 }

@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+bin/
+*.md
+.idea
+.vscode
+*.test.go
+**/__pycache__
+terminals

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"my_project/internal/responses"
-	"my_project/internal/services"
+	"backend/internal/responses"
+	"backend/internal/services"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

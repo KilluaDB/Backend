@@ -1,4 +1,4 @@
-.PHONY: help install deps build run test clean migrate setup cleanup-network docker-down
+.PHONY: help install deps build run test clean migrate setup docker-down docker-build docker-push deploy
 
 # Default target
 .DEFAULT_GOAL := help
@@ -14,9 +14,9 @@ help: ## Show this help message
 	@echo 'Available targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: ## Install all dependencies (Go, PostgreSQL, Redis)
+install: ## Install all dependencies (Go, PostgreSQL)
 	@echo "Checking dependencies..."
-	@./start.sh --check-only || echo "Please install missing dependencies manually"
+	@command -v go >/dev/null 2>&1 || { echo "Go is not installed"; exit 1; }
 
 deps: ## Install Go dependencies
 	@echo "Installing Go dependencies..."
@@ -33,10 +33,6 @@ run: ## Run the application (development mode)
 	@echo "Starting application..."
 	@go run $(MAIN_PATH)
 
-start: build ## Build and run the application
-	@echo "Starting application..."
-	@./$(BINARY_PATH)
-
 test: ## Run tests
 	@echo "Running tests..."
 	@go test -v ./...
@@ -50,45 +46,45 @@ migrate: ## Run database migrations manually
 	@echo "Running migrations..."
 	@go run $(MAIN_PATH) --migrate-only || echo "Migrations run automatically on startup"
 
-setup: ## Initial setup (create .env, setup database)
+setup: ## Initial setup (create .env)
 	@echo "Setting up project..."
 	@if [ ! -f .env ]; then \
-		echo "Creating .env file..."; \
-		./start.sh --setup-only; \
+		echo "Creating .env file from template..."; \
+		cp .env.example .env 2>/dev/null || echo "No .env.example found. Create .env manually."; \
 	fi
 	@echo "Setup complete. Please review .env file and update as needed."
 
 check: ## Check if all dependencies are installed
 	@echo "Checking dependencies..."
 	@command -v go >/dev/null 2>&1 || { echo "Go is not installed"; exit 1; }
-	@command -v psql >/dev/null 2>&1 || { echo "PostgreSQL is not installed"; exit 1; }
-	@command -v redis-cli >/dev/null 2>&1 || { echo "Redis is not installed (optional)"; }
+	@command -v docker >/dev/null 2>&1 || { echo "Docker is not installed"; exit 1; }
+	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl is not installed"; exit 1; }
 	@echo "All required dependencies are installed"
+
+docker-build: ## Build Docker image
+	@echo "Building Docker image..."
+	docker build -t backend-api:latest .
+
+docker-push: ## Push Docker image to ECR (requires ECR_URL env var)
+	@if [ -z "$$ECR_URL" ]; then echo "ECR_URL is required. Run: export ECR_URL=\$$(cd infra/terraform && terraform output -raw ecr_repository_url)"; exit 1; fi
+	docker tag backend-api:latest $$ECR_URL:latest
+	docker push $$ECR_URL:latest
+
+deploy: ## Deploy all K8s manifests to the current cluster context
+	@echo "Deploying to Kubernetes..."
+	kubectl apply -f deploy/rbac.yaml
+	kubectl apply -f deploy/meta-db-cluster.yaml
+	@echo "Waiting for meta-db to be ready..."
+	kubectl wait --for=condition=Ready cluster/meta-db --timeout=300s 2>/dev/null || echo "Waiting for CNPG cluster (check: kubectl get cluster meta-db)"
+	kubectl apply -f deploy/configmap.yaml
+	kubectl apply -f deploy/deployment.yaml
+	kubectl apply -f deploy/service.yaml
+	kubectl apply -f deploy/ingress.yaml
+	@echo "Deploy complete. Check: kubectl get pods -n default"
 
 dev: deps run ## Install dependencies and run in development mode
 
-cleanup-network: ## Remove orchestrator Docker network (optional - network is reused by default)
-	@echo "Removing orchestrator network..."
-	@if [ -f .env ]; then \
-		export $$(cat .env | grep -v '^#' | xargs); \
-		NETWORK_NAME="$${ORCHESTRATOR_NETWORK_NAME:-dbaas-orchestrator-network}"; \
-		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
-			echo "Removing network: $$NETWORK_NAME"; \
-			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
-		else \
-			echo "Network $$NETWORK_NAME does not exist"; \
-		fi \
-	else \
-		NETWORK_NAME="dbaas-orchestrator-network"; \
-		if docker network ls --format '{{.Name}}' | grep -q "^$$NETWORK_NAME$$"; then \
-			echo "Removing network: $$NETWORK_NAME"; \
-			docker network rm $$NETWORK_NAME 2>/dev/null || echo "Network removed or not found"; \
-		else \
-			echo "Network $$NETWORK_NAME does not exist"; \
-		fi \
-	fi
-
-docker-down: ## Stop and remove Docker containers (keeps orchestrator network)
+docker-down: ## Stop and remove Docker containers
 	@echo "Stopping Docker containers..."
 	@if command -v docker-compose >/dev/null 2>&1; then \
 		docker-compose down; \

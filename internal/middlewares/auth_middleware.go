@@ -1,10 +1,9 @@
 package middlewares
 
 import (
+	"backend/internal/utils"
 	"net/http"
 	"strings"
-
-	"my_project/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )

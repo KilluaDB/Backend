@@ -1,0 +1,79 @@
+package handler
+
+import (
+	"backend/internal/postgres/service"
+	"backend/internal/responses"
+	"backend/internal/services"
+	"errors"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+type SchemaHandler struct {
+	schemaService *service.SchemaService
+}
+
+func NewSchemaHandler(schemaService *service.SchemaService) *SchemaHandler {
+	return &SchemaHandler{
+		schemaService: schemaService,
+	}
+}
+
+// VisualizeSchema handles GET /api/v1/projects/:id/postgres/schema/visualize
+func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
+	// Get user ID from context (set by auth middleware)
+	userID, exists := c.Get("userId")
+	if !exists {
+		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+
+	projectID := c.Param("id")
+	schema := c.DefaultQuery("schema", "public") // Default to "public" schema
+
+	// Convert userID to uuid.UUID
+	var userUUID uuid.UUID
+	switch v := userID.(type) {
+	case uuid.UUID:
+		userUUID = v
+	case string:
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid user ID format")
+			return
+		}
+		userUUID = parsed
+	default:
+		responses.Fail(c, http.StatusBadRequest, nil, "Invalid user ID type")
+		return
+	}
+
+	// Parse project ID
+	projectUUID, err := uuid.Parse(projectID)
+	if err != nil {
+		responses.Fail(c, http.StatusBadRequest, err, "Invalid project ID format")
+		return
+	}
+
+	mermaidDiagram, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidSchema):
+			responses.Fail(c, http.StatusBadRequest, err, "Invalid schema name")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
+			return
+		}
+	}
+
+	responses.Success(c, http.StatusOK, gin.H{
+		"mermaid": mermaidDiagram,
+		"schema":  schema,
+	}, "Schema visualization generated successfully")
+}
