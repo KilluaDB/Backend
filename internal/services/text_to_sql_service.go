@@ -142,3 +142,17 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 
 	return &result, nil
 }
+
+func (s *TextToSQLService) HealthCheck() error {
+	resp, err := s.httpClient.Get(s.baseURL + "/health")
+	if err != nil {
+		return fmt.Errorf("text-to-sql service unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("text-to-sql service unhealthy: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
