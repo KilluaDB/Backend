@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
-	
-	"backend/internal/responses"
+
 	"backend/internal/postgres/service"
+	"backend/internal/responses"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -76,7 +78,20 @@ func (h *TextToSQLHandler) GenerateSQL(c *gin.Context) {
 	// Call FastAPI to generate SQL
 	result, err := h.textToSQLService.GenerateSQL(userUUID, &req, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusServiceUnavailable, err, "Text-to-SQL service unavailable")
+		switch {
+		case errors.Is(err, service.ErrProjectNotFound):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or not accessible")
+		case errors.Is(err, service.ErrNoRunningDBInstance):
+			responses.Fail(c, http.StatusBadRequest, err, "No running database instance for this project")
+		case errors.Is(err, service.ErrNoDBCredentials):
+			responses.Fail(c, http.StatusBadRequest, err, "Database credentials not configured")
+		case errors.Is(err, service.ErrTextToSQLUnavailable):
+			responses.Fail(c, http.StatusServiceUnavailable, err, fmt.Sprintf("Text-to-SQL service unavailable: %v", err))
+		case errors.Is(err, service.ErrTextToSQLInvalidResponse):
+			responses.Fail(c, http.StatusBadGateway, err, fmt.Sprintf("Invalid response from text-to-SQL service: %v", err))
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Text-to-SQL request failed")
+		}
 		return
 	}
 
@@ -135,7 +150,20 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 	// Call FastAPI to generate SQL
 	genResult, err := h.textToSQLService.GenerateSQL(userUUID, &req, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusServiceUnavailable, err, "Text-to-SQL service unavailable")
+		switch {
+		case errors.Is(err, service.ErrProjectNotFound):
+			responses.Fail(c, http.StatusNotFound, err, "Project not found or not accessible")
+		case errors.Is(err, service.ErrNoRunningDBInstance):
+			responses.Fail(c, http.StatusBadRequest, err, "No running database instance for this project")
+		case errors.Is(err, service.ErrNoDBCredentials):
+			responses.Fail(c, http.StatusBadRequest, err, "Database credentials not configured")
+		case errors.Is(err, service.ErrTextToSQLUnavailable):
+			responses.Fail(c, http.StatusServiceUnavailable, err, fmt.Sprintf("Text-to-SQL service unavailable: %v", err))
+		case errors.Is(err, service.ErrTextToSQLInvalidResponse):
+			responses.Fail(c, http.StatusBadGateway, err, fmt.Sprintf("Invalid response from text-to-SQL service: %v", err))
+		default:
+			responses.Fail(c, http.StatusInternalServerError, err, "Text-to-SQL request failed")
+		}
 		return
 	}
 

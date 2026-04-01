@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	postgresrepo "backend/internal/postgres/repository"
@@ -17,6 +19,15 @@ import (
 	"backend/internal/utils"
 
 	"github.com/google/uuid"
+)
+
+// Sentinel errors for HTTP handlers to map 4xx/502/503 distinctly.
+var (
+	ErrProjectNotFound          = errors.New("project not found or not accessible")
+	ErrNoRunningDBInstance      = errors.New("no running database instance for this project")
+	ErrNoDBCredentials          = errors.New("no credentials configured for this database instance")
+	ErrTextToSQLUnavailable     = errors.New("text-to-sql service unavailable")
+	ErrTextToSQLInvalidResponse = errors.New("invalid response from text-to-sql service")
 )
 
 // TextToSQLService handles communication with the FastAPI Text-to-SQL service
@@ -54,13 +65,21 @@ type TextToSQLResponse struct {
 func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, projectRepo  *postgresrepo.PostgresProjectRepository) *TextToSQLService {
 	baseURL := os.Getenv("TEXT_TO_SQL_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:5001" // Default FastAPI URL
+		baseURL = "http://127.0.0.1:5001" // Default FastAPI URL (AI/integration main.py); use host.docker.internal in Docker (see docker-compose.yml)
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	timeout := 120 * time.Second
+	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {
+		if sec, err := strconv.Atoi(s); err == nil && sec > 0 {
+			timeout = time.Duration(sec) * time.Second
+		}
 	}
 
 	return &TextToSQLService{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second, // LLM calls can take time
+			Timeout: timeout, // LLM + schema extraction can exceed 30s
 		},
 		projectRepo: projectRepo,
 		instanceRepo: instanceRepo,
@@ -71,31 +90,35 @@ func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, 
 func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, projectId uuid.UUID) (*TextToSQLResponse, error) {
 	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectId, userID)
 	if err != nil {
-		// return nil, nil, err
+		return nil, err
 	}
 	if project == nil {
-		// return nil, nil, errors.New("project not found or not accessible")
+		return nil, ErrProjectNotFound
 	}
 
 	// Find running DB instance for this project
 	inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
 	if err != nil {
-		// return nil, nil, err
+		return nil, err
 	}
 	if inst == nil {
-		// return nil, nil, errors.New("no running database instance for this project")
+		return nil, ErrNoRunningDBInstance
 	}
 
 	// Fetch credentials for the instance
 	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
 	if err != nil {
-		// return nil, nil, err
+		return nil, err
 	}
 	if cred == nil {
-		// return nil, nil, errors.New("no credentials configured for this database instance")
+		return nil, ErrNoDBCredentials
 	}
 
 	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt db password: %w", err)
+	}
+
 	dbConnection := DatabaseConnection {
 		Host: *inst.Host    ,
 		Port: *inst.Port    ,
@@ -108,7 +131,7 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
-		// return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	// Send request to FastAPI
@@ -119,7 +142,7 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	)
 	if err != nil {
 		log.Printf("[TextToSQLService] Request failed: %v", err)
-		return nil, errors.New("text-to-sql service unavailable")
+		return nil, fmt.Errorf("%w: %v", ErrTextToSQLUnavailable, err)
 	}
 	defer resp.Body.Close()
 
@@ -133,7 +156,7 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	var result TextToSQLResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		log.Printf("[TextToSQLService] Failed to parse response: %v", err)
-		return nil, errors.New("invalid response from text-to-sql service")
+		return nil, fmt.Errorf("%w: %v", ErrTextToSQLInvalidResponse, err)
 	}
 
 	if !result.Success {
