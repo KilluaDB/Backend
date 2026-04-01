@@ -86,14 +86,17 @@ func NewServer() *http.Server {
 	}
 	projectService := services.NewProjectService(projectRepo, orchestratorService, dbInstanceRepo, dbCredentialRepo)
 	projectHandler := handlers.NewProjectHandler(projectService)
-	
 
 	// Query dependencies
 	queryHistoryRepo := repositories.NewQueryHistoryRepository(pool)
 	queryService := services.NewQueryService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo)
 	queryHandler := handlers.NewQueryHandler(queryService)
 
-	// 
+	// textToSqlRepo := repositories.NewQueryHistoryRepository(pool)
+	textToSqlService := services.NewTextToSQLService(dbInstanceRepo, dbCredentialRepo, projectRepo)
+	textToSqlHandler := handlers.NewTextToSQLHandler(textToSqlService, queryService)
+
+	//
 	tableRepo := repositories.NewTableRepository(pool)
 	tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
 	tableHandler := handlers.NewTableHandler(tableService)
@@ -110,7 +113,7 @@ func NewServer() *http.Server {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, googleAuthHandler, tableHandler, userRepo) // register all routes
+	routes.RegisterRoutes(router, authHandler, userHandler, projectHandler, queryHandler, textToSqlHandler, googleAuthHandler, tableHandler, userRepo) // register all routes
 
 	// Create and configure the HTTP server
 	// WriteTimeout is set to 5 minutes to accommodate long-running database queries
@@ -142,9 +145,9 @@ func validateRequiredEnvVars() error {
 		"ORCHESTRATOR_SUBNET_CIDR":      os.Getenv("ORCHESTRATOR_SUBNET_CIDR"),
 		"ORCHESTRATOR_GATEWAY":          os.Getenv("ORCHESTRATOR_GATEWAY"),
 		"ORCHESTRATOR_MONITOR_INTERVAL": os.Getenv("ORCHESTRATOR_MONITOR_INTERVAL"),
-		"GOOGLE_CLIENT_ID":					os.Getenv("GOOGLE_CLIENT_ID"),
-		"GOOGLE_CLIENT_SECRET":				os.Getenv("GOOGLE_CLIENT_SECRET"),
-		"GOOGLE_REDIRECT_URL":				os.Getenv("GOOGLE_REDIRECT_URL"),
+		"GOOGLE_CLIENT_ID":              os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_SECRET":          os.Getenv("GOOGLE_CLIENT_SECRET"),
+		"GOOGLE_REDIRECT_URL":           os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {

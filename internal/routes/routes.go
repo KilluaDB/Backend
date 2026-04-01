@@ -8,13 +8,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-
 func RegisterRoutes(
-	router *gin.Engine, 
-	authHandler *handlers.AuthHandler, 
-	userHandler *handlers.UserHandler, 
-	projectHandler *handlers.ProjectHandler, 
-	queryHandler *handlers.QueryHandler, 
+	router *gin.Engine,
+	authHandler *handlers.AuthHandler,
+	userHandler *handlers.UserHandler,
+	projectHandler *handlers.ProjectHandler,
+	queryHandler *handlers.QueryHandler,
+	textToSqlHandler *handlers.TextToSQLHandler,
 	googleAuthHandler *handlers.GoogleAuthHandler,
 	tableHandler *handlers.TableHandler,
 	userRepo *repositories.UserRepository,
@@ -30,6 +30,9 @@ func RegisterRoutes(
 
 	queryRoutes := NewQueryRoutes(queryHandler)
 	queryRoutes.RegisterRoutes(api)
+
+	textToSqlRoutes := NewTextToSqlRoutes(textToSqlHandler)
+	textToSqlRoutes.RegisterRoutes(api)
 
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
