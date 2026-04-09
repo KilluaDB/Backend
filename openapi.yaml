@@ -2376,6 +2376,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/projects/{id}/postgres/schema/from-text/stream:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Postgres]
+      summary: Generate a Mermaid ER diagram from requirement text (streaming)
+      description: |
+        Proxies the local SchemaAgent (AI) service and streams progress events as Server-Sent Events (SSE).
+        The Mermaid ER diagram is provided in a streamed event with `type: "mermaid"`.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requirement_text]
+              properties:
+                requirement_text:
+                  type: string
+                  description: Natural language description of the database requirements
+                model_name:
+                  type: string
+                  description: Model name used by the AI service (default: deepseek)
+                  default: deepseek
+                database_name:
+                  type: string
+                  description: Optional database name hint for the generator
+            example:
+              requirement_text: "A university needs a course selection system"
+              model_name: "deepseek"
+              database_name: "uni_db"
+      responses:
+        '200':
+          description: SSE stream of schema generation events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                data: {"type":"phase","phase":"logical_design","status":"start"}
+
+                data: {"type":"mermaid","content":"erDiagram\n  Student ||--o{ Enrollment : takes","valid":true}
+
+                data: {"type":"done","message":"Schema generation complete"}
+
+                data: [DONE]
+        '400':
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Upstream schema generator unavailable or returned an error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/projects/{id}/postgres/query/execute:
     parameters:
       - name: id
