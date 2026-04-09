@@ -26,14 +26,14 @@ type ForeignKeyRef struct {
 
 // TableForeignKeyDef is foreign key definition for create/update table requests.
 type TableForeignKeyDef struct {
-	Schema     string          `json:"schema"` // Optional; defaults to "public"
+	Schema     string          `json:"schema"` // Omitted or empty → "public" in service
 	Table      string          `json:"table" binding:"required"`
 	References []ForeignKeyRef `json:"references" binding:"required,min=1"`
 }
 
 // CreateTableRequest is the request body for creating a table.
 type CreateTableRequest struct {
-	Schema      string               `json:"schema"` // Optional; defaults to "public"
+	Schema      string               `json:"schema"` // Omitted or empty → "public" in service
 	Table       string               `json:"table" binding:"required"`
 	Columns     []TableColumnDef     `json:"columns" binding:"required"`
 	ForeignKeys *TableForeignKeyDef  `json:"foreign_keys"`
@@ -49,6 +49,42 @@ type UpdateTableRequest struct {
 
 // DeleteTableRequest is the request body for deleting a table.
 type DeleteTableRequest struct {
-	Schema string `json:"schema"` // Optional; defaults to "public"
+	Schema string `json:"schema"` // Omitted or empty → "public" in service
 	Table  string `json:"table" binding:"required"`
+}
+
+// GetRowsResult is the data payload for GET .../tables/:table/rows (paginated list).
+type GetRowsResult struct {
+	Rows    []map[string]interface{} `json:"rows"`
+	Limit   int                      `json:"limit"`
+	Offset  int                      `json:"offset"`
+	HasMore bool                     `json:"has_more"`
+	Total   *int64                   `json:"total,omitempty"`
+}
+
+// TableMetadata is returned by GET .../postgres/tables/:table (column layout, keys; no row data).
+type TableMetadata struct {
+	Schema      string         `json:"schema"`
+	Table       string         `json:"table"`
+	Columns     []ColumnDetail `json:"columns"`
+	PrimaryKeys []string       `json:"primary_keys"`
+	ForeignKeys []ForeignKey   `json:"foreign_keys"`
+}
+
+// TableIndexInfo describes one index on a table (from pg_catalog).
+type TableIndexInfo struct {
+	Name       string `json:"name"`
+	Unique     bool   `json:"unique"`
+	Primary    bool   `json:"primary"`
+	Method     string `json:"method"`
+	Definition string `json:"definition"`
+	Valid      bool   `json:"valid"`
+}
+
+// CreateIndexRequest is the body for POST .../tables/{table}/indexes.
+type CreateIndexRequest struct {
+	Name    string   `json:"name" binding:"required"`
+	Columns []string `json:"columns" binding:"required,min=1"`
+	Unique  bool     `json:"unique"`
+	Method  string   `json:"method"` // btree (default), hash, gin, gist, spgist, brin
 }

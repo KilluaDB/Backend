@@ -147,7 +147,6 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 	if err != nil {
 		return nil, nil, err
 	}
-	defer pool.Close()
 
 	result, err := s.executeSQLQuery(ctx, pool, req.Query)
 	execTime := time.Since(startTime).Milliseconds()
@@ -217,7 +216,17 @@ func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Poo
 			if val != nil {
 				switch v := val.(type) {
 				case []byte:
-					rowMap[col] = string(v)
+					if len(v) == 16 {
+						if u, err := uuid.FromBytes(v); err == nil {
+							rowMap[col] = u.String()
+						} else {
+							rowMap[col] = string(v)
+						}
+					} else {
+						rowMap[col] = string(v)
+					}
+				case [16]byte:
+					rowMap[col] = uuid.UUID(v).String()
 				case time.Time:
 					rowMap[col] = v.Format(time.RFC3339)
 				default:
@@ -254,7 +263,15 @@ func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.
 	}, nil
 }
 
-func (s *QueryService) GetQueryHistory(userID uuid.UUID, limit int) ([]models.QueryHistory, error) {
-	return s.execRepo.GetByUserID(userID, limit)
+// GetQueryHistory returns SQL query history for the user scoped to the project's database instance.
+func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uuid.UUID, limit int) ([]models.QueryHistory, error) {
+	instanceID, err := s.instanceConn.GetInstanceID(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if instanceID == uuid.Nil {
+		return []models.QueryHistory{}, nil
+	}
+	return s.execRepo.GetByUserIDAndInstanceID(userID, instanceID, limit)
 }
 

@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type SchemaHandler struct {
@@ -23,51 +22,36 @@ func NewSchemaHandler(schemaService *service.SchemaService) *SchemaHandler {
 
 // VisualizeSchema handles GET /api/v1/projects/:id/postgres/schema/visualize
 func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
-	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
-	projectID := c.Param("id")
-	schema := c.DefaultQuery("schema", "public") // Default to "public" schema
-
-	// Convert userID to uuid.UUID
-	var userUUID uuid.UUID
-	switch v := userID.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		parsed, err := uuid.Parse(v)
-		if err != nil {
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid user ID format")
-			return
-		}
-		userUUID = parsed
-	default:
-		responses.Fail(c, http.StatusBadRequest, nil, "Invalid user ID type")
-		return
-	}
-
-	// Parse project ID
-	projectUUID, err := uuid.Parse(projectID)
+	projectUUID, err := projectIDFromGin(c)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid project ID format")
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
+
+	rawSchema := c.Query("schema")
+	if err := service.ValidatePostgresSchemaName(rawSchema); err != nil {
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return
+	}
+	schema := service.PostgresSchema(rawSchema)
 
 	mermaidDiagram, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidSchema):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid schema name")
+			pgFail(c, http.StatusBadRequest, err, "Invalid schema name")
 			return
 		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
+			pgFail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
 			return
 		}
 	}
@@ -76,4 +60,31 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 		"mermaid": mermaidDiagram,
 		"schema":  schema,
 	}, "Schema visualization generated successfully")
+}
+
+// ListSchemas handles GET /api/v1/projects/:id/postgres/schemas
+func (h *SchemaHandler) ListSchemas(c *gin.Context) {
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	projectUUID, err := projectIDFromGin(c)
+	if err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	schemas, err := h.schemaService.ListSchemas(c.Request.Context(), userUUID, projectUUID)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			pgFail(c, http.StatusBadRequest, err, err.Error())
+			return
+		}
+	}
+	responses.Success(c, http.StatusOK, gin.H{"schemas": schemas}, "Schemas listed successfully")
 }

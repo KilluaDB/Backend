@@ -83,3 +83,45 @@ func (r *QueryHistoryRepository) GetByUserID(userID uuid.UUID, limit int) ([]mod
 	return queries, rows.Err()
 }
 
+// GetByUserIDAndInstanceID returns query history for a user scoped to a database instance (project).
+func (r *QueryHistoryRepository) GetByUserIDAndInstanceID(userID, instanceID uuid.UUID, limit int) ([]models.QueryHistory, error) {
+	ctx := context.Background()
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `
+		SELECT id, db_instance_id, user_id, query_text, executed_at, success, execution_time_ms
+		FROM postgres_query_history
+		WHERE user_id = $1 AND db_instance_id = $2
+		ORDER BY executed_at DESC
+		LIMIT $3
+	`
+
+	rows, err := r.pool.Query(ctx, query, userID, instanceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var queries []models.QueryHistory
+	for rows.Next() {
+		var qh models.QueryHistory
+		err := rows.Scan(
+			&qh.ID,
+			&qh.DBInstanceID,
+			&qh.UserID,
+			&qh.QueryText,
+			&qh.ExecutedAt,
+			&qh.Success,
+			&qh.ExecutionTimeMs,
+		)
+		if err != nil {
+			return nil, err
+		}
+		queries = append(queries, qh)
+	}
+
+	return queries, rows.Err()
+}

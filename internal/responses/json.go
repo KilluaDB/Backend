@@ -11,6 +11,7 @@ type APIResponse struct {
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
+	Code    string      `json:"code,omitempty"`
 }
 
 func JSON(c *gin.Context, statusCode int, status string, data interface{}, message string, err error) {

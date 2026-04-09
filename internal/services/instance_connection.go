@@ -3,17 +3,16 @@ package services
 import (
 	"backend/internal/database"
 	"backend/internal/models"
-	"backend/internal/mongodb/repository"
 	"backend/internal/repositories"
 	"backend/internal/utils"
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // Sentinel errors for instance/connection so callers can return proper HTTP status.
@@ -29,6 +28,14 @@ type InstanceConnectionService struct {
 	instanceRepo *repositories.DatabaseInstanceRepository
 	credRepo     *repositories.DatabaseCredentialRepository
 	provisioner  *OperatorProvisioner
+
+	pgPoolMu sync.Mutex
+	pgPools  map[poolCacheKey]*pgxpool.Pool
+}
+
+type poolCacheKey struct {
+	userID    uuid.UUID
+	projectID uuid.UUID
 }
 
 // NewInstanceConnectionService creates the central connection service.
@@ -43,6 +50,7 @@ func NewInstanceConnectionService(
 		instanceRepo: instanceRepo,
 		credRepo:     credRepo,
 		provisioner:  provisioner,
+		pgPools:      make(map[poolCacheKey]*pgxpool.Pool),
 	}
 }
 
@@ -144,20 +152,14 @@ func (s *InstanceConnectionService) GetInstanceID(ctx context.Context, userID, p
 	return params.instanceID, nil
 }
 
-// GetPool returns a connection pool for the project's database instance.
-// Caller must defer pool.Close().
-func (s *InstanceConnectionService) GetPool(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, error) {
-	params, err := s.getConnectionParams(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
-	}
-
+// connectPostgresPoolForParams dials the project database, pings, and optionally heals on auth failure.
+// The returned pool is not yet registered in the cache.
+func (s *InstanceConnectionService) connectPostgresPoolForParams(ctx context.Context, userID, projectID uuid.UUID, params *connectionParams) (*pgxpool.Pool, error) {
 	pool, err := database.ConnectToPostgresProject(params.host, params.port, params.username, params.password, "app")
 	if err != nil {
 		return nil, err
 	}
 
-	// Optional ping-based heal on auth failure
 	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
 	pingErr := pool.Ping(pingCtx)
 	pingCancel()
@@ -203,76 +205,75 @@ func (s *InstanceConnectionService) GetPool(ctx context.Context, userID, project
 	return pool, nil
 }
 
-// GetPoolWithMeta returns a connection pool and the instance ID (for query history).
-// Caller must defer pool.Close().
+// acquireCachedPostgresPool returns a shared pool for (userID, projectID). Callers must not Close the pool.
+func (s *InstanceConnectionService) acquireCachedPostgresPool(ctx context.Context, userID, projectID uuid.UUID, params *connectionParams) (*pgxpool.Pool, error) {
+	key := poolCacheKey{userID: userID, projectID: projectID}
+
+	s.pgPoolMu.Lock()
+	if p, ok := s.pgPools[key]; ok {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		pingErr := p.Ping(pingCtx)
+		cancel()
+		if pingErr == nil {
+			s.pgPoolMu.Unlock()
+			return p, nil
+		}
+		delete(s.pgPools, key)
+		p.Close()
+	}
+	s.pgPoolMu.Unlock()
+
+	pool, err := s.connectPostgresPoolForParams(ctx, userID, projectID, params)
+	if err != nil {
+		return nil, err
+	}
+
+	s.pgPoolMu.Lock()
+	defer s.pgPoolMu.Unlock()
+	if existing, ok := s.pgPools[key]; ok {
+		pool.Close()
+		return existing, nil
+	}
+	s.pgPools[key] = pool
+	return pool, nil
+}
+
+// GetPool returns a shared connection pool for the project's database instance.
+// Do not Close the returned pool; it is cached for reuse across requests.
+func (s *InstanceConnectionService) GetPool(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, error) {
+	params, err := s.getConnectionParams(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.acquireCachedPostgresPool(ctx, userID, projectID, params)
+}
+
+// GetPoolWithMeta returns a shared pool and the instance ID (for query history).
+// Do not Close the returned pool.
 func (s *InstanceConnectionService) GetPoolWithMeta(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, uuid.UUID, error) {
 	params, err := s.getConnectionParams(ctx, userID, projectID)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
-
-	pool, err := database.ConnectToPostgresProject(params.host, params.port, params.username, params.password, "app")
+	pool, err := s.acquireCachedPostgresPool(ctx, userID, projectID, params)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
-
-	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
-	pingErr := pool.Ping(pingCtx)
-	pingCancel()
-	if pingErr != nil && s.provisioner != nil {
-		var pgErr *pgconn.PgError
-		shouldHeal := true
-		if errors.As(pingErr, &pgErr) && pgErr.Code != "28P01" {
-			shouldHeal = false
-		}
-		if shouldHeal {
-			project, _ := s.projectRepo.GetByIDAndUserID(ctx, projectID, userID)
-			if project != nil {
-				resourceRef := s.provisioner.ResourceRefForProject(projectID, project.DBType)
-				healCtx, healCancel := context.WithTimeout(ctx, 30*time.Second)
-				healResult, healErr := s.provisioner.GetConnectionByResourceRef(healCtx, resourceRef, project.DBType)
-				healCancel()
-				if healErr == nil && healResult != nil {
-					pool.Close()
-					_ = s.instanceRepo.UpdateConnectionInfo(params.instanceID, healResult.Host, healResult.Port)
-					if encrypted, encErr := utils.EncryptString(healResult.Password); encErr == nil {
-						_ = s.credRepo.Upsert(&models.DatabaseCredential{
-							DBInstanceID:      params.instanceID,
-							Username:          "admin",
-							PasswordEncrypted: encrypted,
-						})
-					}
-					pool, err = database.ConnectToPostgresProject(healResult.Host, healResult.Port, healResult.User, healResult.Password, "app")
-					if err != nil {
-						return nil, uuid.Nil, err
-					}
-					pingCtx2, cancel2 := context.WithTimeout(ctx, 5*time.Second)
-					pingErr = pool.Ping(pingCtx2)
-					cancel2()
-				}
-			}
-		}
-	}
-	if pingErr != nil {
-		pool.Close()
-		return nil, uuid.Nil, pingErr
-	}
-
 	return pool, params.instanceID, nil
 }
 
 // GetMongoClient returns a MongoDB client for the project's database instance.
 // Caller must defer client.Disconnect(ctx) on the returned client.
-func (s *InstanceConnectionService) GetMongoClient(ctx context.Context, userID, projectID uuid.UUID) (*mongo.Client, error) {
-	params, err := s.getConnectionParams(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
-	}
-
-	client, err := repository.ConnectToMongoProject(params.host, params.port, params.username, params.password, "app")
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
+//func (s *InstanceConnectionService) GetMongoClient(ctx context.Context, userID, projectID uuid.UUID) (*mongo.Client, error) {
+//	params, err := s.getConnectionParams(ctx, userID, projectID)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	client, err := repository.ConnectToMongoProject(params.host, params.port, params.username, params.password, "app")
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return client, nil
+//}

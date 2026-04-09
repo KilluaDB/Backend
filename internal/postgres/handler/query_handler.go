@@ -10,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/google/uuid"
 )
 
 type QueryHandler struct {
@@ -22,49 +21,26 @@ func NewQueryHandler(queryService *service.QueryService) *QueryHandler {
 }
 
 // ExecuteQuery executes a SQL query for a Postgres project.
-// Body: { "query": "..." }
 func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
-	projectId := c.Param("id")
-	if projectId == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Project id is required")
-		return
-	}
-
-	userId, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-		return
-	}
-
-	var userUUID uuid.UUID
-	switch v := userId.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		parsed, err := uuid.Parse(v)
-		if err != nil {
-			responses.Fail(c, http.StatusUnauthorized, err, "Invalid user ID format")
-			return
-		}
-		userUUID = parsed
-	default:
-		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
-		return
-	}
-
-	projectUUID, err := uuid.Parse(projectId)
+	projectUUID, err := projectIDFromGin(c)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
 	var req service.ExecuteQueryRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
 		return
 	}
 	if req.Query == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Query is required: Cannot be empty")
+		pgFail(c, http.StatusBadRequest, nil, "Query is required: Cannot be empty")
 		return
 	}
 
@@ -77,19 +53,23 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 				message = result.Error
 			}
 			if result != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": message, "data": result})
+				pgFailWithData(c, http.StatusBadRequest, err, message, result)
 			} else {
-				responses.Fail(c, http.StatusBadRequest, err, message)
+				pgFail(c, http.StatusBadRequest, err, message)
 			}
 			return
 		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
+			message := err.Error()
+			if result != nil && result.Error != "" {
+				message = result.Error
+			}
 			if result != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Query execution failed", "data": result})
+				pgFailWithData(c, http.StatusBadRequest, err, message, result)
 			} else {
-				responses.Fail(c, http.StatusInternalServerError, err, "Query execution failed")
+				pgFail(c, http.StatusBadRequest, err, message)
 			}
 			return
 		}
@@ -108,11 +88,17 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	responses.Success(c, http.StatusOK, response, "Query executed successfully")
 }
 
-// GetQueryHistory returns Postgres query history for the authenticated user.
+// GetQueryHistory returns Postgres query history for this project's database instance and the authenticated user.
 func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
-	userId, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+
+	projectUUID, err := projectIDFromGin(c)
+	if err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 
@@ -125,28 +111,17 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 		limit = 30
 	}
 
-	var userUUID uuid.UUID
-	switch v := userId.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		parsed, err := uuid.Parse(v)
-		if err != nil {
-			responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
+	history, err := h.queryService.GetQueryHistory(c.Request.Context(), userUUID, projectUUID, limit)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			pgFail(c, http.StatusInternalServerError, err, "Failed to retrieve query history")
 			return
 		}
-		userUUID = parsed
-	default:
-		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
-		return
-	}
-
-	history, err := h.queryService.GetQueryHistory(userUUID, limit)
-	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve query history")
-		return
 	}
 
 	responses.Success(c, http.StatusOK, history, "Query history retrieved successfully")
 }
-

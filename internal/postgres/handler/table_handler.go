@@ -2,13 +2,15 @@ package handler
 
 import (
 	"backend/internal/postgres/model"
+	"backend/internal/postgres/repository"
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,161 +18,12 @@ import (
 
 type TableHandler struct {
 	tableService *service.TableService
-	recordService *services.RecordService
 }
 
-func NewTableHandler(tableService *service.TableService, recordService *services.RecordService) *TableHandler {
+func NewTableHandler(tableService *service.TableService) *TableHandler {
 	return &TableHandler{
-		tableService:  tableService,
-		recordService: recordService,
+		tableService: tableService,
 	}
-}
-
-func (h *TableHandler) CreateTable(c *gin.Context) {
-	projectId := c.Param("id")
-	if projectId == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Project id is required")
-		return
-	}
-
-	userId, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-		return
-	}
-
-	var req model.CreateTableRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
-		return
-	}
-
-	userUUID, err := h.toUUID(userId)
-	if err != nil {
-		responses.Fail(c, http.StatusUnauthorized, err, "Invalid user ID format")
-		return
-	}
-
-	projectUUID, err := uuid.Parse(projectId)
-	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
-		return
-	}
-
-	result, err := h.tableService.CreateTable(&req, userUUID, projectUUID)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid request: schema, table, or column names or types are invalid")
-			return
-		case errors.Is(err, service.ErrTableAlreadyExists):
-			responses.Fail(c, http.StatusConflict, err, "Table already exists")
-			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
-			return
-		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create table")
-			return
-		}
-	}
-
-	response := gin.H{
-		"result": result,
-	}
-
-	responses.Success(c, http.StatusCreated, response, "Table created successfully")
-}
-
-func (h *TableHandler) DeleteTable(c *gin.Context) {
-	projectId := c.Param("id")
-	if projectId == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Project id is required")
-		return
-	}
-
-	userId, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
-		return
-	}
-
-	var req model.DeleteTableRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
-		return
-	}
-
-	userUUID, err := h.toUUID(userId)
-	if err != nil {
-		responses.Fail(c, http.StatusUnauthorized, err, "Invalid user Id format")
-		return
-	}
-
-	projectUUID, err := uuid.Parse(projectId)
-	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
-		return
-	}
-
-	result, err := h.tableService.DeleteTable(&req, userUUID, projectUUID)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid request: schema or table name is invalid")
-			return
-		case errors.Is(err, service.ErrTableNotFound):
-			responses.Fail(c, http.StatusNotFound, err, "Table does not exist")
-			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
-			return
-		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete table")
-			return
-		}
-	}
-
-	response := gin.H{
-		"result": result,
-	}
-
-	responses.Success(c, http.StatusOK, response, "Table deleted successfully")
-}
-
-func (h *TableHandler) toUUID(userId any) (uuid.UUID, error) {
-	switch v := userId.(type) {
-	case uuid.UUID:
-		return v, nil
-	case string:
-		parsed, err := uuid.Parse(v)
-		if err != nil {
-			return uuid.Nil, err
-		}
-		return parsed, nil
-	default:
-		return uuid.Nil, fmt.Errorf("invalid user Id type: %T", v)
-	}
-}
-
-func (h *TableHandler) getUserAndProjectUUID(c *gin.Context) (userUUID, projectUUID uuid.UUID, ok bool) {
-	userID, exists := c.Get("userId")
-	if !exists {
-		return uuid.Nil, uuid.Nil, false
-	}
-	userUUID, err := h.toUUID(userID)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, false
-	}
-	projectID := c.Param("id")
-	if projectID == "" {
-		return uuid.Nil, uuid.Nil, false
-	}
-	projectUUID, err = uuid.Parse(projectID)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, false
-	}
-	return userUUID, projectUUID, true
 }
 
 func parseFilterFromQuery(c *gin.Context) map[string]interface{} {
@@ -185,29 +38,267 @@ func parseFilterFromQuery(c *gin.Context) map[string]interface{} {
 	return filter
 }
 
-// InsertRowWithTable POST /postgres/tables/:table/rows
-func (h *TableHandler) InsertRowWithTable(c *gin.Context) {
-	table := c.Param("table")
-	if table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required")
+// parseFilterForDeleteRows uses JSON body {"filter": {...}} when present (typical for frontend),
+// otherwise ?filter= URL-encoded JSON (same shape as GET rows).
+func parseFilterForDeleteRows(c *gin.Context) map[string]interface{} {
+	ct := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.HasPrefix(ct, "application/json") && c.Request.ContentLength > 0 {
+		var body struct {
+			Filter map[string]interface{} `json:"filter"`
+		}
+		if err := c.ShouldBindJSON(&body); err == nil && body.Filter != nil {
+			return body.Filter
+		}
+	}
+	return parseFilterFromQuery(c)
+}
+
+// requireUserAndProject parses auth user and path project id. On failure writes 400 for invalid :id or 401 for missing user.
+func requireUserAndProject(c *gin.Context) (userUUID, projectUUID uuid.UUID, ok bool) {
+	u, p, ok, projErr := userAndProjectFromGin(c)
+	if !ok {
+		if projErr != nil {
+			pgFail(c, http.StatusBadRequest, projErr, "Invalid projectId format")
+		} else {
+			pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		}
+		return uuid.Nil, uuid.Nil, false
+	}
+	return u, p, true
+}
+
+// failTableInstanceError maps connection/access errors to 404; returns true if handled.
+func failTableInstanceError(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, services.ErrProjectNotAccessible) || errors.Is(err, services.ErrNoRunningInstance) {
+		pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+		return true
+	}
+	return false
+}
+
+// schemaQueryOrDefault reads `schema` from the query string, defaulting empty to "public", validates it, or writes 400.
+func schemaQueryOrDefault(c *gin.Context) (string, bool) {
+	raw := c.Query("schema")
+	if err := service.ValidatePostgresSchemaName(raw); err != nil {
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return "", false
+	}
+	return service.PostgresSchema(raw), true
+}
+
+// CreateTable post /postgres/tables
+func (h *TableHandler) CreateTable(c *gin.Context) {
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	projectUUID, err := projectIDFromGin(c)
+	if err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	var req model.CreateTableRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.tableService.CreateTable(c.Request.Context(), &req, userUUID, projectUUID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			pgFail(c, http.StatusBadRequest, err, "Invalid request: schema, table, or column names or types are invalid")
+			return
+		case errors.Is(err, service.ErrTableAlreadyExists):
+			pgFail(c, http.StatusConflict, err, "Table already exists")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			pgFail(c, http.StatusBadRequest, err, "Failed to create table")
+			return
+		}
+	}
+
+	response := gin.H{
+		"result": result,
+	}
+
+	responses.Success(c, http.StatusCreated, response, "Table created successfully")
+}
+
+// GetTables GET /postgres/tables
+func (h *TableHandler) GetTables(c *gin.Context) {
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	tables, err := h.tableService.GetTables(c.Request.Context(), projectUUID, userUUID, schema)
+	if err != nil {
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, "Failed to list tables")
+		return
+	}
+	responses.Success(c, http.StatusOK, tables, "Tables retrieved successfully")
+}
+
+// GetTable GET /postgres/tables/:table — column and key metadata (no rows).
+func (h *TableHandler) GetTable(c *gin.Context) {
+	table := c.Param("table")
+	if table == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	meta, err := h.tableService.GetTableMetadata(c.Request.Context(), projectUUID, userUUID, schema, table)
+	if err != nil {
+		if errors.Is(err, service.ErrTableNotFound) {
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		}
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return
+	}
+	responses.Success(c, http.StatusOK, meta, "Table metadata retrieved successfully")
+}
+
+// DeleteTable DELETE /postgres/tables/:table
+func (h *TableHandler) DeleteTable(c *gin.Context) {
+	userUUID, ok := userIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	projectUUID, err := projectIDFromGin(c)
+	if err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	var req model.DeleteTableRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.tableService.DeleteTable(c.Request.Context(), &req, userUUID, projectUUID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			pgFail(c, http.StatusBadRequest, err, "Invalid request: schema or table name is invalid")
+			return
+		case errors.Is(err, service.ErrTableNotFound):
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			pgFail(c, http.StatusBadRequest, err, "Failed to delete table")
+			return
+		}
+	}
+
+	response := gin.H{
+		"result": result,
+	}
+
+	responses.Success(c, http.StatusOK, response, "Table deleted successfully")
+}
+
+// UpdateTable PATCH /postgres/tables/:table
+func (h *TableHandler) UpdateTable(c *gin.Context) {
+	table := c.Param("table")
+	if table == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	var req model.UpdateTableRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.tableService.UpdateTable(c.Request.Context(), userUUID, projectUUID, schema, table, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			pgFail(c, http.StatusBadRequest, err, err.Error())
+			return
+		case errors.Is(err, service.ErrTableNotFound):
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
+			return
+		default:
+			pgFail(c, http.StatusBadRequest, err, err.Error())
+			return
+		}
+	}
+
+	responses.Success(c, http.StatusOK, gin.H{"result": result}, "Table updated successfully")
+}
+
+// InsertRow POST /postgres/tables/:table/rows
+func (h *TableHandler) InsertRow(c *gin.Context) {
+	table := c.Param("table")
+	if table == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
 		return
 	}
 	var body struct {
 		Values map[string]interface{} `json:"values" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
-	req := service.InsertRowRequest{Table: table, Values: body.Values}
+	req := service.InsertRowRequest{Schema: schema, Table: table, Values: body.Values}
 	result, err := h.tableService.InsertRow(c.Request.Context(), userUUID, projectUUID, req)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to insert row")
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
 	responses.Success(c, http.StatusCreated, result, "Row inserted successfully")
@@ -217,18 +308,51 @@ func (h *TableHandler) InsertRowWithTable(c *gin.Context) {
 func (h *TableHandler) GetRows(c *gin.Context) {
 	table := c.Param("table")
 	if table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required")
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
 		return
 	}
 	filter := parseFilterFromQuery(c)
-	records, err := h.recordService.GetRecords(c.Request.Context(), projectUUID, userUUID, table, filter)
+
+	limit := repository.MaxGetRowsLimit
+	if ls := c.Query("limit"); ls != "" {
+		l, err := strconv.Atoi(ls)
+		if err != nil || l < 1 {
+			pgFail(c, http.StatusBadRequest, nil, "limit must be a positive integer")
+			return
+		}
+		if l > repository.MaxGetRowsLimit {
+			pgFail(c, http.StatusBadRequest, nil, "limit cannot exceed "+strconv.Itoa(repository.MaxGetRowsLimit))
+			return
+		}
+		limit = l
+	}
+
+	offset := 0
+	if os := c.Query("offset"); os != "" {
+		o, err := strconv.Atoi(os)
+		if err != nil || o < 0 {
+			pgFail(c, http.StatusBadRequest, nil, "offset must be a non-negative integer")
+			return
+		}
+		offset = o
+	}
+
+	includeTotal := strings.EqualFold(c.Query("include_total"), "1") || strings.EqualFold(c.Query("include_total"), "true")
+
+	records, err := h.tableService.GetRows(c.Request.Context(), projectUUID, userUUID, schema, table, filter, limit, offset, includeTotal)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to get rows")
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
 	responses.Success(c, http.StatusOK, records, "Rows retrieved successfully")
@@ -238,12 +362,15 @@ func (h *TableHandler) GetRows(c *gin.Context) {
 func (h *TableHandler) UpdateRows(c *gin.Context) {
 	table := c.Param("table")
 	if table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required")
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -251,60 +378,58 @@ func (h *TableHandler) UpdateRows(c *gin.Context) {
 		Update map[string]interface{} `json:"update" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
-	if err := h.recordService.UpdateRecords(c.Request.Context(), projectUUID, userUUID, table, body.Filter, body.Update); err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to update rows")
+	if err := h.tableService.UpdateRows(c.Request.Context(), projectUUID, userUUID, schema, table, body.Filter, body.Update); err != nil {
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
 	responses.Success(c, http.StatusOK, nil, "Rows updated successfully")
 }
 
-// DeleteRows DELETE /postgres/tables/:table/rows or .../rows/:row_id
+// DeleteRows DELETE /postgres/tables/:table/rows
 func (h *TableHandler) DeleteRows(c *gin.Context) {
 	table := c.Param("table")
 	if table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required")
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	rowID := c.Param("row_id")
-	if rowID != "" {
-		req := service.DeleteRowRequest{TableName: table}
-		if err := h.tableService.DeleteRow(c.Request.Context(), userUUID, projectUUID, req, rowID); err != nil {
-			if err.Error() == "row not found" {
-				responses.Fail(c, http.StatusNotFound, err, "Row not found")
-				return
-			}
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete row")
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	filter := parseFilterForDeleteRows(c)
+	if err := h.tableService.DeleteRowsByFilter(c.Request.Context(), userUUID, projectUUID, schema, table, filter); err != nil {
+		if failTableInstanceError(c, err) {
 			return
 		}
-		responses.Success(c, http.StatusNoContent, nil, "Row deleted successfully")
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	filter := parseFilterFromQuery(c)
-	if err := h.recordService.DeleteRecords(c.Request.Context(), projectUUID, userUUID, table, filter); err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete rows")
-		return
-	}
-	responses.Success(c, http.StatusNoContent, nil, "Rows deleted successfully")
+	c.Status(http.StatusNoContent)
 }
 
-// AddColumnWithTable POST /postgres/tables/:table/columns
-func (h *TableHandler) AddColumnWithTable(c *gin.Context) {
+// AddColumn POST /postgres/tables/:table/columns
+func (h *TableHandler) AddColumn(c *gin.Context) {
 	table := c.Param("table")
 	if table == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table name is required")
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -313,35 +438,142 @@ func (h *TableHandler) AddColumnWithTable(c *gin.Context) {
 		Default interface{} `json:"default,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
-	req := service.AddColumnRequest{TableName: table, Name: body.Name, Type: body.Type, Default: body.Default}
+	req := service.AddColumnRequest{Schema: schema, TableName: table, Name: body.Name, Type: body.Type, Default: body.Default}
 	result, err := h.tableService.AddColumn(c.Request.Context(), userUUID, projectUUID, req)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to add column")
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
 	responses.Success(c, http.StatusOK, result, "Column added successfully")
 }
 
-// DeleteColumnWithTable DELETE /postgres/tables/:table/columns/:column
-func (h *TableHandler) DeleteColumnWithTable(c *gin.Context) {
+// DropColumn DELETE /postgres/tables/:table/columns/:column
+func (h *TableHandler) DropColumn(c *gin.Context) {
 	table := c.Param("table")
 	column := c.Param("column")
 	if table == "" || column == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Table and column are required")
+		pgFail(c, http.StatusBadRequest, nil, "Table and column are required")
 		return
 	}
-	userUUID, projectUUID, ok := h.getUserAndProjectUUID(c)
+	userUUID, projectUUID, ok := requireUserAndProject(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	req := service.DeleteColumnRequest{TableName: table}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	req := service.DeleteColumnRequest{Schema: schema, TableName: table}
 	if err := h.tableService.DeleteColumn(c.Request.Context(), userUUID, projectUUID, req, column); err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete column")
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusNoContent, nil, "Column deleted successfully")
+	c.Status(http.StatusNoContent)
+}
+
+// ListIndexes GET /postgres/tables/:table/indexes
+func (h *TableHandler) ListIndexes(c *gin.Context) {
+	table := c.Param("table")
+	if table == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	list, err := h.tableService.ListTableIndexes(c.Request.Context(), projectUUID, userUUID, schema, table)
+	if err != nil {
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return
+	}
+	responses.Success(c, http.StatusOK, gin.H{"indexes": list}, "Indexes listed successfully")
+}
+
+// CreateIndex POST /postgres/tables/:table/indexes
+func (h *TableHandler) CreateIndex(c *gin.Context) {
+	table := c.Param("table")
+	if table == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table name is required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	var req model.CreateIndexRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+	if err := h.tableService.CreateTableIndex(c.Request.Context(), projectUUID, userUUID, schema, table, &req); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			pgFail(c, http.StatusBadRequest, err, err.Error())
+			return
+		case errors.Is(err, service.ErrIndexAlreadyExists):
+			pgFail(c, http.StatusConflict, err, "Index already exists")
+			return
+		}
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return
+	}
+	responses.Success(c, http.StatusCreated, nil, "Index created successfully")
+}
+
+// DropIndex DELETE /postgres/tables/:table/indexes/:index
+func (h *TableHandler) DropIndex(c *gin.Context) {
+	table := c.Param("table")
+	indexName := c.Param("index")
+	if table == "" || indexName == "" {
+		pgFail(c, http.StatusBadRequest, nil, "Table and index name are required")
+		return
+	}
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+	schema, ok := schemaQueryOrDefault(c)
+	if !ok {
+		return
+	}
+	if err := h.tableService.DropTableIndex(c.Request.Context(), projectUUID, userUUID, schema, table, indexName); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrIndexNotFound):
+			pgFail(c, http.StatusNotFound, err, "Index does not exist on this table")
+			return
+		case errors.Is(err, repository.ErrCannotDropPrimaryIndex):
+			pgFail(c, http.StatusBadRequest, err, "Cannot drop primary key index")
+			return
+		}
+		if failTableInstanceError(c, err) {
+			return
+		}
+		pgFail(c, http.StatusBadRequest, err, err.Error())
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

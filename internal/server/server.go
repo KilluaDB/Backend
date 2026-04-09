@@ -3,13 +3,7 @@ package server
 import (
 	"backend/internal/config"
 	"backend/internal/database"
-	dbdrivers "backend/internal/database"
 	"backend/internal/handlers"
-	mgodriver "backend/internal/mongodb/driver"
-	mongodbhandler "backend/internal/mongodb/handler"
-	mongorepo "backend/internal/mongodb/repository"
-	mongosvc "backend/internal/mongodb/service"
-	pgdriver "backend/internal/postgres/driver"
 	pghandler "backend/internal/postgres/handler"
 	postgresrepo "backend/internal/postgres/repository"
 	postgressvc "backend/internal/postgres/service"
@@ -102,17 +96,6 @@ func NewServer() *http.Server {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
 	instanceConn := services.NewInstanceConnectionService(projectRepo, dbInstanceRepo, dbCredentialRepo, provisioner)
-
-	// Database drivers registry (Postgres + Mongo) for unified container/record/field APIs
-	pgDBDriver := pgdriver.NewDriver(pool)
-	mongoDBDriver := mgodriver.NewDriver(pool)
-	driverRegistry := dbdrivers.NewInMemoryDriverRegistry(map[string]dbdrivers.DatabaseDriver{
-		"postgresql": pgDBDriver,
-		"mongodb":    mongoDBDriver,
-	})
-
-	recordService := services.NewRecordService(projectRepo, driverRegistry)
-
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()
 	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
@@ -125,17 +108,17 @@ func NewServer() *http.Server {
 	pgQueryService := postgressvc.NewQueryService(instanceConn, pgQueryHistoryRepo, maxPostgresQueryLimit)
 	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
-	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
-	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
-	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
+	//	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
+	//	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
+	//	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
 
 	schemaService := postgressvc.NewSchemaService(instanceConn)
 	schemaHandler := pghandler.NewSchemaHandler(schemaService)
-	tableHandler := pghandler.NewTableHandler(tableService, recordService)
-	postgresHandler := pghandler.NewPostgresHandler(projectService, tableService, recordService)
+	tableHandler := pghandler.NewTableHandler(tableService)
+	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler)
 
 	// MongoDB API handler
-	mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
+	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
 
 	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
 	router := gin.New()
@@ -154,7 +137,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, schemaHandler, tableHandler, projectRepo, postgresHandler, pgQueryHandler, mongodbHandler, mongoQueryHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -169,20 +152,20 @@ func NewServer() *http.Server {
 
 func validateRequiredEnvVars() error {
 	required := map[string]string{
-		"PORT":                os.Getenv("PORT"),
-		"DB_HOST":             os.Getenv("DB_HOST"),
-		"DB_PORT":             os.Getenv("DB_PORT"),
-		"DB_USERNAME":         os.Getenv("DB_USERNAME"),
-		"DB_PASSWORD":         os.Getenv("DB_PASSWORD"),
-		"DB_DATABASE":         os.Getenv("DB_DATABASE"),
-		"DB_ADMIN_USER":       os.Getenv("DB_ADMIN_USER"),
-		"DB_ADMIN_PASSWORD":   os.Getenv("DB_ADMIN_PASSWORD"),
-		"REDIS_ADDR":          os.Getenv("REDIS_ADDR"),
-		"ACCESS_TOKEN_SECRET": os.Getenv("ACCESS_TOKEN_SECRET"),
+		"PORT":                 os.Getenv("PORT"),
+		"DB_HOST":              os.Getenv("DB_HOST"),
+		"DB_PORT":              os.Getenv("DB_PORT"),
+		"DB_USERNAME":          os.Getenv("DB_USERNAME"),
+		"DB_PASSWORD":          os.Getenv("DB_PASSWORD"),
+		"DB_DATABASE":          os.Getenv("DB_DATABASE"),
+		"DB_ADMIN_USER":        os.Getenv("DB_ADMIN_USER"),
+		"DB_ADMIN_PASSWORD":    os.Getenv("DB_ADMIN_PASSWORD"),
+		"REDIS_ADDR":           os.Getenv("REDIS_ADDR"),
+		"ACCESS_TOKEN_SECRET":  os.Getenv("ACCESS_TOKEN_SECRET"),
 		"REFRESH_TOKEN_SECRET": os.Getenv("REFRESH_TOKEN_SECRET"),
-		"GOOGLE_CLIENT_ID":    os.Getenv("GOOGLE_CLIENT_ID"),
+		"GOOGLE_CLIENT_ID":     os.Getenv("GOOGLE_CLIENT_ID"),
 		"GOOGLE_CLIENT_SECRET": os.Getenv("GOOGLE_CLIENT_SECRET"),
-		"GOOGLE_REDIRECT_URL": os.Getenv("GOOGLE_REDIRECT_URL"),
+		"GOOGLE_REDIRECT_URL":  os.Getenv("GOOGLE_REDIRECT_URL"),
 	}
 
 	for name, value := range required {

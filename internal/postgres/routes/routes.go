@@ -11,26 +11,14 @@ import (
 // PostgresRoutes registers all /projects/:id/postgres/* endpoints.
 // Middleware ensures the project is PostgreSQL.
 type PostgresRoutes struct {
-	projectRepo     repositories.ProjectRepository
-	postgresHandler *handler.PostgresHandler
-	tableHandler    *handler.TableHandler
-	schemaHandler   *handler.SchemaHandler
-	queryHandler    *handler.QueryHandler
+	projectRepo repositories.ProjectRepository
+	pg          *handler.PostgresHandler
 }
 
-func NewPostgresRoutes(
-	projectRepo repositories.ProjectRepository,
-	postgresHandler *handler.PostgresHandler,
-	tableHandler *handler.TableHandler,
-	schemaHandler *handler.SchemaHandler,
-	queryHandler *handler.QueryHandler,
-) *PostgresRoutes {
+func NewPostgresRoutes(projectRepo repositories.ProjectRepository, pg *handler.PostgresHandler) *PostgresRoutes {
 	return &PostgresRoutes{
-		projectRepo:     projectRepo,
-		postgresHandler: postgresHandler,
-		tableHandler:    tableHandler,
-		schemaHandler:   schemaHandler,
-		queryHandler:    queryHandler,
+		projectRepo: projectRepo,
+		pg:          pg,
 	}
 }
 
@@ -38,28 +26,36 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	postgres := router.Group("/projects/:id/postgres")
 	postgres.Use(middlewares.Authenticate)
 	postgres.Use(middlewares.RequirePostgresProject(r.projectRepo))
+	h := r.pg
 	{
 		// Tables
-		postgres.GET("/tables", r.postgresHandler.ListTables)
-		postgres.POST("/tables", r.tableHandler.CreateTable)
-		postgres.DELETE("/tables/:table", r.postgresHandler.DeleteTableByPath)
+		postgres.POST("/tables", h.Table.CreateTable)
+		postgres.GET("/tables", h.Table.GetTables)
+		postgres.GET("/tables/:table", h.Table.GetTable)
+		postgres.PATCH("/tables/:table", h.Table.UpdateTable)
+		postgres.DELETE("/tables/:table", h.Table.DeleteTable)
 
 		// Rows
-		postgres.GET("/tables/:table/rows", r.tableHandler.GetRows)
-		postgres.POST("/tables/:table/rows", r.tableHandler.InsertRowWithTable)
-		postgres.PATCH("/tables/:table/rows", r.tableHandler.UpdateRows)
-		postgres.DELETE("/tables/:table/rows/:row_id", r.tableHandler.DeleteRows)
-		postgres.DELETE("/tables/:table/rows", r.tableHandler.DeleteRows)
+		postgres.GET("/tables/:table/rows", h.Table.GetRows)
+		postgres.POST("/tables/:table/rows", h.Table.InsertRow)
+		postgres.PATCH("/tables/:table/rows", h.Table.UpdateRows)
+		postgres.DELETE("/tables/:table/rows", h.Table.DeleteRows)
 
 		// Columns
-		postgres.POST("/tables/:table/columns", r.tableHandler.AddColumnWithTable)
-		postgres.DELETE("/tables/:table/columns/:column", r.tableHandler.DeleteColumnWithTable)
+		postgres.POST("/tables/:table/columns", h.Table.AddColumn)
+		postgres.DELETE("/tables/:table/columns/:column", h.Table.DropColumn)
+
+		// Indexes
+		postgres.GET("/tables/:table/indexes", h.Table.ListIndexes)
+		postgres.POST("/tables/:table/indexes", h.Table.CreateIndex)
+		postgres.DELETE("/tables/:table/indexes/:index", h.Table.DropIndex)
 
 		// Schema
-		postgres.GET("/schema/visualize", r.schemaHandler.VisualizeSchema)
+		postgres.GET("/schemas", h.Schema.ListSchemas)
+		postgres.GET("/schema/visualize", h.Schema.VisualizeSchema)
 
 		// Query
-		postgres.POST("/query/execute", r.queryHandler.ExecuteQuery)
-		postgres.GET("/query/history", r.queryHandler.GetQueryHistory)
+		postgres.POST("/query/execute", h.Query.ExecuteQuery)
+		postgres.GET("/query/history", h.Query.GetQueryHistory)
 	}
 }

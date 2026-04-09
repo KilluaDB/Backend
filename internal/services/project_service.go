@@ -16,21 +16,21 @@ import (
 
 // Sentinel errors for project operations so handlers can return proper HTTP status and messages.
 var (
-	ErrInvalidProjectID    = errors.New("invalid project ID")
-	ErrInvalidUserID       = errors.New("invalid user ID")
-	ErrInvalidDBType       = errors.New("invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
-	ErrInvalidResourceTier = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+	ErrInvalidProjectID     = errors.New("invalid project ID")
+	ErrInvalidUserID        = errors.New("invalid user ID")
+	ErrInvalidDBType        = errors.New("invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
+	ErrInvalidResourceTier  = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
 	ErrProjectNotFound      = errors.New("project not found or access denied")
 	ErrProjectCreateDB      = errors.New("failed to create project or database instance")
 	ErrUnsupportedDBForRows = errors.New("row and column operations are only supported for PostgreSQL projects")
 )
 
 type ProjectService struct {
-	projectRepo       repositories.ProjectRepository
-	provisioner       *OperatorProvisioner
-	dbInstanceRepo    *repositories.DatabaseInstanceRepository
-	dbCredentialRepo  *repositories.DatabaseCredentialRepository
-	instanceConn      *InstanceConnectionService
+	projectRepo          repositories.ProjectRepository
+	provisioner          *OperatorProvisioner
+	dbInstanceRepo       *repositories.DatabaseInstanceRepository
+	dbCredentialRepo     *repositories.DatabaseCredentialRepository
+	instanceConn         *InstanceConnectionService
 	postgresTableService *service.TableService
 }
 
@@ -43,11 +43,11 @@ func NewProjectService(
 	postgresTableService *service.TableService,
 ) *ProjectService {
 	return &ProjectService{
-		projectRepo:         projectRepo,
-		provisioner:         provisioner,
-		dbInstanceRepo:     dbInstanceRepo,
-		dbCredentialRepo:   dbCredentialRepo,
-		instanceConn:       instanceConn,
+		projectRepo:          projectRepo,
+		provisioner:          provisioner,
+		dbInstanceRepo:       dbInstanceRepo,
+		dbCredentialRepo:     dbCredentialRepo,
+		instanceConn:         instanceConn,
 		postgresTableService: postgresTableService,
 	}
 }
@@ -55,8 +55,8 @@ func NewProjectService(
 type CreateProjectRequest struct {
 	Name         string  `json:"name" binding:"required"`
 	Description  *string `json:"description,omitempty"`
-	DBType       string  `json:"db_type" binding:"required"`   // 'postgresql'|'sql' (→ postgresql) or 'mongodb'|'nosql' (→ mongodb)
-	ResourceTier string  `json:"resource_tier,omitempty"`      // 'free', 'basic', or 'premium'; defaults to 'free'
+	DBType       string  `json:"db_type" binding:"required"` // 'postgresql'|'sql' (→ postgresql) or 'mongodb'|'nosql' (→ mongodb)
+	ResourceTier string  `json:"resource_tier,omitempty"`    // 'free', 'basic', or 'premium'; defaults to 'free'
 }
 
 func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, *models.DatabaseInstance, error) {
@@ -301,52 +301,4 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID string, userID str
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
 	return nil
-}
-
-// InsertRow delegates to PostgreSQL row service when project is PostgreSQL.
-func (s *ProjectService) InsertRow(userID, projectID uuid.UUID, req service.InsertRowRequest) (*service.InsertRowResponse, error) {
-	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
-	if err != nil || proj == nil {
-		return nil, ErrProjectNotFound
-	}
-	if proj.DBType != "postgresql" {
-		return nil, ErrUnsupportedDBForRows
-	}
-	return s.postgresTableService.InsertRow(context.Background(), userID, projectID, req)
-}
-
-// DeleteRow delegates to PostgreSQL row service when project is PostgreSQL.
-func (s *ProjectService) DeleteRow(userID, projectID uuid.UUID, req service.DeleteRowRequest, rowID string) error {
-	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
-	if err != nil || proj == nil {
-		return ErrProjectNotFound
-	}
-	if proj.DBType != "postgresql" {
-		return ErrUnsupportedDBForRows
-	}
-	return s.postgresTableService.DeleteRow(context.Background(), userID, projectID, req, rowID)
-}
-
-// AddColumn delegates to PostgreSQL row service when project is PostgreSQL.
-func (s *ProjectService) AddColumn(userID, projectID uuid.UUID, req service.AddColumnRequest) (*service.AddColumnResponse, error) {
-	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
-	if err != nil || proj == nil {
-		return nil, ErrProjectNotFound
-	}
-	if proj.DBType != "postgresql" {
-		return nil, ErrUnsupportedDBForRows
-	}
-	return s.postgresTableService.AddColumn(context.Background(), userID, projectID, req)
-}
-
-// DeleteColumn delegates to PostgreSQL row service when project is PostgreSQL.
-func (s *ProjectService) DeleteColumn(userID, projectID uuid.UUID, req service.DeleteColumnRequest, columnName string) error {
-	proj, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectID, userID)
-	if err != nil || proj == nil {
-		return ErrProjectNotFound
-	}
-	if proj.DBType != "postgresql" {
-		return ErrUnsupportedDBForRows
-	}
-	return s.postgresTableService.DeleteColumn(context.Background(), userID, projectID, req, columnName)
 }

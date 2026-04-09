@@ -23,6 +23,11 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 CLUSTER_NAME="dbaas-local"
 K3D_CONTEXT="k3d-${CLUSTER_NAME}"
 
+# True if k3d knows about this cluster (kubectl context alone can be stale).
+k3d_cluster_exists() {
+  k3d cluster list --no-headers 2>/dev/null | awk 'NF {print $1}' | grep -qx "${CLUSTER_NAME}"
+}
+
 # Ensure we're in repo root
 cd "$(dirname "$0")/.."
 
@@ -58,22 +63,31 @@ if ! command_exists k3d; then
 fi
 ok "kubectl, Helm, Docker and k3d found"
 
-info "Ensuring k3d cluster '${CLUSTER_NAME}' is running..."
-if ! kubectl config get-contexts "${K3D_CONTEXT}" >/dev/null 2>&1; then
-  info "k3d context ${K3D_CONTEXT} not found. Creating cluster '${CLUSTER_NAME}'..."
-  k3d cluster create "${CLUSTER_NAME}" --wait --timeout 5m
-else
-  info "k3d context ${K3D_CONTEXT} already exists"
+if ! docker info >/dev/null 2>&1; then
+  err "Docker daemon is not running or not reachable at ${DOCKER_HOST:-unix:///var/run/docker.sock}."
+  err "Start it (e.g. sudo systemctl start docker, or open Docker Desktop), then run this script again."
+  exit 1
 fi
 
-# Make sure the cluster is started and context is selected
+info "Ensuring k3d cluster '${CLUSTER_NAME}' is running..."
+if k3d_cluster_exists; then
+  info "k3d cluster '${CLUSTER_NAME}' found"
+  if ! kubectl cluster-info &>/dev/null 2>&1; then
+    warn "Kubernetes API not reachable; starting k3d cluster '${CLUSTER_NAME}'..."
+    k3d cluster start "${CLUSTER_NAME}"
+  fi
+else
+  info "No k3d cluster named '${CLUSTER_NAME}' (kubectl context may be stale). Creating cluster..."
+  k3d cluster create "${CLUSTER_NAME}" --wait --timeout 5m
+fi
+
+if ! kubectl config get-contexts "${K3D_CONTEXT}" >/dev/null 2>&1; then
+  err "kubectl context ${K3D_CONTEXT} missing after k3d setup. Try: k3d kubeconfig merge ${CLUSTER_NAME} --kubeconfig-merge-default"
+  exit 1
+fi
 kubectl config use-context "${K3D_CONTEXT}" >/dev/null 2>&1 || {
-  warn "Failed to switch kubectl context to ${K3D_CONTEXT}. Attempting to start k3d cluster '${CLUSTER_NAME}'..."
-  k3d cluster start "${CLUSTER_NAME}"
-  kubectl config use-context "${K3D_CONTEXT}" >/dev/null 2>&1 || {
-    err "Unable to use kubectl context ${K3D_CONTEXT}. Check your k3d installation."
-    exit 1
-  }
+  err "Unable to switch kubectl context to ${K3D_CONTEXT}."
+  exit 1
 }
 
 if ! kubectl cluster-info &>/dev/null; then
