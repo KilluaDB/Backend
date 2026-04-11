@@ -21,10 +21,8 @@ spec:
       serviceAccountName: backend
       containers:
         - name: api
-          # For local k3d: build and load with same name, e.g. docker build -t backend-api:latest . && k3d image import backend-api:latest -c <cluster-name>
-          # For AWS: use your ECR URL, e.g. 123456789012.dkr.ecr.region.amazonaws.com/backend:latest
-          image: backend-api:latest
-          imagePullPolicy: IfNotPresent
+          image: docker.io/alimx07/dbaas-backend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
@@ -32,20 +30,19 @@ spec:
             - configMapRef:
                 name: backend-config
           env:
-            # Redis in-cluster service (override ConfigMap if missing)
             - name: REDIS_ADDR
               value: "redis:6379"
-            # Plain postgres (start.sh): uses postgres-secrets. For CNPG meta-db use meta-db-app / meta-db-superuser with key password.
+            # CNPG operator creates these secrets automatically when meta-db cluster is ready
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-secrets
-                  key: POSTGRES_PASSWORD
+                  name: meta-db-app
+                  key: password
             - name: DB_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-secrets
-                  key: POSTGRES_PASSWORD
+                  name: meta-db-superuser
+                  key: password
             - name: ACCESS_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

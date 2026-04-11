@@ -14,7 +14,6 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-    - host: api.domain.com  # if we will use one
       http:
         paths:
           - path: /
