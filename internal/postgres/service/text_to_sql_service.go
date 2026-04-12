@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	postgresrepo "backend/internal/postgres/repository"
@@ -63,11 +62,7 @@ type TextToSQLResponse struct {
 
 // NewTextToSQLService creates a new Text-to-SQL service client
 func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, projectRepo  *postgresrepo.PostgresProjectRepository) *TextToSQLService {
-	baseURL := os.Getenv("TEXT_TO_SQL_URL")
-	if baseURL == "" {
-		baseURL = "http://127.0.0.1:5001" // Default FastAPI URL (AI/integration main.py); use host.docker.internal in Docker (see docker-compose.yml)
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	baseURL := os.Getenv("TEXT_TO_SQL_URL")	
 
 	timeout := 120 * time.Second
 	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {
@@ -95,7 +90,7 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	if project == nil {
 		return nil, ErrProjectNotFound
 	}
-
+	
 	// Find running DB instance for this project
 	inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
 	if err != nil {
@@ -118,17 +113,18 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	if err != nil {
 		return nil, fmt.Errorf("decrypt db password: %w", err)
 	}
-
+	
+	log.Printf("[Database] : %v", project.Name)
 	dbConnection := DatabaseConnection {
 		Host: *inst.Host    ,
 		Port: *inst.Port    ,
-		Database: "postgres",
+		Database: "app",
 		User: cred.Username,
 		Password: dbPassword,
 	}
 
 	req.DBConnection = dbConnection
-
+	
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -166,18 +162,4 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	}
 
 	return &result, nil
-}
-
-func (s *TextToSQLService) HealthCheck() error {
-	resp, err := s.httpClient.Get(s.baseURL + "/health")
-	if err != nil {
-		return fmt.Errorf("text-to-sql service unavailable: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("text-to-sql service unhealthy: status %d", resp.StatusCode)
-	}
-
-	return nil
 }
