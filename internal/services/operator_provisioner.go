@@ -57,6 +57,11 @@ type ProvisionResult struct {
 	ResourceRef string // namespace/name for deletion
 }
 
+const (
+	postgresAppDBName  = "app"
+	postgresAppDBOwner = "app"
+)
+
 // OperatorProvisioner creates and deletes DB instances via Kubernetes operators (CloudNativePG, MongoDB).
 type OperatorProvisioner struct {
 	postgresNamespace string
@@ -200,9 +205,14 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			"spec": map[string]interface{}{
 				"instances":             1,
 				"enableSuperuserAccess": true,
+				"bootstrap": map[string]interface{}{
+					"initdb": map[string]interface{}{
+						"database": postgresAppDBName,
+						"owner":    postgresAppDBOwner,
+					},
+				},
 				"postgresql": map[string]interface{}{
 					"parameters": map[string]interface{}{
-						"shared_preload_libraries": "pg_stat_statements",
 						"pg_stat_statements.max":   "10000",
 						"pg_stat_statements.track": "all",
 					},
@@ -240,23 +250,60 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 	return p.getPostgresConnection(ctx, ns, name)
 }
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
-	secretName := name + "-superuser"
+	appSecretName := name + "-app"
+	superuserSecretName := name + "-superuser"
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
-		secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
-		if err != nil {
-			if errors.IsNotFound(err) {
-				return false, nil
+		// Preferred readiness signal: least-privilege app credentials secret.
+		if secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, appSecretName, metav1.GetOptions{}); err == nil {
+			passBytes := secret.Data["password"]
+			if len(passBytes) > 0 {
+				return true, nil
 			}
+		} else if !errors.IsNotFound(err) {
 			return false, err
 		}
-		passBytes := secret.Data["password"]
-		if len(passBytes) == 0 {
-			return false, nil
+
+		// Backward-compatible fallback for older clusters.
+		if secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, superuserSecretName, metav1.GetOptions{}); err == nil {
+			passBytes := secret.Data["password"]
+			if len(passBytes) > 0 {
+				return true, nil
+			}
+		} else if !errors.IsNotFound(err) {
+			return false, err
 		}
-		return true, nil
+
+		return false, nil
 	})
 }
 func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
+	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
+
+	// Preferred runtime credentials: CNPG app secret (least privilege).
+	appSecretName := name + "-app"
+	if secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, appSecretName, metav1.GetOptions{}); err == nil {
+		username := string(secret.Data["username"])
+		if username == "" {
+			username = postgresAppDBOwner
+		}
+		password := string(secret.Data["password"])
+		if password == "" {
+			return nil, fmt.Errorf("app secret %s has no password", appSecretName)
+		}
+		database := string(secret.Data["dbname"])
+		if database == "" {
+			database = postgresAppDBName
+		}
+		userInfo := url.UserPassword(username, password)
+		return &ProvisionResult{
+			DSN:         fmt.Sprintf("postgresql://%s@%s:5432/%s?sslmode=disable", userInfo.String(), host, database),
+			ResourceRef: namespace + "/" + name,
+		}, nil
+	} else if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("get app secret %s: %w", appSecretName, err)
+	}
+
+	// Backward-compatible fallback for pre-change clusters.
 	secretName := name + "-superuser"
 	secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
@@ -266,10 +313,10 @@ func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespa
 	if password == "" {
 		return nil, fmt.Errorf("superuser secret %s has no password", secretName)
 	}
-	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
+	log.Printf("[WARN] Postgres cluster %s/%s missing app secret; using superuser credentials as temporary fallback", namespace, name)
 	userInfo := url.UserPassword("postgres", password)
 	return &ProvisionResult{
-		DSN:         fmt.Sprintf("postgresql://%s@%s:5432/app?sslmode=disable", userInfo.String(), host),
+		DSN:         fmt.Sprintf("postgresql://%s@%s:5432/%s?sslmode=disable", userInfo.String(), host, postgresAppDBName),
 		ResourceRef: namespace + "/" + name,
 	}, nil
 }

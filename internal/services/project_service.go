@@ -16,36 +16,39 @@ import (
 )
 
 var (
-	ErrInvalidProjectID     = errors.New("invalid project ID")
-	ErrInvalidUserID        = errors.New("invalid user ID")
-	ErrInvalidDBType        = errors.New("invalid db_type: must be 'postgresql', 'sql','postgres', 'mongodb', or 'nosql'")
-	ErrInvalidResourceTier  = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
-	ErrProjectNotFound      = errors.New("project not found or access denied")
-	ErrProjectCreateDB      = errors.New("failed to create project or database instance")
-	ErrUnsupportedDBForRows = errors.New("row and column operations are only supported for PostgreSQL projects")
+	ErrInvalidProjectID    = errors.New("invalid project ID")
+	ErrInvalidUserID       = errors.New("invalid user ID")
+	ErrInvalidDBType       = errors.New("invalid db_type: must be 'postgresql', 'sql','postgres', 'mongodb', or 'nosql'")
+	ErrInvalidResourceTier = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
+	ErrProjectNotFound     = errors.New("project not found or access denied")
+	ErrProjectCreateDB     = errors.New("failed to create project or database instance")
 )
 
 type ProjectService struct {
 	projectRepo          repositories.ProjectRepository
 	provisioner          *OperatorProvisioner
 	dbInstanceRepo       *repositories.DatabaseInstanceRepository
-	instanceConn         *InstanceConnectionService
 	postgresTableService *service.TableService
+	poolEvicter          ProjectPoolEvicter
+}
+
+type ProjectPoolEvicter interface {
+	EvictProject(projectID uuid.UUID)
 }
 
 func NewProjectService(
 	projectRepo repositories.ProjectRepository,
 	provisioner *OperatorProvisioner,
 	dbInstanceRepo *repositories.DatabaseInstanceRepository,
-	instanceConn *InstanceConnectionService,
 	postgresTableService *service.TableService,
+	poolEvicter ProjectPoolEvicter,
 ) *ProjectService {
 	return &ProjectService{
 		projectRepo:          projectRepo,
 		provisioner:          provisioner,
 		dbInstanceRepo:       dbInstanceRepo,
-		instanceConn:         instanceConn,
 		postgresTableService: postgresTableService,
+		poolEvicter:          poolEvicter,
 	}
 }
 
@@ -59,7 +62,7 @@ type CreateProjectRequest struct {
 func normalizeDBType(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "postgresql", "sql", "postgres":
-		return "postgres", nil
+		return "postgresql", nil
 	case "mongodb", "nosql":
 		return "mongodb", nil
 	default:
@@ -229,6 +232,9 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID, userID string) er
 	defer cancel()
 	if err := s.provisioner.DeleteInstance(ctx, projectUUID, project.DBType); err != nil {
 		log.Printf("Warning: failed to delete K8s resource for project %s: %v", projectID, err)
+	}
+	if s.poolEvicter != nil {
+		s.poolEvicter.EvictProject(projectUUID)
 	}
 
 	if err := s.projectRepo.DeleteByIDAndUserID(context.Background(), projectUUID, userUUID); err != nil {

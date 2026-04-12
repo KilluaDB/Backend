@@ -28,6 +28,8 @@ type Server struct {
 	pool *pgxpool.Pool
 }
 
+var pgInstanceManager *postgressvc.PostgresConnectionManager
+
 func NewServer() *http.Server {
 	// Validate required environment variables
 	if err := validateRequiredEnvVars(); err != nil {
@@ -90,16 +92,17 @@ func NewServer() *http.Server {
 	// Project dependencies (provisioner uses K8s operators for DB instances)
 	projectRepo := postgresrepo.NewProjectRepository(pool)
 	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
-	dbCredentialRepo := repositories.NewDatabaseCredentialRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
-	instanceConn := services.NewInstanceConnectionService(projectRepo, dbInstanceRepo, dbCredentialRepo, provisioner)
+	dsnService := services.NewInstanceDsnService(projectRepo, dbInstanceRepo, provisioner)
+	instanceConn := postgressvc.NewPostgresConnectionManager(dsnService)
+	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()
 	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
-	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, dbCredentialRepo, instanceConn, tableService)
+	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, tableService, instanceConn)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
 	// Query dependencies (split per DB type + separate history tables)
@@ -151,6 +154,14 @@ func NewServer() *http.Server {
 	}
 
 	return server
+}
+
+// CloseResources releases long-lived pools owned by the server package.
+func CloseResources() {
+	if pgInstanceManager != nil {
+		pgInstanceManager.CloseAll()
+	}
+	database.Close()
 }
 
 func validateRequiredEnvVars() error {

@@ -15,7 +15,7 @@ import (
 // dbTypeForAPI normalizes db_type for API responses.
 func dbTypeForAPI(dbType string) string {
 	switch dbType {
-	case "postgresql", "sql":
+	case "postgres", "postgresql", "sql":
 		return "sql"
 	case "mongodb", "nosql":
 		return "nosql"
