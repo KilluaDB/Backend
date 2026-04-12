@@ -115,7 +115,10 @@ func NewServer() *http.Server {
 	schemaService := postgressvc.NewSchemaService(instanceConn)
 	schemaHandler := pghandler.NewSchemaHandler(schemaService)
 	tableHandler := pghandler.NewTableHandler(tableService)
-	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler)
+	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, dbInstanceRepo)
+	dashMetricsSvc := postgressvc.NewDashboardMetricsService(instanceConn)
+	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
+	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler)
 
 	// MongoDB API handler
 	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)

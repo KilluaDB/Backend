@@ -150,6 +150,7 @@ check_kubectl() {
 # K8s mode: port-forward PID and cleanup flag
 PF_PID=""
 K8S_CLEANUP=""
+LOG_FILE=""
 
 run_in_k8s() {
     print_info "Running backend in Kubernetes cluster (deploy + port-forward)..."
@@ -175,7 +176,8 @@ run_in_k8s() {
             cluster=${ctx#k3d-}
             if [ -n "$cluster" ]; then
                 print_info "Importing image into k3d cluster '$cluster'..."
-                k3d image import backend-api:latest -c "$cluster" 2>/dev/null || true
+                k3d image import backend-api:latest -c "$cluster" || { print_error "k3d image import failed"; exit 1; }
+                print_success "Image imported into k3d"
             fi
         fi
     fi
@@ -258,10 +260,26 @@ run_in_k8s() {
         K8S_CLEANUP=""
         exit 1
     fi
+
+    # Setup persistent log file
+    LOG_FILE=~/backend-$(date +%Y%m%d-%H%M%S).log
+    print_info "Logging to $LOG_FILE"
     echo ""
-    print_info "Streaming backend logs (Ctrl+C to stop and scale down backend)"
+    print_info "Streaming backend logs (Ctrl+C to stop)"
+    print_info "Logs are also saved to: $LOG_FILE"
     echo ""
-    kubectl logs -f deploy/backend -n default --all-containers --prefix
+
+    # Loop to reconnect log stream if it drops (e.g. API server timeout after hours)
+    while true; do
+        kubectl logs -f deploy/backend -n default --all-containers --prefix 2>&1 | tee -a "$LOG_FILE" || true
+        # If we get here, the log stream died — check if pod is still running before reconnecting
+        if ! kubectl get pod -l app=backend -n default --field-selector=status.phase=Running 2>/dev/null | grep -q backend; then
+            print_warning "Backend pod is not running. Waiting for it to come back..."
+        else
+            print_warning "Log stream disconnected, reconnecting in 3s..."
+        fi
+        sleep 3
+    done
 }
 
 stop_containers() {
@@ -282,8 +300,11 @@ cleanup() {
             kill "$PF_PID" 2>/dev/null || true
             print_info "Stopped port-forward (PID $PF_PID)"
         fi
-        print_info "Scaling backend deployment to 0..."
-        kubectl scale deployment backend --replicas=0 -n default 2>/dev/null || true
+        print_info "Leaving backend deployment running..."
+        # kubectl scale deployment backend --replicas=0 -n default 2>/dev/null || true
+        if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+            print_info "Logs saved to: $LOG_FILE"
+        fi
         K8S_CLEANUP=""
         PF_PID=""
     fi

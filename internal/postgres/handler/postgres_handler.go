@@ -8,12 +8,14 @@ type PostgresHandler struct {
 	Table  *TableHandler
 	Schema *SchemaHandler
 	Query  *QueryHandler
+	Dashboard *DashboardHandler
 }
 
-func NewPostgresHandler(table *TableHandler, schema *SchemaHandler, query *QueryHandler) *PostgresHandler {
+func NewPostgresHandler(table *TableHandler, schema *SchemaHandler, query *QueryHandler, dashboard *DashboardHandler) *PostgresHandler {
 	return &PostgresHandler{
-		Table:  table,
-		Schema: schema,
-		Query:  query,
+		Table:     table,
+		Schema:    schema,
+		Query:     query,
+		Dashboard: dashboard,
 	}
 }

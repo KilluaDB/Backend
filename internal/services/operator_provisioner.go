@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,7 +22,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // ProvisionResult holds connection info and resource ref after successful provisioning.
@@ -63,27 +61,6 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 
 	config, err := rest.InClusterConfig()
 	inCluster := err == nil
-	if err != nil {
-		// Not in cluster: use kubeconfig (env or default path)
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			home := os.Getenv("HOME")
-			if home == "" {
-				home = os.Getenv("USERPROFILE")
-			}
-			if home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			}
-		}
-		if kubeconfig == "" {
-			return nil, fmt.Errorf("kubernetes config: not in cluster and no kubeconfig (set KUBECONFIG or use ~/.kube/config): %w", err)
-		}
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return nil, fmt.Errorf("kubernetes config: %w", err)
-		}
-	}
-
 	dyn, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
@@ -99,12 +76,12 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 	return &OperatorProvisioner{
 		postgresNamespace: postgresNS,
 		mongoNamespace:    mongoNS,
-		dynamic:            dyn,
-		core:               core,
-		cnpgGVR:            schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
-		mongoGVR:           schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
-		tierConfig:         tierConfig,
-		inCluster:          inCluster,
+		dynamic:           dyn,
+		core:              core,
+		cnpgGVR:           schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
+		mongoGVR:          schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
+		tierConfig:        tierConfig,
+		inCluster:         inCluster,
 	}, nil
 }
 
@@ -204,10 +181,15 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			},
 			"spec": map[string]interface{}{
 				"instances":             1,
-				"enableSuperuserAccess": true, // superuser for operator; app uses single admin user
+				"enableSuperuserAccess": true,
+				"postgresql": map[string]interface{}{
+					"parameters": map[string]interface{}{
+						"pg_stat_statements.max":   "10000",
+						"pg_stat_statements.track": "all",
+					},
+				},
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
-						// Single admin user; database "app" for connection compatibility.
 						"database": "app",
 						"owner":    adminUsername,
 						"secret": map[string]interface{}{
@@ -231,7 +213,6 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			},
 		},
 	}
-
 	_, err = p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {

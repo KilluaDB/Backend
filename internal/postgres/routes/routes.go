@@ -28,6 +28,10 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	postgres.Use(middlewares.RequirePostgresProject(r.projectRepo))
 	h := r.pg
 	{
+		// Dashboard
+		postgres.GET("/dashboard/overview", h.Dashboard.GetOverview)
+		postgres.GET("/dashboard/metrics", h.Dashboard.GetMetrics)
+
 		// Tables
 		postgres.POST("/tables", h.Table.CreateTable)
 		postgres.GET("/tables", h.Table.GetTables)

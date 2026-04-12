@@ -1,13 +1,21 @@
 openapi: 3.0.3
 info:
   title: DBaaS Backend API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     REST API for a database-as-a-service backend.
     PostgreSQL and MongoDB are namespaced under `/api/v1/projects/{id}/postgres/*`
     and `/api/v1/projects/{id}/mongodb/*`.
 
-    Latest changes (v1.2.0):
+    Latest changes (v1.3.0):
+    - Aligned all endpoint schemas with actual Go handler request/response shapes.
+    - Auth register/login/refresh responses accurately reflect `user_id` + `access_token`
+      data and the `refresh_token` httpOnly cookie.
+    - Google OAuth login correctly returns HTTP 307 (Temporary Redirect).
+    - Google OAuth callback returns `access_token` only (no `user_id`).
+    - User endpoints now reference the `User` schema for `data` payloads.
+    - Project responses now include the `status` field (from database instance).
+    - Removed phantom `/dashboard/roles` endpoints (no handler exists).
     - PostgreSQL APIs accept an optional `schema` (query or JSON). When omitted or empty,
       the server uses `public` (PostgreSQL default namespace).
     - Table delete is `DELETE /projects/{id}/postgres/tables/{table}` with a JSON body
@@ -20,8 +28,6 @@ info:
     - Query execute and query history responses use standard APIResponse (`data` holds payload).
     - Index management: `GET/POST .../tables/{table}/indexes` and `DELETE .../tables/{table}/indexes/{index}`
       (quoted identifiers only; primary key indexes cannot be dropped via this API).
-    - OpenAPI **Postgres** operations include concrete JSON **response examples** (success envelopes and
-      representative errors) aligned with handler output.
 
 servers:
   - url: http://localhost:8080
@@ -71,6 +77,10 @@ components:
         error:
           type: string
           nullable: true
+        code:
+          type: string
+          nullable: true
+          description: PostgreSQL SQLSTATE code, present only for Postgres errors
 
     PostgresGetRowsData:
       type: object
@@ -322,6 +332,14 @@ components:
           type: string
           description: JWT access token
 
+    GoogleAuthCallbackResponse:
+      type: object
+      required: [access_token]
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+
     Project:
       type: object
       required: [id, user_id, name, db_type, resource_tier, created_at]
@@ -347,6 +365,10 @@ components:
         created_at:
           type: string
           format: date-time
+        status:
+          type: string
+          enum: [creating, running, failed, paused, deleted]
+          description: Database instance status. Present when the project has an associated database instance.
 
     CreateProjectRequest:
       type: object
@@ -369,6 +391,14 @@ components:
           enum: [free, basic, premium]
           default: free
           description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
+
+    CreateProjectResponse:
+      type: object
+      required: [project]
+      description: Response data for project creation — wraps the project object
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
 
     ExecuteSQLQueryRequest:
       type: object
@@ -424,6 +454,111 @@ components:
         execution_time_ms:
           type: integer
           nullable: true
+
+    PostgresDashboardOverview:
+      type: object
+      properties:
+        instance:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+            host:
+              type: string
+              nullable: true
+            port:
+              type: integer
+              nullable: true
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+        db:
+          type: object
+          nullable: true
+          properties:
+            database:
+              type: string
+            server_version:
+              type: string
+            postmaster_uptime_s:
+              type: integer
+              format: int64
+            ping_time_ms:
+              type: integer
+              format: int64
+            now_rfc3339:
+              type: string
+            is_in_recovery:
+              type: boolean
+            has_pg_stat_statements:
+              type: boolean
+
+    PostgresDashboardTopQueryStat:
+      type: object
+      properties:
+        query:
+          type: string
+        calls:
+          type: integer
+          format: int64
+        total_time_ms:
+          type: number
+          format: double
+        mean_time_ms:
+          type: number
+          format: double
+        rows:
+          type: integer
+          format: int64
+        shared_blks_hit:
+          type: integer
+          format: int64
+        shared_blks_read:
+          type: integer
+          format: int64
+        temp_blks_written:
+          type: integer
+          format: int64
+
+    PostgresDashboardMetrics:
+      type: object
+      properties:
+        database:
+          type: string
+        db_size_bytes:
+          type: integer
+          format: int64
+        active_connections:
+          type: integer
+          format: int64
+        idle_connections:
+          type: integer
+          format: int64
+        cache_hit_ratio:
+          type: number
+          format: double
+        deadlocks:
+          type: integer
+          format: int64
+        blocked_sessions:
+          type: integer
+          format: int64
+        tables_needing_vacuum:
+          type: integer
+          format: int64
+        pg_stat_statements_enabled:
+          type: boolean
+        top_queries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostgresDashboardTopQueryStat'
 
     User:
       type: object
@@ -752,6 +887,7 @@ components:
 paths:
   /health:
     get:
+      operationId: healthCheck
       summary: Health check
       tags: [Health]
       responses:
@@ -766,10 +902,18 @@ paths:
                     type: string
                     example: ok
 
+  # ────────────────────────────────────────────────────────────
+  # Auth
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/auth/register:
     post:
+      operationId: authRegister
       tags: [Auth]
       summary: Register a new user
+      description: |
+        Creates a new user account and returns an access token. A `refresh_token` httpOnly
+        cookie is also set (30-day expiry, Secure, HttpOnly).
       requestBody:
         required: true
         content:
@@ -782,6 +926,12 @@ paths:
       responses:
         '201':
           description: User registered successfully
+          headers:
+            Set-Cookie:
+              description: httpOnly refresh_token cookie
+              schema:
+                type: string
+                example: "refresh_token=eyJ...; Path=/; Max-Age=2592000; HttpOnly; Secure"
           content:
             application/json:
               schema:
@@ -791,23 +941,39 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/AuthTokenResponse'
+              example:
+                status: success
+                message: New user registered successfully!
+                data:
+                  user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  access_token: "eyJhbGciOiJIUzI1NiIs..."
         '400':
           description: Invalid input (e.g. invalid email or password too short)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Please provide your email and password correctly
         '409':
           description: An account with this email already exists
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: An account with this email already exists
 
   /api/v1/auth/login:
     post:
+      operationId: authLogin
       tags: [Auth]
       summary: Login and obtain an access token
+      description: |
+        Authenticates the user and returns an access token. A `refresh_token` httpOnly
+        cookie is also set (30-day expiry, Secure, HttpOnly).
       requestBody:
         required: true
         content:
@@ -820,6 +986,12 @@ paths:
       responses:
         '200':
           description: Login successful
+          headers:
+            Set-Cookie:
+              description: httpOnly refresh_token cookie
+              schema:
+                type: string
+                example: "refresh_token=eyJ...; Path=/; Max-Age=2592000; HttpOnly; Secure"
           content:
             application/json:
               schema:
@@ -829,34 +1001,65 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/AuthTokenResponse'
+              example:
+                status: success
+                message: User logged in successfully
+                data:
+                  user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  access_token: "eyJhbGciOiJIUzI1NiIs..."
         '400':
           description: Invalid input (e.g. invalid email or password format)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid email or password format
         '401':
           description: Invalid email or password
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid email or password
 
   /api/v1/auth/logout:
     post:
+      operationId: authLogout
       tags: [Auth]
       summary: Logout and revoke the current refresh token
+      description: |
+        Reads the `refresh_token` from the httpOnly cookie, revokes it, and clears the cookie.
+        If no cookie is present the request still succeeds (idempotent).
       security:
         - BearerAuth: []
       responses:
         '200':
           description: Logged out successfully
+          headers:
+            Set-Cookie:
+              description: Clears the refresh_token cookie
+              schema:
+                type: string
+                example: "refresh_token=; Path=/; Max-Age=-1; HttpOnly; Secure"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
+              example:
+                status: success
+                message: Logged out successfully
         '401':
-          description: Unauthorized
+          description: Unauthorized (invalid or missing access token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Could not revoke session
           content:
             application/json:
               schema:
@@ -864,40 +1067,85 @@ paths:
 
   /api/v1/auth/refresh:
     post:
+      operationId: authRefresh
       tags: [Auth]
       summary: Refresh access token using refresh token cookie
+      description: |
+        Reads the `refresh_token` from the httpOnly cookie, validates it, rotates to a new
+        refresh token (stored in a new cookie), and returns a new access token plus user_id.
       responses:
         '200':
           description: New access token issued
+          headers:
+            Set-Cookie:
+              description: New rotated refresh_token cookie
+              schema:
+                type: string
+                example: "refresh_token=eyJ...; Path=/; Max-Age=2592000; HttpOnly; Secure"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthTokenResponse'
+              example:
+                status: success
+                message: Access token refreshed successfully
+                data:
+                  user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  access_token: "eyJhbGciOiJIUzI1NiIs..."
         '400':
-          description: Missing refresh token
+          description: Missing refresh token cookie
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Missing refresh token
         '401':
           description: Invalid or expired refresh token
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid or expired refresh token
 
   /api/v1/auth/google/login:
     get:
+      operationId: googleAuthLogin
       tags: [Auth]
       summary: Initiate Google OAuth login flow
+      description: |
+        Generates an OAuth state value, stores it in an `oauth_state` cookie, and redirects the
+        client to Google's OAuth consent screen. The redirect uses HTTP 307 (Temporary Redirect).
       responses:
-        '302':
+        '307':
           description: Redirect to Google OAuth consent screen
+          headers:
+            Location:
+              description: Google OAuth authorization URL with state
+              schema:
+                type: string
+            Set-Cookie:
+              description: oauth_state cookie (1 hour TTL, HttpOnly)
+              schema:
+                type: string
 
   /api/v1/auth/google/callback:
     get:
+      operationId: googleAuthCallback
       tags: [Auth]
       summary: Handle Google OAuth callback
+      description: |
+        Validates the `state` parameter against the `oauth_state` cookie to prevent CSRF,
+        exchanges the authorization code for a token, and returns an access token.
+        Unlike regular login, only `access_token` is returned (no `user_id` in the response body).
       parameters:
         - name: code
           in: query
@@ -917,16 +1165,46 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GoogleAuthCallbackResponse'
+              example:
+                status: success
+                message: User Login Successfully!
+                data:
+                  access_token: "eyJhbGciOiJIUzI1NiIs..."
         '400':
-          description: Missing or invalid parameters
+          description: Missing or invalid parameters (code, state, or state cookie)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: State mismatch — possible CSRF attack
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: State mismatch - possible CSRF attack
+        '500':
+          description: Token exchange or login processing failed
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Users
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/users/me:
     get:
+      operationId: getMe
       tags: [Users]
       summary: Get current authenticated user's information
       security:
@@ -937,16 +1215,46 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+              example:
+                status: success
+                message: User retrieved successfully
+                data:
+                  id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  email: "alice@example.com"
+                  role: "user"
+                  status: "active"
+                  created_at: "2026-01-15T10:30:00Z"
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
+      operationId: updateMe
       tags: [Users]
       summary: Update current authenticated user's information
+      description: |
+        Updates the authenticated user's own profile. Only `email` can be changed by non-admin users.
+        Attempting to change `role` as a non-admin returns 403.
       security:
         - BearerAuth: []
       requestBody:
@@ -963,7 +1271,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+              example:
+                status: success
+                message: User updated successfully
+                data:
+                  id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  email: "alice.new@example.com"
+                  role: "user"
+                  status: "active"
+                  created_at: "2026-01-15T10:30:00Z"
         '400':
           description: Invalid request body
           content:
@@ -976,9 +1298,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden — only admins can change user roles / admin cannot demote themselves
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deleteMe
       tags: [Users]
       summary: Delete current authenticated user's account
+      description: |
+        Soft-deletes the authenticated user. Returns `access_token: ""` to signal the client
+        should clear its stored token.
       security:
         - BearerAuth: []
       responses:
@@ -987,9 +1325,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          access_token:
+                            type: string
+                            description: Empty string indicating the token should be cleared
+              example:
+                status: success
+                message: User deleted successfully
+                data:
+                  access_token: ""
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden — cannot delete the last admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
           content:
             application/json:
               schema:
@@ -997,6 +1361,7 @@ paths:
 
   /api/v1/users:
     get:
+      operationId: listUsers
       tags: [Users]
       summary: List all users (Admin only)
       security:
@@ -1007,7 +1372,28 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+              example:
+                status: success
+                message: Users retrieved successfully
+                data:
+                  - id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                    email: "alice@example.com"
+                    role: "admin"
+                    status: "active"
+                    created_at: "2026-01-15T10:30:00Z"
+                  - id: "b2c3d4e5-f607-8901-bcde-234567890abc"
+                    email: "bob@example.com"
+                    role: "user"
+                    status: "active"
+                    created_at: "2026-02-20T14:00:00Z"
         '401':
           description: Unauthorized
           content:
@@ -1030,6 +1416,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: getUserById
       tags: [Users]
       summary: Get a user by ID (Admin only)
       security:
@@ -1040,7 +1427,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
         '400':
           description: Invalid user ID format
           content:
@@ -1066,6 +1458,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
+      operationId: updateUserById
       tags: [Users]
       summary: Update a user by ID (Admin only)
       security:
@@ -1085,7 +1478,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
         '400':
           description: Invalid request body or user ID format
           content:
@@ -1111,13 +1509,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deleteUserById
       tags: [Users]
       summary: Delete a user by ID (Admin only)
+      description: |
+        Handler calls `responses.Success(c, http.StatusNoContent, nil, ...)` which returns
+        a 204 with a JSON body containing `status` and `message` (no `data` field).
       security:
         - BearerAuth: []
       responses:
         '204':
           description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
         '400':
           description: Invalid user ID format
           content:
@@ -1143,10 +1549,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Projects
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects:
     post:
+      operationId: createProject
       tags: [Projects]
       summary: Create a new project and associated database instance
+      description: |
+        Creates a project and starts asynchronous provisioning of the database instance.
+        The response includes the project data wrapped in a `project` key. The initial
+        instance `status` is `creating` until provisioning completes.
       security:
         - BearerAuth: []
       requestBody:
@@ -1166,9 +1581,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CreateProjectResponse'
+              example:
+                status: success
+                message: Project created successfully
+                data:
+                  project:
+                    id: "c3d4e5f6-a7b8-9012-cdef-345678901234"
+                    user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                    name: "Analytics Service DB"
+                    description: "Primary PostgreSQL database for the analytics microservice"
+                    db_type: "sql"
+                    resource_tier: "basic"
+                    created_at: "2026-04-10T01:00:00Z"
+                    status: "creating"
         '400':
-          description: Invalid request body
+          description: Invalid request body (bad db_type, resource_tier, etc.)
           content:
             application/json:
               schema:
@@ -1180,14 +1613,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: Failed to create project
+          description: Failed to create project or database instance
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     get:
+      operationId: listProjects
       tags: [Projects]
       summary: List projects for the authenticated user
+      description: |
+        Returns all projects belonging to the authenticated user. Each project includes
+        the current database instance `status`.
       security:
         - BearerAuth: []
       responses:
@@ -1196,7 +1633,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Project'
+              example:
+                status: success
+                message: Projects retrieved successfully
+                data:
+                  - id: "c3d4e5f6-a7b8-9012-cdef-345678901234"
+                    user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                    name: "Analytics Service DB"
+                    db_type: "sql"
+                    resource_tier: "basic"
+                    created_at: "2026-04-10T01:00:00Z"
+                    status: "running"
         '401':
           description: Unauthorized
           content:
@@ -1213,8 +1668,12 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: getProject
       tags: [Projects]
       summary: Get a project by ID
+      description: |
+        Returns the project belonging to the authenticated user, including
+        the current database instance `status`.
       security:
         - BearerAuth: []
       responses:
@@ -1223,7 +1682,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+              example:
+                status: success
+                message: Project retrieved successfully
+                data:
+                  id: "c3d4e5f6-a7b8-9012-cdef-345678901234"
+                  user_id: "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+                  name: "Analytics Service DB"
+                  description: "Primary PostgreSQL database for the analytics microservice"
+                  db_type: "sql"
+                  resource_tier: "basic"
+                  created_at: "2026-04-10T01:00:00Z"
+                  status: "running"
         '401':
           description: Unauthorized
           content:
@@ -1237,8 +1713,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deleteProject
       tags: [Projects]
       summary: Delete a project by ID
+      description: |
+        Deletes the project and its associated Kubernetes database resources.
       security:
         - BearerAuth: []
       responses:
@@ -1247,7 +1726,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponse'
+                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
+              example:
+                status: success
+                message: Project deleted successfully
         '401':
           description: Unauthorized
           content:
@@ -1261,6 +1743,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Tables
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/tables:
     parameters:
       - name: id
@@ -1270,6 +1756,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: listPostgresTables
       tags: [Postgres]
       summary: List PostgreSQL tables for a project
       security:
@@ -1304,7 +1791,7 @@ paths:
                   - orders
                   - products
         '400':
-          description: Invalid project ID
+          description: Invalid project ID or schema name
           content:
             application/json:
               schema:
@@ -1328,6 +1815,7 @@ paths:
                 status: error
                 message: Project not found or database instance not ready
     post:
+      operationId: createPostgresTable
       tags: [Postgres]
       summary: Create a new PostgreSQL table
       security:
@@ -1444,6 +1932,7 @@ paths:
           type: string
         description: Base table name; use query `schema` (defaults to `public`) for GET/PATCH; DELETE uses JSON body for schema/table confirmation
     get:
+      operationId: getPostgresTable
       tags: [Postgres]
       summary: Get PostgreSQL table metadata (columns, primary keys, foreign keys)
       description: Does not return row data; use `GET .../tables/{table}/rows` for data pages.
@@ -1510,6 +1999,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
+      operationId: updatePostgresTable
       tags: [Postgres]
       summary: Partially update a PostgreSQL table
       description: >
@@ -1608,6 +2098,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deletePostgresTable
       tags: [Postgres]
       summary: Delete a PostgreSQL table by schema and name
       security:
@@ -1658,6 +2149,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Rows
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/tables/{table}/rows:
     parameters:
       - name: id
@@ -1681,6 +2176,7 @@ paths:
         description: PostgreSQL schema containing the table; defaults to `public` if omitted
         example: public
     get:
+      operationId: getPostgresRows
       tags: [Postgres]
       summary: Get rows from a PostgreSQL table
       security:
@@ -1759,6 +2255,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
+      operationId: insertPostgresRow
       tags: [Postgres]
       summary: Insert a row into a PostgreSQL table
       security:
@@ -1830,6 +2327,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
+      operationId: updatePostgresRows
       tags: [Postgres]
       summary: Update rows in a PostgreSQL table
       security:
@@ -1888,6 +2386,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deletePostgresRows
       tags: [Postgres]
       summary: Delete rows from a PostgreSQL table (by filter)
       security:
@@ -1936,6 +2435,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Columns
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/tables/{table}/columns:
     parameters:
       - name: id
@@ -1959,6 +2462,7 @@ paths:
         description: PostgreSQL schema containing the table; defaults to `public` if omitted
         example: public
     post:
+      operationId: addPostgresColumn
       tags: [Postgres]
       summary: Add a column to a PostgreSQL table
       security:
@@ -2060,6 +2564,7 @@ paths:
         description: PostgreSQL schema containing the table; defaults to `public` if omitted
         example: public
     delete:
+      operationId: dropPostgresColumn
       tags: [Postgres]
       summary: Delete a column from a PostgreSQL table
       security:
@@ -2086,6 +2591,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Indexes
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/tables/{table}/indexes:
     parameters:
       - name: id
@@ -2109,6 +2618,7 @@ paths:
         description: PostgreSQL schema containing the table; defaults to `public` if omitted
         example: public
     get:
+      operationId: listPostgresIndexes
       tags: [Postgres]
       summary: List indexes on a PostgreSQL table
       security:
@@ -2161,6 +2671,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
+      operationId: createPostgresIndex
       tags: [Postgres]
       summary: Create an index on a PostgreSQL table
       description: Creates a simple column index (no partial or expression indexes). Primary key indexes are created via table DDL, not this endpoint.
@@ -2242,6 +2753,7 @@ paths:
         description: PostgreSQL schema containing the table; defaults to `public` if omitted
         example: public
     delete:
+      operationId: dropPostgresIndex
       tags: [Postgres]
       summary: Drop an index from a PostgreSQL table
       description: Cannot drop the primary key index; use table/constraint changes instead.
@@ -2269,6 +2781,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Schemas
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/schemas:
     parameters:
       - name: id
@@ -2278,6 +2794,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: listPostgresSchemas
       tags: [Postgres]
       summary: List PostgreSQL schema names for the project database
       security:
@@ -2314,6 +2831,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Schema Visualization & AI
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/schema/visualize:
     parameters:
       - name: id
@@ -2323,6 +2844,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: visualizePostgresSchema
       tags: [Postgres]
       summary: Generate a Mermaid ER diagram visualization of the PostgreSQL schema
       security:
@@ -2385,6 +2907,7 @@ paths:
           type: string
           format: uuid
     post:
+      operationId: generateSchemaFromTextStream
       tags: [Postgres]
       summary: Generate a Mermaid ER diagram from requirement text (streaming)
       description: |
@@ -2405,7 +2928,7 @@ paths:
                   description: Natural language description of the database requirements
                 model_name:
                   type: string
-                  description: Model name used by the AI service (default: deepseek)
+                  description: "Model name used by the AI service (default: deepseek)"
                   default: deepseek
                 database_name:
                   type: string
@@ -2448,6 +2971,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Query
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/postgres/query/execute:
     parameters:
       - name: id
@@ -2457,6 +2984,7 @@ paths:
           type: string
           format: uuid
     post:
+      operationId: executePostgresQuery
       tags: [Postgres]
       summary: Execute a SQL query against a PostgreSQL project database
       security:
@@ -2525,12 +3053,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Failed to execute query
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /api/v1/projects/{id}/postgres/query/history:
     parameters:
@@ -2541,6 +3063,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: getPostgresQueryHistory
       tags: [Postgres]
       summary: Get PostgreSQL query execution history for this project
       description: Returns recent executions for the authenticated user against this project's database instance only (not all projects).
@@ -2600,6 +3123,105 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ────────────────────────────────────────────────────────────
+  # Postgres — Dashboard
+  # ────────────────────────────────────────────────────────────
+
+  /api/v1/projects/{id}/postgres/dashboard/overview:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getPostgresDashboardOverview
+      tags: [Postgres]
+      summary: Get dashboard overview for a project's Postgres instance
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Overview data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PostgresDashboardOverview'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not accessible or database instance not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to retrieve overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/postgres/dashboard/metrics:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getPostgresDashboardMetrics
+      tags: [Postgres]
+      summary: Get dashboard metrics for a project's Postgres instance
+      description: Includes pg_stat_statements top queries when enabled on the instance.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Metrics data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PostgresDashboardMetrics'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not accessible or database instance not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to retrieve metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ────────────────────────────────────────────────────────────
+  # MongoDB
+  # ────────────────────────────────────────────────────────────
+
   /api/v1/projects/{id}/mongodb/collections:
     parameters:
       - name: id
@@ -2609,6 +3231,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: listMongoCollections
       tags: [MongoDB]
       summary: List MongoDB collections for a project
       security:
@@ -2633,6 +3256,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
+      operationId: createMongoCollection
       tags: [MongoDB]
       summary: Create a MongoDB collection
       security:
@@ -2679,6 +3303,7 @@ paths:
         schema:
           type: string
     delete:
+      operationId: deleteMongoCollection
       tags: [MongoDB]
       summary: Delete a MongoDB collection
       security:
@@ -2713,6 +3338,7 @@ paths:
         schema:
           type: string
     get:
+      operationId: getMongoDocuments
       tags: [MongoDB]
       summary: Get documents from a MongoDB collection
       security:
@@ -2745,6 +3371,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
+      operationId: insertMongoDocument
       tags: [MongoDB]
       summary: Insert a document into a MongoDB collection
       security:
@@ -2783,6 +3410,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
+      operationId: updateMongoDocuments
       tags: [MongoDB]
       summary: Update documents in a MongoDB collection
       security:
@@ -2819,6 +3447,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      operationId: deleteMongoDocuments
       tags: [MongoDB]
       summary: Delete documents from a MongoDB collection
       security:
@@ -2861,6 +3490,7 @@ paths:
         schema:
           type: string
     post:
+      operationId: addMongoField
       tags: [MongoDB]
       summary: Add a field to all documents in a MongoDB collection
       security:
@@ -2913,6 +3543,7 @@ paths:
         schema:
           type: string
     delete:
+      operationId: removeMongoField
       tags: [MongoDB]
       summary: Remove a field from all documents in a MongoDB collection
       security:
@@ -2942,6 +3573,7 @@ paths:
           type: string
           format: uuid
     post:
+      operationId: executeMongoQuery
       tags: [MongoDB]
       summary: Execute a MongoDB query operation for a MongoDB project
       security:
@@ -3007,6 +3639,7 @@ paths:
           type: string
           format: uuid
     get:
+      operationId: getMongoQueryHistory
       tags: [MongoDB]
       summary: Get MongoDB query execution history for the authenticated user
       security:
@@ -3047,4 +3680,3 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
