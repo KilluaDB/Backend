@@ -24,7 +24,7 @@ spec:
           # For local k3d: build and load with same name, e.g. docker build -t backend-api:latest . && k3d image import backend-api:latest -c <cluster-name>
           # For AWS: use your ECR URL, e.g. 123456789012.dkr.ecr.region.amazonaws.com/backend:latest
           image: backend-api:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http
