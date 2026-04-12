@@ -20,13 +20,11 @@ const (
 
 type GoogleAuthService struct {
 	userRepo *repositories.UserRepository
-	// sessionRepo *repositories.SessionRepository
 }
 
 func NewGoogleAuthService(userRepo *repositories.UserRepository) *GoogleAuthService {
 	return &GoogleAuthService{
 		userRepo: userRepo,
-		// sessionRepo: sessionRepo,
 	}
 }
 

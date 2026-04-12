@@ -119,13 +119,11 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 }
 
 // ExecuteSQLQuery executes a SQL query on the project's PostgreSQL database instance.
-func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
+func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
-	ctx := context.Background()
-
-	instanceID, _ := s.instanceConn.GetInstanceID(ctx, userID, projectId)
 
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
+		instanceID, _ := s.instanceConn.GetInstanceID(ctx, userID, projectId)
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		execTimeInt := int(execTime)
@@ -274,4 +272,3 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 	}
 	return s.execRepo.GetByUserIDAndInstanceID(userID, instanceID, limit)
 }
-

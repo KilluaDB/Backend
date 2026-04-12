@@ -44,7 +44,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	result, exec, err := h.queryService.ExecuteSQLQuery(userUUID, &req, projectUUID)
+	result, exec, err := h.queryService.ExecuteSQLQuery(c.Request.Context(), userUUID, &req, projectUUID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidQuery):
