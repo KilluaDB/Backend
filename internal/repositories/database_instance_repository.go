@@ -141,7 +141,7 @@ func (r *DatabaseInstanceRepository) UpdateHost(id uuid.UUID, host string) error
 
 // UpdateAfterProvision sets host, port, and status to running after successful provisioning.
 // K8s resource is discovered by project_id (ResourceRefForProject) when needed.
-func (r *DatabaseInstanceRepository) UpdateAfterProvision(id uuid.UUID, host string, port int) error {
+func (r *DatabaseInstanceRepository) UpdateAfterProvision(id uuid.UUID, host string) error {
 	ctx := context.Background()
 
 	query := `
@@ -150,7 +150,7 @@ func (r *DatabaseInstanceRepository) UpdateAfterProvision(id uuid.UUID, host str
 		WHERE id = $1
 	`
 
-	_, err := r.pool.Exec(ctx, query, id, host, port, time.Now())
+	_, err := r.pool.Exec(ctx, query, id, host, time.Now())
 	return err
 }
 
