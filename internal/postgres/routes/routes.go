@@ -16,6 +16,7 @@ type PostgresRoutes struct {
 	tableHandler    *handler.TableHandler
 	schemaHandler   *handler.SchemaHandler
 	queryHandler    *handler.QueryHandler
+	textToSqlHandler *handler.TextToSQLHandler
 }
 
 func NewPostgresRoutes(
@@ -24,6 +25,7 @@ func NewPostgresRoutes(
 	tableHandler *handler.TableHandler,
 	schemaHandler *handler.SchemaHandler,
 	queryHandler *handler.QueryHandler,
+	textToSqlHandler *handler.TextToSQLHandler,
 ) *PostgresRoutes {
 	return &PostgresRoutes{
 		projectRepo:     projectRepo,
@@ -31,6 +33,7 @@ func NewPostgresRoutes(
 		tableHandler:    tableHandler,
 		schemaHandler:   schemaHandler,
 		queryHandler:    queryHandler,
+		textToSqlHandler: textToSqlHandler,
 	}
 }
 
@@ -61,5 +64,8 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		// Query
 		postgres.POST("/query/execute", r.queryHandler.ExecuteQuery)
 		postgres.GET("/query/history", r.queryHandler.GetQueryHistory)
+
+		// Text to SQL endpoints
+		postgres.POST("/text-to-sql", r.textToSqlHandler.GenerateAndExecuteSQL)
 	}
 }

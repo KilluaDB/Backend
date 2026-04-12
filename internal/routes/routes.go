@@ -36,16 +36,10 @@ func RegisterRoutes(
 	userRoutes := NewUserRoutes(userHandler, userRepo)
 	userRoutes.RegisterRoutes(api)
 
-	// queryRoutes := NewQueryRoutes(queryHandler)
-	// queryRoutes.RegisterRoutes(api)
-
-	textToSqlRoutes := NewTextToSqlRoutes(textToSqlHandler)
-	textToSqlRoutes.RegisterRoutes(api)
-
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
 
-	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, postgresQueryHandler)
+	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, postgresQueryHandler, textToSqlHandler)
 	postgresRoutes.RegisterRoutes(api)
 
 	mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
