@@ -54,14 +54,14 @@ func (s *InstanceDsnService) GetConnectionDSN(ctx context.Context, userID, proje
 
 	result, err := s.provisioner.GetConnection(ctx, projectID, project.DBType)
 	if err != nil {
-		if inst.Status != "running" {
+		if project.Status != "running" {
 			return "", uuid.Nil, ErrNoRunningInstance
 		}
 		return "", uuid.Nil, fmt.Errorf("get connection from K8s: %w", err)
 	}
 
-	if inst.Status != "running" {
-		_ = s.instanceRepo.UpdateStatus(inst.ID, "running")
+	if project.Status != "running" {
+		_ = s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "running")
 	}
 
 	return result.DSN, inst.ID, nil

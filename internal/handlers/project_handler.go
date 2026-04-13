@@ -26,14 +26,16 @@ func dbTypeForAPI(dbType string) string {
 
 func projectToAPI(p *models.Project) gin.H {
 	return gin.H{
-		"id":            p.ID,
-		"user_id":       p.UserID,
-		"name":          p.Name,
-		"description":   p.Description,
-		"db_type":       dbTypeForAPI(p.DBType),
-		"resource_tier": p.ResourceTier,
-		"created_at":    p.CreatedAt,
-		"status":        p.Status,
+		"id":                 p.ID,
+		"user_id":            p.UserID,
+		"name":               p.Name,
+		"description":        p.Description,
+		"db_type":            dbTypeForAPI(p.DBType),
+		"resource_tier":      p.ResourceTier,
+		"created_at":         p.CreatedAt,
+		"status":             p.Status,
+		"runtime_created_at": p.RuntimeCreatedAt,
+		"runtime_updated_at": p.RuntimeUpdatedAt,
 	}
 }
 
@@ -73,7 +75,7 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	project, instance, err := h.projectService.CreateProject(userIDStr, req)
+	project, _, err := h.projectService.CreateProject(userIDStr, req)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidUserID):
@@ -95,7 +97,6 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 	}
 
 	projectData := projectToAPI(project)
-	projectData["status"] = instance.Status
 
 	responseData := gin.H{
 		"project": projectData,

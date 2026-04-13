@@ -31,8 +31,8 @@ func (r *PostgresProjectRepository) Create(ctx context.Context, project *models.
 	project.Prepare()
 
 	query := `
-		INSERT INTO projects (id, user_id, name, description, db_type, resource_tier, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO projects (id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	now := time.Now()
@@ -43,6 +43,9 @@ func (r *PostgresProjectRepository) Create(ctx context.Context, project *models.
 		project.Description,
 		project.DBType,
 		project.ResourceTier,
+		now,
+		project.Status,
+		now,
 		now,
 	)
 
@@ -55,7 +58,7 @@ func (r *PostgresProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (
 	}
 
 	query := `
-		SELECT id, user_id, name, description, db_type, resource_tier, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
 		FROM projects WHERE id = $1
 	`
 
@@ -68,6 +71,9 @@ func (r *PostgresProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (
 		&project.DBType,
 		&project.ResourceTier,
 		&project.CreatedAt,
+		&project.Status,
+		&project.RuntimeCreatedAt,
+		&project.RuntimeUpdatedAt,
 	)
 
 	if err != nil {
@@ -86,7 +92,7 @@ func (r *PostgresProjectRepository) GetByIDAndUserID(ctx context.Context, id uui
 	}
 
 	query := `
-		SELECT id, user_id, name, description, db_type, resource_tier, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
 		FROM projects WHERE id = $1 AND user_id = $2
 	`
 
@@ -99,6 +105,9 @@ func (r *PostgresProjectRepository) GetByIDAndUserID(ctx context.Context, id uui
 		&project.DBType,
 		&project.ResourceTier,
 		&project.CreatedAt,
+		&project.Status,
+		&project.RuntimeCreatedAt,
+		&project.RuntimeUpdatedAt,
 	)
 
 	if err != nil {
@@ -117,7 +126,7 @@ func (r *PostgresProjectRepository) GetByUserID(ctx context.Context, userID uuid
 	}
 
 	query := `
-		SELECT id, user_id, name, description, db_type, resource_tier, created_at
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
 		FROM projects WHERE user_id = $1
 		ORDER BY created_at DESC
 	`
@@ -139,6 +148,9 @@ func (r *PostgresProjectRepository) GetByUserID(ctx context.Context, userID uuid
 			&project.DBType,
 			&project.ResourceTier,
 			&project.CreatedAt,
+			&project.Status,
+			&project.RuntimeCreatedAt,
+			&project.RuntimeUpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -147,6 +159,21 @@ func (r *PostgresProjectRepository) GetByUserID(ctx context.Context, userID uuid
 	}
 
 	return projects, rows.Err()
+}
+
+func (r *PostgresProjectRepository) UpdateRuntimeStatus(ctx context.Context, id uuid.UUID, status string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		UPDATE projects
+		SET status = $2, runtime_updated_at = $3
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, id, status, time.Now())
+	return err
 }
 
 func (r *PostgresProjectRepository) Update(ctx context.Context, project *models.Project) error {

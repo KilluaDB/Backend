@@ -45,12 +45,16 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   db_type db_type_t NOT NULL,
   resource_tier resource_tier_t NOT NULL DEFAULT 'free',
+  status instance_status_t NOT NULL DEFAULT 'creating',
+  runtime_created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  runtime_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
 CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 
 
 -- Database Instances table (K8s resource discovered by project_id via cluster name convention)
@@ -69,6 +73,7 @@ CREATE TABLE IF NOT EXISTS database_instances (
 
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_database_instances_project_id ON database_instances(project_id);
 
 -- Database Credentials table
 CREATE TABLE IF NOT EXISTS database_credentials (

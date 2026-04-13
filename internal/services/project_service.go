@@ -117,7 +117,7 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 		return nil, nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
 	}
 
-	// Provision asynchronously; status transitions to "running" or "failed" once done.
+	// Provision asynchronously; project status transitions to "running" or "failed" once done.
 	go s.provisionInstanceAsync(project.ID, dbInstance.ID, internalDBType, req.ResourceTier)
 
 	// Reload to get DB-managed fields (timestamps etc.) for the response.
@@ -126,6 +126,9 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	}
 	if inst, err := s.dbInstanceRepo.GetByID(dbInstance.ID); err == nil && inst != nil {
 		dbInstance = inst
+	}
+	if project.Status == "" {
+		project.Status = "creating"
 	}
 
 	return project, dbInstance, nil
@@ -143,6 +146,9 @@ func (s *ProjectService) provisionInstanceAsync(projectID, instanceID uuid.UUID,
 	_, err := s.provisioner.CreateInstance(ctx, projectID, dbType, resourceTier)
 	if err != nil {
 		log.Printf("ERROR: provision failed for project %s: %v", projectID, err)
+		if statusErr := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "failed"); statusErr != nil {
+			log.Printf("ERROR: failed to mark project %s as failed: %v", projectID, statusErr)
+		}
 		if statusErr := s.dbInstanceRepo.UpdateStatus(instanceID, "failed"); statusErr != nil {
 			log.Printf("ERROR: failed to mark instance %s as failed: %v", instanceID, statusErr)
 		}
@@ -150,6 +156,9 @@ func (s *ProjectService) provisionInstanceAsync(projectID, instanceID uuid.UUID,
 	}
 
 	// Only store status — not the DSN. Credentials are read from K8s at connection time.
+	if err := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "running"); err != nil {
+		log.Printf("ERROR: failed to mark project %s as running: %v", projectID, err)
+	}
 	if err := s.dbInstanceRepo.UpdateStatus(instanceID, "running"); err != nil {
 		log.Printf("ERROR: failed to mark instance %s as running: %v", instanceID, err)
 	}
@@ -183,8 +192,8 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID, userID string) (*mod
 		return nil, ErrProjectNotFound
 	}
 
-	if inst, _ := s.dbInstanceRepo.GetByProjectID(project.ID); inst != nil {
-		project.Status = inst.Status
+	if project.Status == "" {
+		project.Status = "creating"
 	}
 
 	return project, nil
@@ -202,8 +211,8 @@ func (s *ProjectService) GetProjectsByUserID(userID string) ([]models.Project, e
 	}
 
 	for i := range projects {
-		if inst, _ := s.dbInstanceRepo.GetByProjectID(projects[i].ID); inst != nil {
-			projects[i].Status = inst.Status
+		if projects[i].Status == "" {
+			projects[i].Status = "creating"
 		}
 	}
 
