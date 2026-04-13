@@ -88,7 +88,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	responses.Success(c, http.StatusOK, response, "Query executed successfully")
 }
 
-// GetQueryHistory returns Postgres query history for this project's database instance and the authenticated user.
+// GetQueryHistory returns recent pg_stat_statements data for this project's database instance.
 func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 	userUUID, ok := userIDFromGin(c)
 	if !ok {

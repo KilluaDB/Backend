@@ -38,13 +38,13 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: meta-db-app
-                  key: password
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
             - name: DB_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: meta-db-superuser
-                  key: password
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
             - name: ACCESS_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

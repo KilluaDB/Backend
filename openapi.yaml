@@ -23,8 +23,8 @@ info:
     - `GET /projects/{id}/postgres/schemas` lists non-system schema names.
     - `GET /projects/{id}/postgres/tables/{table}` returns column and key metadata (no row data).
     - `GET .../tables/{table}/rows` supports optional `include_total=true` to add a matching row count.
-    - Query history at `GET .../postgres/query/history` is scoped to the project's database instance
-      (same user; not a global cross-project history).
+    - Query history at `GET .../postgres/query/history` is sourced from `pg_stat_statements`
+      and filters obvious system/catalog statements.
     - Query execute and query history responses use standard APIResponse (`data` holds payload).
     - Index management: `GET/POST .../tables/{table}/indexes` and `DELETE .../tables/{table}/indexes/{index}`
       (quoted identifiers only; primary key indexes cannot be dropped via this API).
@@ -432,28 +432,24 @@ components:
 
     QueryHistoryItem:
       type: object
-      required: [id, db_instance_id, user_id, query_text, executed_at]
+      required: [query, calls, total_time_ms, mean_time_ms, rows, shared_blks_hit, shared_blks_read, temp_blks_written]
       properties:
-        id:
+        query:
           type: string
-          format: uuid
-        db_instance_id:
-          type: string
-          format: uuid
-        user_id:
-          type: string
-          format: uuid
-        query_text:
-          type: string
-        executed_at:
-          type: string
-          format: date-time
-        success:
-          type: boolean
-          nullable: true
-        execution_time_ms:
+        calls:
           type: integer
-          nullable: true
+        total_time_ms:
+          type: number
+        mean_time_ms:
+          type: number
+        rows:
+          type: integer
+        shared_blks_hit:
+          type: integer
+        shared_blks_read:
+          type: integer
+        temp_blks_written:
+          type: integer
 
     PostgresDashboardOverview:
       type: object
@@ -3065,8 +3061,8 @@ paths:
     get:
       operationId: getPostgresQueryHistory
       tags: [Postgres]
-      summary: Get PostgreSQL query execution history for this project
-      description: Returns recent executions for the authenticated user against this project's database instance only (not all projects).
+      summary: Get PostgreSQL query statistics for this project
+      description: Returns recent user-generated statements from pg_stat_statements for this project's database instance, filtering out obvious system and catalog queries.
       security:
         - BearerAuth: []
       parameters:
@@ -3097,13 +3093,14 @@ paths:
                 status: success
                 message: Query history retrieved successfully
                 data:
-                  - id: 7c9e5d4a-3b2f-4a1e-8d00-abcdefabcdef
-                    db_instance_id: 11111111-2222-3333-4444-555555555555
-                    user_id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
-                    query_text: SELECT id, email FROM public.customers LIMIT 10;
-                    executed_at: '2026-04-09T12:00:00Z'
-                    success: true
-                    execution_time_ms: 2
+                  - query: SELECT id, email FROM public.customers LIMIT 10;
+                    calls: 4
+                    total_time_ms: 18.42
+                    mean_time_ms: 4.6
+                    rows: 40
+                    shared_blks_hit: 28
+                    shared_blks_read: 2
+                    temp_blks_written: 0
         '401':
           description: Unauthorized
           content:

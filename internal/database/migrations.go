@@ -21,7 +21,6 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		createDatabaseInstancesTable,
 		createDatabaseCredentialsTable,
 		createAPIKeysTable,
-		createPostgresQueryHistoryTable,
 		createMongoQueryHistoryTable,
 		createUsageMetricsTable,
 		preventHardDeleteUsers,
@@ -182,22 +181,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_revoked ON api_keys(revoked);
 CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at);
-`
-
-const createPostgresQueryHistoryTable = `
-CREATE TABLE IF NOT EXISTS postgres_query_history (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-  query_text TEXT NOT NULL,
-  executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  success BOOLEAN,
-  execution_time_ms INT
-);
-
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_db_instance_id ON postgres_query_history(db_instance_id);
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_user_id ON postgres_query_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_executed_at ON postgres_query_history(executed_at);
 `
 
 const createMongoQueryHistoryTable = `
