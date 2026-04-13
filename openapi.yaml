@@ -495,33 +495,19 @@ components:
               type: boolean
             has_pg_stat_statements:
               type: boolean
-
-    PostgresDashboardTopQueryStat:
-      type: object
-      properties:
-        query:
-          type: string
-        calls:
-          type: integer
-          format: int64
-        total_time_ms:
-          type: number
-          format: double
-        mean_time_ms:
-          type: number
-          format: double
-        rows:
-          type: integer
-          format: int64
-        shared_blks_hit:
-          type: integer
-          format: int64
-        shared_blks_read:
-          type: integer
-          format: int64
-        temp_blks_written:
-          type: integer
-          format: int64
+        schema_summary:
+          type: object
+          nullable: true
+          properties:
+            total_tables:
+              type: integer
+              format: int64
+            total_columns:
+              type: integer
+              format: int64
+            total_primary_keys:
+              type: integer
+              format: int64
 
     PostgresDashboardMetrics:
       type: object
@@ -549,12 +535,6 @@ components:
         tables_needing_vacuum:
           type: integer
           format: int64
-        pg_stat_statements_enabled:
-          type: boolean
-        top_queries:
-          type: array
-          items:
-            $ref: '#/components/schemas/PostgresDashboardTopQueryStat'
 
     User:
       type: object
@@ -3181,7 +3161,7 @@ paths:
       operationId: getPostgresDashboardMetrics
       tags: [Postgres]
       summary: Get dashboard metrics for a project's Postgres instance
-      description: Includes pg_stat_statements top queries when enabled on the instance.
+      description: Returns aggregate database health metrics (no query text payload).
       security:
         - BearerAuth: []
       responses:

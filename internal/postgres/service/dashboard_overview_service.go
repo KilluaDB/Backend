@@ -9,8 +9,9 @@ import (
 )
 
 type DashboardOverview struct {
-	Instance *DashboardInstanceInfo `json:"instance,omitempty"`
-	DB       *DashboardDBInfo       `json:"db,omitempty"`
+	Instance      *DashboardInstanceInfo  `json:"instance,omitempty"`
+	DB            *DashboardDBInfo        `json:"db,omitempty"`
+	SchemaSummary *DashboardSchemaSummary `json:"schema_summary,omitempty"`
 }
 
 type DashboardInstanceInfo struct {
@@ -30,6 +31,12 @@ type DashboardDBInfo struct {
 	NowRFC3339     string `json:"now_rfc3339"`
 	IsInRecovery   bool   `json:"is_in_recovery"`
 	HasStatStmtExt bool   `json:"has_pg_stat_statements"`
+}
+
+type DashboardSchemaSummary struct {
+	TotalTables      int64 `json:"total_tables"`
+	TotalColumns     int64 `json:"total_columns"`
+	TotalPrimaryKeys int64 `json:"total_primary_keys"`
 }
 
 type DashboardOverviewService struct {
@@ -69,6 +76,9 @@ func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, proj
 		uptimeSeconds int64
 		inRecovery    bool
 		hasExt        bool
+		totalTables   int64
+		totalColumns  int64
+		totalPKs      int64
 	)
 
 	// Keep overview queries small and fast.
@@ -81,6 +91,25 @@ func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, proj
 	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&hasExt); err != nil {
 		// Extension catalog should exist; if not, treat as absent.
 		hasExt = false
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*)::bigint
+			 FROM information_schema.tables t
+			 WHERE t.table_type = 'BASE TABLE'
+			   AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
+			   AND t.table_schema NOT LIKE 'pg_toast%') AS total_tables,
+			(SELECT COUNT(*)::bigint
+			 FROM information_schema.columns c
+			 WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+			   AND c.table_schema NOT LIKE 'pg_toast%') AS total_columns,
+			(SELECT COUNT(*)::bigint
+			 FROM information_schema.table_constraints tc
+			 WHERE tc.constraint_type = 'PRIMARY KEY'
+			   AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+			   AND tc.table_schema NOT LIKE 'pg_toast%') AS total_primary_keys
+	`).Scan(&totalTables, &totalColumns, &totalPKs); err != nil {
+		return nil, err
 	}
 
 	pingMs := time.Since(start).Milliseconds()
@@ -95,6 +124,11 @@ func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, proj
 			NowRFC3339:     nowStr,
 			IsInRecovery:   inRecovery,
 			HasStatStmtExt: hasExt,
+		},
+		SchemaSummary: &DashboardSchemaSummary{
+			TotalTables:      totalTables,
+			TotalColumns:     totalColumns,
+			TotalPrimaryKeys: totalPKs,
 		},
 	}, nil
 }

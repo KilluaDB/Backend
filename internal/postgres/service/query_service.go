@@ -263,50 +263,6 @@ func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.
 	}, nil
 }
 
-func isSystemQueryText(query string) bool {
-	normalized := strings.ToUpper(strings.TrimSpace(query))
-	if normalized == "" {
-		return true
-	}
-
-	systemContains := []string{
-		"PG_CATALOG",
-		"INFORMATION_SCHEMA",
-		"PG_STAT_STATEMENTS",
-		"PG_TOAST",
-		"PG_TEMP_",
-		"PG_SETTINGS",
-		"PG_EXTENSION",
-	}
-	for _, token := range systemContains {
-		if strings.Contains(normalized, token) {
-			return true
-		}
-	}
-
-	systemPrefixes := []string{
-		"SELECT CURRENT_DATABASE()",
-		"SELECT VERSION()",
-		"SELECT EXISTS(SELECT 1 FROM PG_EXTENSION",
-		"SELECT EXTRACT(EPOCH FROM (NOW() - PG_POSTMASTER_START_TIME()))",
-		"SET ",
-		"SHOW ",
-		"BEGIN",
-		"COMMIT",
-		"ROLLBACK",
-		"SAVEPOINT",
-		"RELEASE SAVEPOINT",
-		"DISCARD ",
-	}
-	for _, prefix := range systemPrefixes {
-		if strings.HasPrefix(normalized, prefix) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // GetQueryHistory returns recent user-generated query statistics from pg_stat_statements.
 func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uuid.UUID, limit int) ([]QueryHistoryItem, error) {
 	if limit <= 0 {
@@ -352,7 +308,7 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 		if err := rows.Scan(&item.Query, &item.Calls, &item.TotalTimeMs, &item.MeanTimeMs, &item.Rows, &item.SharedBlksHit, &item.SharedBlksRead, &item.TempBlksWritten); err != nil {
 			return nil, err
 		}
-		if isSystemQueryText(item.Query) {
+		if IsSystemQueryText(item.Query) {
 			continue
 		}
 		items = append(items, item)
