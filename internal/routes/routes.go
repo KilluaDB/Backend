@@ -2,8 +2,6 @@ package routes
 
 import (
 	"backend/internal/handlers"
-	mongodbhandler "backend/internal/mongodb/handler"
-	mongodbroutes "backend/internal/mongodb/routes"
 	postgreshandler "backend/internal/postgres/handler"
 	postgresroutes "backend/internal/postgres/routes"
 	"backend/internal/repositories"
@@ -19,14 +17,11 @@ func RegisterRoutes(
 	userHandler *handlers.UserHandler,
 	userRepo *repositories.UserRepository,
 	projectHandler *handlers.ProjectHandler,
-	schemaHandler *postgreshandler.SchemaHandler,
-	tableHandler *postgreshandler.TableHandler,
 	projectRepo repositories.ProjectRepository,
 	postgresHandler *postgreshandler.PostgresHandler,
-	postgresQueryHandler *postgreshandler.QueryHandler,
-	mongodbHandler *mongodbhandler.MongoDBHandler,
-	mongoQueryHandler *mongodbhandler.QueryHandler,
-	textToSqlHandler *postgreshandler.TextToSQLHandler,
+	// mongodbHandler *mongodbhandler.MongoDBHandler,
+
+	// mongoQueryHandler *mongodbhandler.QueryHandler,
 ) {
 	api := router.Group("/api/v1")
 
@@ -39,11 +34,11 @@ func RegisterRoutes(
 	projectRoutes := NewProjectRoutes(projectHandler)
 	projectRoutes.RegisterRoutes(api)
 
-	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler, tableHandler, schemaHandler, postgresQueryHandler, textToSqlHandler)
+	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler)
 	postgresRoutes.RegisterRoutes(api)
 
-	mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
-	mongodbRoutes.RegisterRoutes(api)
+	//mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
+	//mongodbRoutes.RegisterRoutes(api)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

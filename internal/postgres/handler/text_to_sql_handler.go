@@ -104,7 +104,7 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 		Query: genResult.SQL,
 	}
 
-	execResult, exec, err := h.queryService.ExecuteSQLQuery(userUUID, execReq, projectUUID)
+	execResult, exec, err := h.queryService.ExecuteSQLQuery(c.Request.Context(), userUUID, execReq, projectUUID)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Query execution failed")
 		return

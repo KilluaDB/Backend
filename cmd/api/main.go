@@ -34,5 +34,6 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Println("Server Shutdown:", err)
 	}
+	server.CloseResources()
 	log.Println("Server exiting")
 }

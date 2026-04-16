@@ -2,7 +2,6 @@ package service
 
 import (
 	"backend/internal/models"
-	"backend/internal/postgres/repository"
 	"context"
 	"errors"
 	"fmt"
@@ -28,6 +27,17 @@ type ExecuteQueryRequest struct {
 	Query string `json:"query" binding:"required"`
 }
 
+type QueryHistoryItem struct {
+	Query           string  `json:"query"`
+	Calls           int64   `json:"calls"`
+	TotalTimeMs     float64 `json:"total_time_ms"`
+	MeanTimeMs      float64 `json:"mean_time_ms"`
+	Rows            int64   `json:"rows"`
+	SharedBlksHit   int64   `json:"shared_blks_hit"`
+	SharedBlksRead  int64   `json:"shared_blks_read"`
+	TempBlksWritten int64   `json:"temp_blks_written"`
+}
+
 // Sentinel errors for query operations so handlers can return proper HTTP status.
 var (
 	ErrInvalidQuery = errors.New("invalid or disallowed query")
@@ -35,17 +45,15 @@ var (
 
 type QueryService struct {
 	instanceConn InstanceConnectionService
-	execRepo     *repository.QueryHistoryRepository
 	maxLimit     int
 }
 
-func NewQueryService(instanceConn InstanceConnectionService, execRepo *repository.QueryHistoryRepository, maxLimit int) *QueryService {
+func NewQueryService(instanceConn InstanceConnectionService, maxLimit int) *QueryService {
 	if maxLimit <= 0 {
 		maxLimit = 50
 	}
 	return &QueryService{
 		instanceConn: instanceConn,
-		execRepo:     execRepo,
 		maxLimit:     maxLimit,
 	}
 }
@@ -119,13 +127,11 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 }
 
 // ExecuteSQLQuery executes a SQL query on the project's PostgreSQL database instance.
-func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
+func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
 	startTime := time.Now()
-	ctx := context.Background()
-
-	instanceID, _ := s.instanceConn.GetInstanceID(ctx, userID, projectId)
 
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
+		instanceID, _ := s.instanceConn.GetInstanceID(ctx, userID, projectId)
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		execTimeInt := int(execTime)
@@ -137,9 +143,6 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 			Success:         &success,
 			ExecutionTimeMs: &execTimeInt,
 		}
-		if instanceID != uuid.Nil {
-			_ = s.execRepo.Create(exec)
-		}
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 	}
 
@@ -147,7 +150,6 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 	if err != nil {
 		return nil, nil, err
 	}
-	defer pool.Close()
 
 	result, err := s.executeSQLQuery(ctx, pool, req.Query)
 	execTime := time.Since(startTime).Milliseconds()
@@ -164,9 +166,6 @@ func (s *QueryService) ExecuteSQLQuery(userID uuid.UUID, req *ExecuteQueryReques
 		ExecutedAt:      time.Now(),
 		Success:         &success,
 		ExecutionTimeMs: &execTimeInt,
-	}
-	if instanceID2 != uuid.Nil {
-		_ = s.execRepo.Create(exec)
 	}
 
 	if err != nil {
@@ -217,7 +216,17 @@ func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Poo
 			if val != nil {
 				switch v := val.(type) {
 				case []byte:
-					rowMap[col] = string(v)
+					if len(v) == 16 {
+						if u, err := uuid.FromBytes(v); err == nil {
+							rowMap[col] = u.String()
+						} else {
+							rowMap[col] = string(v)
+						}
+					} else {
+						rowMap[col] = string(v)
+					}
+				case [16]byte:
+					rowMap[col] = uuid.UUID(v).String()
 				case time.Time:
 					rowMap[col] = v.Format(time.RFC3339)
 				default:
@@ -254,7 +263,59 @@ func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.
 	}, nil
 }
 
-func (s *QueryService) GetQueryHistory(userID uuid.UUID, limit int) ([]models.QueryHistory, error) {
-	return s.execRepo.GetByUserID(userID, limit)
-}
+// GetQueryHistory returns recent user-generated query statistics from pg_stat_statements.
+func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uuid.UUID, limit int) ([]QueryHistoryItem, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 30 {
+		limit = 30
+	}
 
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	var hasStatStatements bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&hasStatStatements); err != nil {
+		return nil, err
+	}
+	if !hasStatStatements {
+		return []QueryHistoryItem{}, nil
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(queryCtx, `
+		SELECT query, calls::bigint, total_exec_time, mean_exec_time, rows::bigint,
+		       shared_blks_hit::bigint, shared_blks_read::bigint, temp_blks_written::bigint
+		FROM pg_stat_statements
+		WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND userid = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+		ORDER BY total_exec_time DESC, calls DESC
+		LIMIT 50
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]QueryHistoryItem, 0, limit)
+	for rows.Next() {
+		var item QueryHistoryItem
+		if err := rows.Scan(&item.Query, &item.Calls, &item.TotalTimeMs, &item.MeanTimeMs, &item.Rows, &item.SharedBlksHit, &item.SharedBlksRead, &item.TempBlksWritten); err != nil {
+			return nil, err
+		}
+		// if IsSystemQueryText(item.Query) {
+		// 	continue
+		// }
+		items = append(items, item)
+		if len(items) >= limit {
+			break
+		}
+	}
+
+	return items, rows.Err()
+}

@@ -15,7 +15,7 @@ import (
 
 	postgresrepo "backend/internal/postgres/repository"
 	"backend/internal/repositories"
-	"backend/internal/utils"
+	_ "backend/internal/utils"
 
 	"github.com/google/uuid"
 )
@@ -35,7 +35,7 @@ type TextToSQLService struct {
 	httpClient *http.Client
 	projectRepo  *postgresrepo.PostgresProjectRepository
 	instanceRepo *repositories.DatabaseInstanceRepository
-	credRepo     *repositories.DatabaseCredentialRepository
+	// credRepo     *repositories.DatabaseCredentialRepository
 }
 
 // DatabaseConnection represents DB connection details for schema extraction
@@ -61,7 +61,7 @@ type TextToSQLResponse struct {
 }
 
 // NewTextToSQLService creates a new Text-to-SQL service client
-func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, credRepo *repositories.DatabaseCredentialRepository, projectRepo  *postgresrepo.PostgresProjectRepository) *TextToSQLService {
+func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, projectRepo  *postgresrepo.PostgresProjectRepository) *TextToSQLService {
 	baseURL := os.Getenv("TEXT_TO_SQL_URL")	
 
 	timeout := 120 * time.Second
@@ -78,7 +78,7 @@ func NewTextToSQLService(instanceRepo *repositories.DatabaseInstanceRepository, 
 		},
 		projectRepo: projectRepo,
 		instanceRepo: instanceRepo,
-		credRepo: credRepo,
+		// credRepo: credRepo,
 	}
 }
 
@@ -92,35 +92,35 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	}
 	
 	// Find running DB instance for this project
-	inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
-	if err != nil {
-		return nil, err
-	}
-	if inst == nil {
-		return nil, ErrNoRunningDBInstance
-	}
+	// inst, err := s.instanceRepo.GetRunningByProjectID(projectId)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if inst == nil {
+	// 	return nil, ErrNoRunningDBInstance
+	// }
 
 	// Fetch credentials for the instance
-	cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
-	if err != nil {
-		return nil, err
-	}
-	if cred == nil {
-		return nil, ErrNoDBCredentials
-	}
+	// cred, err := s.credRepo.GetLatestByInstanceID(inst.ID)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if cred == nil {
+	// 	return nil, ErrNoDBCredentials
+	// }
 
-	dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt db password: %w", err)
-	}
+	// dbPassword, err := utils.DecryptString(cred.PasswordEncrypted)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("decrypt db password: %w", err)
+	// }
 	
 	log.Printf("[Database] : %v", project.Name)
 	dbConnection := DatabaseConnection {
-		Host: *inst.Host    ,
-		Port: *inst.Port    ,
+		Host: "*inst.Host"    ,
+		Port: 5432    ,			// *inst.Port
 		Database: "app",
-		User: cred.Username,
-		Password: dbPassword,
+		User: "cred.Username",	
+		Password: "dbPassword",	
 	}
 
 	req.DBConnection = dbConnection

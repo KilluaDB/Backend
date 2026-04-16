@@ -4,6 +4,7 @@ import (
 	"backend/internal/repositories"
 	"backend/internal/responses"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -63,11 +64,22 @@ func requireProjectDBType(projectRepo repositories.ProjectRepository, wantDBType
 			c.Abort()
 			return
 		}
-		if project.DBType != wantDBType {
+		if canonicalProjectDBType(project.DBType) != canonicalProjectDBType(wantDBType) {
 			responses.Fail(c, http.StatusBadRequest, nil, "This endpoint is only available for "+wantDBType+" projects")
 			c.Abort()
 			return
 		}
 		c.Next()
+	}
+}
+
+func canonicalProjectDBType(dbType string) string {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "postgres", "postgresql", "sql":
+		return "postgresql"
+	case "mongodb", "nosql":
+		return "mongodb"
+	default:
+		return strings.ToLower(strings.TrimSpace(dbType))
 	}
 }

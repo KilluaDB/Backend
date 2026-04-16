@@ -46,6 +46,7 @@ func isValidSchemaName(name string) bool {
 
 // VisualizeSchema generates a Mermaid ER diagram for a project's database schema
 func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, schema string) (string, error) {
+	schema = strings.TrimSpace(schema)
 	if schema == "" {
 		schema = "public"
 	}
@@ -58,7 +59,6 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 	if err != nil {
 		return "", err
 	}
-	defer pool.Close()
 
 	schemaRepo := repository.NewSchemaRepository(pool)
 
@@ -70,6 +70,16 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 		return "", fmt.Errorf("failed to generate schema visualization: %w", err)
 	}
 	return mermaidDiagram, nil
+}
+
+// ListSchemas returns schema names available in the project's database.
+func (s *SchemaService) ListSchemas(ctx context.Context, userID, projectID uuid.UUID) ([]string, error) {
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	repo := repository.NewSchemaRepository(pool)
+	return repo.ListSchemas(ctx)
 }
 
 func parseTables(ctx context.Context, schemaRepo *repository.SchemaRepository, schema string) ([]model.Table, error) {

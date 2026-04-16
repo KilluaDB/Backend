@@ -34,19 +34,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
--- Sessions table (for authentication)
-CREATE TABLE IF NOT EXISTS sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    refresh_token TEXT NOT NULL,
-    is_revoked BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMPTZ NOT NULL
-);
 
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_refresh_token ON sessions(refresh_token);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
 
 -- Projects table
 CREATE TABLE IF NOT EXISTS projects (
@@ -56,12 +45,16 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   db_type db_type_t NOT NULL,
   resource_tier resource_tier_t NOT NULL DEFAULT 'free',
+  status instance_status_t NOT NULL DEFAULT 'creating',
+  runtime_created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  runtime_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
 CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 
 
 -- Database Instances table (K8s resource discovered by project_id via cluster name convention)
@@ -80,6 +73,7 @@ CREATE TABLE IF NOT EXISTS database_instances (
 
 CREATE INDEX IF NOT EXISTS idx_database_instances_project_id ON database_instances(project_id);
 CREATE INDEX IF NOT EXISTS idx_database_instances_status ON database_instances(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_database_instances_project_id ON database_instances(project_id);
 
 -- Database Credentials table
 CREATE TABLE IF NOT EXISTS database_credentials (
@@ -110,21 +104,6 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_revoked ON api_keys(revoked);
 CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at);
 
-
--- Query History tables (split by DB type)
-CREATE TABLE IF NOT EXISTS postgres_query_history (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  db_instance_id UUID NOT NULL REFERENCES database_instances(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-  query_text TEXT NOT NULL,
-  executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  success BOOLEAN,
-  execution_time_ms INT
-);
-
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_db_instance_id ON postgres_query_history(db_instance_id);
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_user_id ON postgres_query_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_postgres_query_history_executed_at ON postgres_query_history(executed_at);
 
 CREATE TABLE IF NOT EXISTS mongo_query_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

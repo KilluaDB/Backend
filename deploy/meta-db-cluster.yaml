@@ -12,10 +12,12 @@ spec:
       max_connections: "100"
       shared_buffers: "128MB"
 
+  enableSuperuserAccess: true
+
   bootstrap:
     initdb:
-      database: dbaas      
-      owner: dbaas        
+      database: dbaas
+      owner: dbaas
 
   storage:
     size: 10Gi

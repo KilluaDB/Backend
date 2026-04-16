@@ -7,6 +7,8 @@
 BINARY_NAME=api
 BINARY_PATH=bin/$(BINARY_NAME)
 MAIN_PATH=cmd/api/main.go
+DOCKERHUB_USERNAME ?= your-dockerhub-username
+BACKEND_IMAGE ?= $(DOCKERHUB_USERNAME)/dbaas-backend:latest
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -61,23 +63,25 @@ check: ## Check if all dependencies are installed
 	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl is not installed"; exit 1; }
 	@echo "All required dependencies are installed"
 
-docker-build: ## Build Docker image
-	@echo "Building Docker image..."
-	docker build -t backend-api:latest .
+docker-build: ## Build Docker image (set DOCKERHUB_USERNAME or BACKEND_IMAGE)
+	@echo "Building Docker image: $(BACKEND_IMAGE)"
+	docker build -t $(BACKEND_IMAGE) .
 
-docker-push: ## Push Docker image to ECR (requires ECR_URL env var)
-	@if [ -z "$$ECR_URL" ]; then echo "ECR_URL is required. Run: export ECR_URL=\$$(cd infra/terraform && terraform output -raw ecr_repository_url)"; exit 1; fi
-	docker tag backend-api:latest $$ECR_URL:latest
-	docker push $$ECR_URL:latest
+docker-push: docker-build ## Build and push Docker image to DockerHub
+	docker push $(BACKEND_IMAGE)
 
-deploy: ## Deploy all K8s manifests to the current cluster context
+deploy: ## Deploy all K8s manifests to the current cluster context (set DOCKERHUB_USERNAME or BACKEND_IMAGE)
+	@if [ "$(BACKEND_IMAGE)" = "your-dockerhub-username/dbaas-backend:latest" ]; then \
+		echo "ERROR: Set DOCKERHUB_USERNAME or BACKEND_IMAGE before deploying"; exit 1; fi
 	@echo "Deploying to Kubernetes..."
 	kubectl apply -f deploy/rbac.yaml
+	kubectl apply -f deploy/redis.yaml
 	kubectl apply -f deploy/meta-db-cluster.yaml
-	@echo "Waiting for meta-db to be ready..."
-	kubectl wait --for=condition=Ready cluster/meta-db --timeout=300s 2>/dev/null || echo "Waiting for CNPG cluster (check: kubectl get cluster meta-db)"
+	@echo "Waiting for meta-db to be ready (up to 5 min)..."
+	kubectl wait --for=condition=Ready cluster/meta-db --timeout=300s 2>/dev/null || echo "Still waiting for CNPG cluster (check: kubectl get cluster meta-db)"
 	kubectl apply -f deploy/configmap.yaml
-	kubectl apply -f deploy/deployment.yaml
+	kubectl apply -f deploy/secret.yaml
+	BACKEND_IMAGE=$(BACKEND_IMAGE) envsubst < deploy/deployment.yaml | kubectl apply -f -
 	kubectl apply -f deploy/service.yaml
 	kubectl apply -f deploy/ingress.yaml
 	@echo "Deploy complete. Check: kubectl get pods -n default"

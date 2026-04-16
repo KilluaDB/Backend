@@ -142,6 +142,7 @@ Optional:
 | `DB_INSTANCES_NAMESPACE_POSTGRES` | Namespace for PostgreSQL instances (CloudNativePG) | `postgres-instances` |
 | `DB_INSTANCES_NAMESPACE_MONGO` | Namespace for MongoDB instances | `mongodb-instances` |
 | `KUBECONFIG` | Path to kubeconfig (when backend runs outside the cluster) | unset = in-cluster config |
+| `SCHEMA_AI_BASE_URL` | Base URL of the local AI schema generator service (used by schema-from-text streaming endpoint) | `http://localhost:8090` |
 
 ### Quick start
 
