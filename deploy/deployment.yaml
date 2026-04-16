@@ -32,10 +32,9 @@ spec:
             - configMapRef:
                 name: backend-config
           env:
-            # Redis in-cluster service (override ConfigMap if missing)
             - name: REDIS_ADDR
               value: "redis:6379"
-            # Plain postgres (start.sh): uses postgres-secrets. For CNPG meta-db use meta-db-app / meta-db-superuser with key password.
+            # CNPG operator creates these secrets automatically when meta-db cluster is ready
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
