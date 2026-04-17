@@ -105,6 +105,11 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS resource_tier resource_tier_t NOT NULL DEFAULT 'free';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS status instance_status_t NOT NULL DEFAULT 'creating';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS runtime_created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS runtime_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_db_type ON projects(db_type);
 CREATE INDEX IF NOT EXISTS idx_projects_resource_tier ON projects(resource_tier);

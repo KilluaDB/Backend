@@ -62,5 +62,8 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		// Query
 		postgres.POST("/query/execute", h.Query.ExecuteQuery)
 		postgres.GET("/query/history", h.Query.GetQueryHistory)
+
+		// Text-to-SQL
+		postgres.POST("/text-to-sql", h.TextToSql.GenerateAndExecuteSQL)
 	}
 }

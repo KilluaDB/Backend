@@ -75,8 +75,8 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-	sessionRepo := repositories.NewSessionRepository(pool)
-	userService := services.NewUserService(userRepo, sessionRepo)
+	// sessionRepo := repositories.NewSessionRepository(pool)
+	userService := services.NewUserService(userRepo)
 	authService := services.NewAuthService(userRepo, refreshStore)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
@@ -110,6 +110,14 @@ func NewServer() *http.Server {
 	pgQueryService := postgressvc.NewQueryService(instanceConn, maxPostgresQueryLimit)
 	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
+	// textToSqlRepo := repositories.NewQueryHistoryRepository(pool)
+	textToSqlService := postgressvc.NewTextToSQLService(dsnService, projectRepo)
+	textToSqlHandler := pghandler.NewTextToSQLHandler(textToSqlService, pgQueryService)
+
+	//
+	// tableRepo := repositories.NewTableRepository(pool)
+	// tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
+	
 	//	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
 	//	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
 	//	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
@@ -120,7 +128,7 @@ func NewServer() *http.Server {
 	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, dbInstanceRepo)
 	dashMetricsSvc := postgressvc.NewDashboardMetricsService(instanceConn)
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
-	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler)
+	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)
 
 	// MongoDB API handler
 	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)

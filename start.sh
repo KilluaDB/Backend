@@ -70,6 +70,12 @@ REFRESH_TOKEN_SECRET=your-refresh-token-secret-change-this-in-production
 # Redis (required: redis:6379 in-cluster, localhost:6379 locally)
 REDIS_ADDR=localhost:6379
 
+# Text-to-SQL (FastAPI in AI/integration — uvicorn on port 5001). No trailing slash.
+# When the Go backend runs in Docker and FastAPI stays on the host, override to:
+# TEXT_TO_SQL_URL=http://host.docker.internal:5001
+# TEXT_TO_SQL_URL=http://127.0.0.1:5001
+TEXT_TO_SQL_URL=http://text-to-sql-svc.default.svc.cluster.local:5001
+
 # Google OAuth (optional)
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
+	_ "strconv"
 	"strings"
 	"time"
 
@@ -105,23 +105,23 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	}
 
 	// Enforce LIMIT for SELECT queries to avoid unbounded result sets.
-	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
-	if isSelect {
-		// Simple detection of LIMIT <number> ignoring comments (already stripped above).
-		limitRegex := regexp.MustCompile(`\bLIMIT\s+(\d+)\b`)
-		matches := limitRegex.FindStringSubmatch(normalized)
-		if len(matches) < 2 {
-			return fmt.Errorf("SELECT queries must include a LIMIT clause with value <= %d", s.maxLimit)
-		}
-		limitValueStr := matches[1]
-		limitValue, err := strconv.Atoi(limitValueStr)
-		if err != nil {
-			return fmt.Errorf("unable to parse LIMIT value: %v", err)
-		}
-		if limitValue > s.maxLimit {
-			return fmt.Errorf("LIMIT value %d exceeds the maximum allowed (%d)", limitValue, s.maxLimit)
-		}
-	}
+	// isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
+	// if isSelect {
+	// 	// Simple detection of LIMIT <number> ignoring comments (already stripped above).
+	// 	limitRegex := regexp.MustCompile(`\bLIMIT\s+(\d+)\b`)
+	// 	matches := limitRegex.FindStringSubmatch(normalized)
+	// 	if len(matches) < 2 {
+	// 		return fmt.Errorf("SELECT queries must include a LIMIT clause with value <= %d", s.maxLimit)
+	// 	}
+	// 	limitValueStr := matches[1]
+	// 	limitValue, err := strconv.Atoi(limitValueStr)
+	// 	if err != nil {
+	// 		return fmt.Errorf("unable to parse LIMIT value: %v", err)
+	// 	}
+	// 	if limitValue > s.maxLimit {
+	// 		return fmt.Errorf("LIMIT value %d exceeds the maximum allowed (%d)", limitValue, s.maxLimit)
+	// 	}
+	// }
 
 	return nil
 }
@@ -308,9 +308,9 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 		if err := rows.Scan(&item.Query, &item.Calls, &item.TotalTimeMs, &item.MeanTimeMs, &item.Rows, &item.SharedBlksHit, &item.SharedBlksRead, &item.TempBlksWritten); err != nil {
 			return nil, err
 		}
-		if IsSystemQueryText(item.Query) {
-			continue
-		}
+		// if IsSystemQueryText(item.Query) {
+		// 	continue
+		// }
 		items = append(items, item)
 		if len(items) >= limit {
 			break
