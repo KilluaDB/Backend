@@ -111,7 +111,7 @@ func NewServer() *http.Server {
 	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
 	// textToSqlRepo := repositories.NewQueryHistoryRepository(pool)
-	textToSqlService := postgressvc.NewTextToSQLService(dbInstanceRepo, projectRepo)
+	textToSqlService := postgressvc.NewTextToSQLService(dsnService, projectRepo)
 	textToSqlHandler := pghandler.NewTextToSQLHandler(textToSqlService, pgQueryService)
 
 	//
