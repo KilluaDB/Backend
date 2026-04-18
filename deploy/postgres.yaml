@@ -1,4 +1,3 @@
-# PostgreSQL meta-DB for the backend (runs inside the cluster)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,6 +6,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: local-path
   resources:
     requests:
       storage: 1Gi
@@ -43,35 +43,29 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 configMapKeyRef:
-                  name: postgres-config
-                  key: POSTGRES_USER
+                  name: backend-config
+                  key: DB_USERNAME
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
-                  name: postgres-config
-                  key: POSTGRES_DB
+                  name: backend-config
+                  key: DB_DATABASE
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-secrets
-                  key: POSTGRES_PASSWORD
+                  name: backend-secrets
+                  key: DB_PASSWORD
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
           livenessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - postgres
+              command: [pg_isready, -U, postgres]
             initialDelaySeconds: 15
             periodSeconds: 10
           readinessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - postgres
+              command: [pg_isready, -U, postgres]
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
@@ -93,13 +87,3 @@ spec:
       name: postgres
   selector:
     app: postgres
----
-# ConfigMap for non-sensitive Postgres settings (user, db name)
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: postgres-config
-  namespace: default
-data:
-  POSTGRES_USER: "postgres"
-  POSTGRES_DB: "dbaas"

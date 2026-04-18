@@ -21,8 +21,6 @@ spec:
       serviceAccountName: backend
       containers:
         - name: api
-          # For local k3d: build and load with same name, e.g. docker build -t backend-api:latest . && k3d image import backend-api:latest -c <cluster-name>
-          # For AWS: use your ECR URL, e.g. 123456789012.dkr.ecr.region.amazonaws.com/backend:latest
           image: backend-api:latest
           imagePullPolicy: IfNotPresent
           ports:
@@ -31,45 +29,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: backend-config
-          env:
-            - name: REDIS_ADDR
-              value: "redis:6379"
-            # CNPG operator creates these secrets automatically when meta-db cluster is ready
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secrets
-                  key: POSTGRES_PASSWORD
-            - name: DB_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secrets
-                  key: POSTGRES_PASSWORD
-            - name: ACCESS_TOKEN_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: ACCESS_TOKEN_SECRET
-            - name: REFRESH_TOKEN_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: REFRESH_TOKEN_SECRET
-            - name: GOOGLE_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: GOOGLE_CLIENT_SECRET
-            - name: DB_CRED_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: DB_CRED_ENCRYPTION_KEY
+            - secretRef:
+                name: backend-secrets
           resources:
             requests:
               memory: "128Mi"

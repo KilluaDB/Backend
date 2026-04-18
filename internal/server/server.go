@@ -118,7 +118,7 @@ func NewServer() *http.Server {
 	//
 	// tableRepo := repositories.NewTableRepository(pool)
 	// tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
-	
+
 	//	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
 	//	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
 	//	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
@@ -180,8 +180,6 @@ func validateRequiredEnvVars() error {
 		"DB_USERNAME":          os.Getenv("DB_USERNAME"),
 		"DB_PASSWORD":          os.Getenv("DB_PASSWORD"),
 		"DB_DATABASE":          os.Getenv("DB_DATABASE"),
-		"DB_ADMIN_USER":        os.Getenv("DB_ADMIN_USER"),
-		"DB_ADMIN_PASSWORD":    os.Getenv("DB_ADMIN_PASSWORD"),
 		"REDIS_ADDR":           os.Getenv("REDIS_ADDR"),
 		"ACCESS_TOKEN_SECRET":  os.Getenv("ACCESS_TOKEN_SECRET"),
 		"REFRESH_TOKEN_SECRET": os.Getenv("REFRESH_TOKEN_SECRET"),

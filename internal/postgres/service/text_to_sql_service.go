@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/postgres/infra"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -34,12 +35,10 @@ var (
 
 // TextToSQLService handles communication with the FastAPI Text-to-SQL service
 type TextToSQLService struct {
-	baseURL    string
-	httpClient *http.Client
-	projectRepo  *postgresrepo.PostgresProjectRepository
-	dsnProvider	 DSNProvider
-	// instanceRepo *repositories.DatabaseInstanceRepository
-	// credRepo     *repositories.DatabaseCredentialRepository
+	baseURL     string
+	httpClient  *http.Client
+	projectRepo *postgresrepo.PostgresProjectRepository
+	dsnProvider infra.DSNProvider
 }
 
 // DatabaseConnection represents DB connection details for schema extraction
@@ -52,7 +51,7 @@ type DatabaseConnection struct {
 }
 
 type TextToSQLRequest struct {
-	Question  string `json:"question" binding:"required"`
+	Question     string             `json:"question" binding:"required"`
 	DBConnection DatabaseConnection `json:"db_connection"`
 }
 
@@ -65,9 +64,8 @@ type TextToSQLResponse struct {
 }
 
 // NewTextToSQLService creates a new Text-to-SQL service client
-func NewTextToSQLService(dsnProvider DSNProvider, projectRepo  *postgresrepo.PostgresProjectRepository) *TextToSQLService {
-	baseURL := os.Getenv("TEXT_TO_SQL_URL")	
-
+func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *postgresrepo.PostgresProjectRepository) *TextToSQLService {
+	baseURL := os.Getenv("AI")
 	timeout := 120 * time.Second
 	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {
 		if sec, err := strconv.Atoi(s); err == nil && sec > 0 {
@@ -82,7 +80,6 @@ func NewTextToSQLService(dsnProvider DSNProvider, projectRepo  *postgresrepo.Pos
 		},
 		projectRepo: projectRepo,
 		dsnProvider: dsnProvider,
-		// credRepo: credRepo,
 	}
 }
 
@@ -96,7 +93,7 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	if project == nil {
 		return nil, ErrProjectNotFound
 	}
-	
+
 	dsn, _, err := s.dsnProvider.GetConnectionDSN(ctx, userID, projectId)
 	if err != nil {
 		log.Printf("[TextToSQLService] DSN resolution failed for project=%s user=%s: %v", projectId.String(), userID.String(), err)
@@ -122,17 +119,16 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	}
 	password, _ := parsed.User.Password()
 
-
-	dbConnection := DatabaseConnection {
-		Host: parsed.Hostname()    ,
-		Port: port    ,			
+	dbConnection := DatabaseConnection{
+		Host:     parsed.Hostname(),
+		Port:     port,
 		Database: "app",
-		User: parsed.User.Username(),	
-		Password: password,	
+		User:     parsed.User.Username(),
+		Password: password,
 	}
 
 	req.DBConnection = dbConnection
-	
+
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)

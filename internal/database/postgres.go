@@ -23,21 +23,20 @@ func EnsureDatabaseExists() error {
 	if port == "" {
 		return fmt.Errorf("DB_PORT environment variable is required")
 	}
-
-	adminUser := os.Getenv("DB_ADMIN_USER")
-	if adminUser == "" {
-		return fmt.Errorf("DB_ADMIN_USER environment variable is required")
+	dbUserName := os.Getenv("DB_USERNAME")
+	if dbUserName == "" {
+		return fmt.Errorf("DB_USERNAME environment variable is required")
 	}
-	adminPassword := os.Getenv("DB_ADMIN_PASSWORD")
-	if adminPassword == "" {
-		return fmt.Errorf("DB_ADMIN_PASSWORD environment variable is required")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	if dbPassword == "" {
+		return fmt.Errorf("DB_PASSWORD environment variable is required")
 	}
 	database := os.Getenv("DB_DATABASE")
 	if database == "" {
 		return fmt.Errorf("DB_DATABASE environment variable is required")
 	}
 
-	userInfo := url.UserPassword(adminUser, adminPassword)
+	userInfo := url.UserPassword(dbUserName, dbPassword)
 	dsn := fmt.Sprintf(
 		"postgresql://%s@%s:%s/postgres?sslmode=disable",
 		userInfo.String(),
