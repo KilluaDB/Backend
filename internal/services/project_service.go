@@ -67,7 +67,7 @@ func normalizeDBType(raw string) (string, error) {
 	}
 }
 
-func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, error) {
+func (s *ProjectService) CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (*models.Project, error) {
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
@@ -104,15 +104,15 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 	}
 	project.Prepare()
 
-	if err := s.projectRepo.Create(context.Background(), project); err != nil {
+	if err := s.projectRepo.Create(ctx, project); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
 	}
 
 	// Provision asynchronously; project status transitions to "running" or "failed" once done.
-	go s.provisionInstanceAsync(project.ID, internalDBType, req.ResourceTier)
+	go s.provisionInstanceAsync(ctx, project.ID, internalDBType, req.ResourceTier)
 
 	// Reload to get DB-managed fields (timestamps etc.) for the response.
-	if p, err := s.projectRepo.GetByID(context.Background(), project.ID); err == nil && p != nil {
+	if p, err := s.projectRepo.GetByID(ctx, project.ID); err == nil && p != nil {
 		project = p
 	}
 
@@ -125,17 +125,17 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 
 // provisionInstanceAsync provisions the database instance and updates its status.
 // Credentials are never stored — GetConnection derives them from K8s on demand.
-func (s *ProjectService) provisionInstanceAsync(projectID uuid.UUID, dbType, resourceTier string) {
+func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID uuid.UUID, dbType, resourceTier string) {
 	log.Printf("Provisioning DB instance for project %s (type=%s tier=%s)", projectID, dbType, resourceTier)
 
 	// Timeout must exceed the operator wait loops (10 min each) with margin.
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	_, err := s.provisioner.CreateInstance(ctx, projectID, dbType, resourceTier)
 	if err != nil {
 		log.Printf("ERROR: provision failed for project %s: %v", projectID, err)
-		if statusErr := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "failed"); statusErr != nil {
+		if statusErr := s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "failed"); statusErr != nil {
 			log.Printf("ERROR: failed to mark project %s as failed: %v", projectID, statusErr)
 		}
 
@@ -143,22 +143,22 @@ func (s *ProjectService) provisionInstanceAsync(projectID uuid.UUID, dbType, res
 	}
 
 	// Only store status — not the DSN. Credentials are read from K8s at connection time.
-	if err := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "running"); err != nil {
+	if err := s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "running"); err != nil {
 		log.Printf("ERROR: failed to mark project %s as running: %v", projectID, err)
 	}
 
 	log.Printf("DB instance provisioned for project %s", projectID)
 }
 
-func (s *ProjectService) GetProjectByID(projectID string) (*models.Project, error) {
+func (s *ProjectService) GetProjectByID(ctx context.Context, projectID string) (*models.Project, error) {
 	projectUUID, err := utils.ParseUUID(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
 	}
-	return s.projectRepo.GetByID(context.Background(), projectUUID)
+	return s.projectRepo.GetByID(ctx, projectUUID)
 }
 
-func (s *ProjectService) GetProjectByIDAndUserID(projectID, userID string) (*models.Project, error) {
+func (s *ProjectService) GetProjectByIDAndUserID(ctx context.Context, projectID, userID string) (*models.Project, error) {
 	projectUUID, err := utils.ParseUUID(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
@@ -168,7 +168,7 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID, userID string) (*mod
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
-	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
+	project, err := s.projectRepo.GetByIDAndUserID(ctx, projectUUID, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
@@ -183,13 +183,13 @@ func (s *ProjectService) GetProjectByIDAndUserID(projectID, userID string) (*mod
 	return project, nil
 }
 
-func (s *ProjectService) GetProjectsByUserID(userID string) ([]models.Project, error) {
+func (s *ProjectService) GetProjectsByUserID(ctx context.Context, userID string) ([]models.Project, error) {
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
-	projects, err := s.projectRepo.GetByUserID(context.Background(), userUUID)
+	projects, err := s.projectRepo.GetByUserID(ctx, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (s *ProjectService) GetProjectsByUserID(userID string) ([]models.Project, e
 	return projects, nil
 }
 
-func (s *ProjectService) DeleteProjectByIDAndUserID(projectID, userID string) error {
+func (s *ProjectService) DeleteProjectByIDAndUserID(ctx context.Context, projectID, userID string) error {
 	projectUUID, err := utils.ParseUUID(projectID)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
@@ -213,7 +213,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID, userID string) er
 		return fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
-	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectUUID, userUUID)
+	project, err := s.projectRepo.GetByIDAndUserID(ctx, projectUUID, userUUID)
 	if err != nil {
 		return fmt.Errorf("failed to get project: %w", err)
 	}
@@ -221,7 +221,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID, userID string) er
 		return ErrProjectNotFound
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := s.provisioner.DeleteInstance(ctx, projectUUID, project.DBType); err != nil {
 		log.Printf("Warning: failed to delete K8s resource for project %s: %v", projectID, err)
@@ -230,7 +230,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(projectID, userID string) er
 		s.poolEvicter.EvictProject(projectUUID)
 	}
 
-	if err := s.projectRepo.DeleteByIDAndUserID(context.Background(), projectUUID, userUUID); err != nil {
+	if err := s.projectRepo.DeleteByIDAndUserID(ctx, projectUUID, userUUID); err != nil {
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
 	return nil

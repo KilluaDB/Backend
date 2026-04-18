@@ -50,17 +50,17 @@ func NewProjectHandler(projectService *services.ProjectService) *ProjectHandler 
 }
 
 // CreateProject handles POST /api/v1/projects
-func (h *ProjectHandler) CreateProject(c *gin.Context) {
+func (h *ProjectHandler) CreateProject(ctx *gin.Context) {
 	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userId")
+	userID, exists := ctx.Get("userId")
 	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		responses.Fail(ctx, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
 	var req services.CreateProjectRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.Fail(ctx, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
 
@@ -75,23 +75,23 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	project, err := h.projectService.CreateProject(userIDStr, req)
+	project, err := h.projectService.CreateProject(ctx, userIDStr, req)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidUserID):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid user context")
+			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid user context")
 			return
 		case errors.Is(err, services.ErrInvalidDBType):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
+			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
 			return
 		case errors.Is(err, services.ErrInvalidResourceTier):
-			responses.Fail(c, http.StatusBadRequest, err, "Invalid resource_tier: must be 'free', 'basic', or 'premium'")
+			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid resource_tier: must be 'free', 'basic', or 'premium'")
 			return
 		case errors.Is(err, services.ErrProjectCreateDB):
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project or database instance")
+			responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to create project or database instance")
 			return
 		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to create project")
+			responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to create project")
 			return
 		}
 	}
@@ -102,19 +102,19 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		"project": projectData,
 	}
 
-	responses.Success(c, http.StatusCreated, responseData, "Project created successfully")
+	responses.Success(ctx, http.StatusCreated, responseData, "Project created successfully")
 }
 
 // GetProject handles GET /api/v1/projects/:id
-func (h *ProjectHandler) GetProject(c *gin.Context) {
+func (h *ProjectHandler) GetProject(ctx *gin.Context) {
 	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userId")
+	userID, exists := ctx.Get("userId")
 	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		responses.Fail(ctx, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
-	projectID := c.Param("id")
+	projectID := ctx.Param("id")
 
 	// Convert userID to string
 	userIDStr := ""
@@ -127,24 +127,24 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	project, err := h.projectService.GetProjectByIDAndUserID(projectID, userIDStr)
+	project, err := h.projectService.GetProjectByIDAndUserID(ctx, projectID, userIDStr)
 	if err != nil {
 		if errors.Is(err, services.ErrProjectNotFound) || errors.Is(err, services.ErrInvalidProjectID) || errors.Is(err, services.ErrInvalidUserID) {
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			responses.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
 			return
 		}
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve project")
+		responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to retrieve project")
 		return
 	}
 
-	responses.Success(c, http.StatusOK, projectToAPI(project), "Project retrieved successfully")
+	responses.Success(ctx, http.StatusOK, projectToAPI(project), "Project retrieved successfully")
 }
 
 // ListProjects handles GET /api/v1/projects
-func (h *ProjectHandler) ListProjects(c *gin.Context) {
-	userID, exists := c.Get("userId")
+func (h *ProjectHandler) ListProjects(ctx *gin.Context) {
+	userID, exists := ctx.Get("userId")
 	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		responses.Fail(ctx, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
@@ -158,9 +158,9 @@ func (h *ProjectHandler) ListProjects(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	projects, err := h.projectService.GetProjectsByUserID(userIDStr)
+	projects, err := h.projectService.GetProjectsByUserID(ctx, userIDStr)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve projects")
+		responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to retrieve projects")
 		return
 	}
 
@@ -168,19 +168,19 @@ func (h *ProjectHandler) ListProjects(c *gin.Context) {
 	for i := range projects {
 		list = append(list, projectToAPI(&projects[i]))
 	}
-	responses.Success(c, http.StatusOK, list, "Projects retrieved successfully")
+	responses.Success(ctx, http.StatusOK, list, "Projects retrieved successfully")
 }
 
 // DeleteProject handles DELETE /api/v1/projects/:id
-func (h *ProjectHandler) DeleteProject(c *gin.Context) {
+func (h *ProjectHandler) DeleteProject(ctx *gin.Context) {
 	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userId")
+	userID, exists := ctx.Get("userId")
 	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		responses.Fail(ctx, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
-	projectID := c.Param("id")
+	projectID := ctx.Param("id")
 
 	// Convert userID to string
 	userIDStr := ""
@@ -193,17 +193,17 @@ func (h *ProjectHandler) DeleteProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	err := h.projectService.DeleteProjectByIDAndUserID(projectID, userIDStr)
+	err := h.projectService.DeleteProjectByIDAndUserID(ctx, projectID, userIDStr)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrProjectNotFound), errors.Is(err, services.ErrInvalidProjectID), errors.Is(err, services.ErrInvalidUserID):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+			responses.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
 			return
 		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Failed to delete project")
+			responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to delete project")
 			return
 		}
 	}
 
-	responses.Success(c, http.StatusOK, nil, "Project deleted successfully")
+	responses.Success(ctx, http.StatusOK, nil, "Project deleted successfully")
 }
