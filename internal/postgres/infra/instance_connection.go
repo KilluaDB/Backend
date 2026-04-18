@@ -1,4 +1,4 @@
-package service
+package infra
 
 import (
 	"context"
@@ -15,4 +15,3 @@ type InstanceConnectionService interface {
 	GetPoolWithMeta(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, uuid.UUID, error)
 	GetInstanceID(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error)
 }
-

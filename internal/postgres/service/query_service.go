@@ -2,6 +2,7 @@ package service
 
 import (
 	"backend/internal/models"
+	"backend/internal/postgres/infra"
 	"context"
 	"errors"
 	"fmt"
@@ -44,11 +45,11 @@ var (
 )
 
 type QueryService struct {
-	instanceConn InstanceConnectionService
+	instanceConn infra.InstanceConnectionService
 	maxLimit     int
 }
 
-func NewQueryService(instanceConn InstanceConnectionService, maxLimit int) *QueryService {
+func NewQueryService(instanceConn infra.InstanceConnectionService, maxLimit int) *QueryService {
 	if maxLimit <= 0 {
 		maxLimit = 50
 	}

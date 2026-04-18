@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/postgres/infra"
 	"backend/internal/postgres/model"
 	"backend/internal/postgres/repository"
 	"backend/internal/utils"
@@ -25,11 +26,11 @@ const (
 )
 
 type SchemaService struct {
-	instanceConn InstanceConnectionService
+	instanceConn infra.InstanceConnectionService
 }
 
 // NewSchemaService creates a new SchemaService
-func NewSchemaService(instanceConn InstanceConnectionService) *SchemaService {
+func NewSchemaService(instanceConn infra.InstanceConnectionService) *SchemaService {
 	return &SchemaService{
 		instanceConn: instanceConn,
 	}

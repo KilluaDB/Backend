@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/postgres/infra"
 	"backend/internal/repositories"
 	"context"
 	"time"
@@ -40,11 +41,11 @@ type DashboardSchemaSummary struct {
 }
 
 type DashboardOverviewService struct {
-	instanceConn InstanceConnectionService
+	instanceConn infra.InstanceConnectionService
 	instanceRepo *repositories.DatabaseInstanceRepository
 }
 
-func NewDashboardOverviewService(instanceConn InstanceConnectionService, instanceRepo *repositories.DatabaseInstanceRepository) *DashboardOverviewService {
+func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo *repositories.DatabaseInstanceRepository) *DashboardOverviewService {
 	return &DashboardOverviewService{instanceConn: instanceConn, instanceRepo: instanceRepo}
 }
 

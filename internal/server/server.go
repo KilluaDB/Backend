@@ -5,6 +5,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/handlers"
 	pghandler "backend/internal/postgres/handler"
+	"backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
 	postgressvc "backend/internal/postgres/service"
 	"backend/internal/repositories"
@@ -28,7 +29,7 @@ type Server struct {
 	pool *pgxpool.Pool
 }
 
-var pgInstanceManager *postgressvc.PostgresConnectionManager
+var pgInstanceManager *infra.PostgresConnectionManager
 
 func NewServer() *http.Server {
 	// Validate required environment variables
@@ -97,7 +98,7 @@ func NewServer() *http.Server {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
 	dsnService := services.NewInstanceDsnService(projectRepo, dbInstanceRepo, provisioner)
-	instanceConn := postgressvc.NewPostgresConnectionManager(dsnService)
+	instanceConn := infra.NewPostgresConnectionManager(dsnService)
 	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()

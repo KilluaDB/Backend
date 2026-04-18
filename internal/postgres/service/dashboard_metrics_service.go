@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/postgres/infra"
 	"context"
 
 	"github.com/google/uuid"
@@ -18,10 +19,10 @@ type DashboardMetrics struct {
 }
 
 type DashboardMetricsService struct {
-	instanceConn InstanceConnectionService
+	instanceConn infra.InstanceConnectionService
 }
 
-func NewDashboardMetricsService(instanceConn InstanceConnectionService) *DashboardMetricsService {
+func NewDashboardMetricsService(instanceConn infra.InstanceConnectionService) *DashboardMetricsService {
 	return &DashboardMetricsService{instanceConn: instanceConn}
 }
 

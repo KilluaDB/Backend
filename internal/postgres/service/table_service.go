@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/postgres/infra"
 	"backend/internal/postgres/repository"
 	"context"
 
@@ -9,12 +10,12 @@ import (
 )
 
 type TableService struct {
-	instanceConn InstanceConnectionService
+	instanceConn infra.InstanceConnectionService
 	tableRepo    *repository.TableRepository
 }
 
 func NewTableService(
-	instanceConn InstanceConnectionService,
+	instanceConn infra.InstanceConnectionService,
 	tableRepo *repository.TableRepository,
 ) *TableService {
 	return &TableService{
