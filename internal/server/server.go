@@ -92,18 +92,17 @@ func NewServer() *http.Server {
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
 	projectRepo := postgresrepo.NewProjectRepository(pool)
-	dbInstanceRepo := repositories.NewDatabaseInstanceRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
-	dsnService := services.NewInstanceDsnService(projectRepo, dbInstanceRepo, provisioner)
+	dsnService := services.NewInstanceDsnService(projectRepo, provisioner)
 	instanceConn := infra.NewPostgresConnectionManager(dsnService)
 	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()
 	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
-	projectService := services.NewProjectService(projectRepo, provisioner, dbInstanceRepo, tableService, instanceConn)
+	projectService := services.NewProjectService(projectRepo, provisioner, tableService, instanceConn)
 	projectHandler := handlers.NewProjectHandler(projectService)
 
 	// Query dependencies
@@ -126,7 +125,7 @@ func NewServer() *http.Server {
 	schemaService := postgressvc.NewSchemaService(instanceConn)
 	schemaHandler := pghandler.NewSchemaHandler(schemaService)
 	tableHandler := pghandler.NewTableHandler(tableService)
-	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, dbInstanceRepo)
+	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, projectRepo)
 	dashMetricsSvc := postgressvc.NewDashboardMetricsService(instanceConn)
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
 	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)

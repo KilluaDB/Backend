@@ -75,7 +75,7 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		userIDStr = fmt.Sprintf("%v", v)
 	}
 
-	project, _, err := h.projectService.CreateProject(userIDStr, req)
+	project, err := h.projectService.CreateProject(userIDStr, req)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidUserID):

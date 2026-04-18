@@ -27,7 +27,6 @@ var (
 type ProjectService struct {
 	projectRepo          repositories.ProjectRepository
 	provisioner          *OperatorProvisioner
-	dbInstanceRepo       *repositories.DatabaseInstanceRepository
 	postgresTableService *service.TableService
 	poolEvicter          ProjectPoolEvicter
 }
@@ -39,14 +38,12 @@ type ProjectPoolEvicter interface {
 func NewProjectService(
 	projectRepo repositories.ProjectRepository,
 	provisioner *OperatorProvisioner,
-	dbInstanceRepo *repositories.DatabaseInstanceRepository,
 	postgresTableService *service.TableService,
 	poolEvicter ProjectPoolEvicter,
 ) *ProjectService {
 	return &ProjectService{
 		projectRepo:          projectRepo,
 		provisioner:          provisioner,
-		dbInstanceRepo:       dbInstanceRepo,
 		postgresTableService: postgresTableService,
 		poolEvicter:          poolEvicter,
 	}
@@ -70,10 +67,10 @@ func normalizeDBType(raw string) (string, error) {
 	}
 }
 
-func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, *models.DatabaseInstance, error) {
+func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) (*models.Project, error) {
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
 	}
 
 	if req.ResourceTier == "" {
@@ -86,57 +83,49 @@ func (s *ProjectService) CreateProject(userID string, req CreateProjectRequest) 
 
 	internalDBType, err := normalizeDBType(req.DBType)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// tierResources validates the tier early so we fail before writing anything to the DB.
-	if _, _, _, err := s.provisioner.tierResources(req.ResourceTier); err != nil {
-		return nil, nil, ErrInvalidResourceTier
+	if _, _, _, err = s.provisioner.tierResources(req.ResourceTier); err != nil {
+		return nil, ErrInvalidResourceTier
 	}
 
 	project := &models.Project{
-		UserID:       userUUID,
-		Name:         req.Name,
-		Description:  req.Description,
-		DBType:       internalDBType,
-		ResourceTier: req.ResourceTier,
+		UserID:           userUUID,
+		Name:             req.Name,
+		Description:      req.Description,
+		DBType:           internalDBType,
+		ResourceTier:     req.ResourceTier,
+		CreatedAt:        time.Time{},
+		Status:           "",
+		RuntimeCreatedAt: nil,
+		RuntimeUpdatedAt: nil,
 	}
 	project.Prepare()
 
-	dbInstance := &models.DatabaseInstance{
-		ProjectID: project.ID,
-		Status:    "creating",
-	}
-	dbInstance.Prepare()
-
 	if err := s.projectRepo.Create(context.Background(), project); err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
-	}
-	if err := s.dbInstanceRepo.Create(dbInstance); err != nil {
-		_ = s.projectRepo.Delete(context.Background(), project.ID)
-		return nil, nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
+		return nil, fmt.Errorf("%w: %v", ErrProjectCreateDB, err)
 	}
 
 	// Provision asynchronously; project status transitions to "running" or "failed" once done.
-	go s.provisionInstanceAsync(project.ID, dbInstance.ID, internalDBType, req.ResourceTier)
+	go s.provisionInstanceAsync(project.ID, internalDBType, req.ResourceTier)
 
 	// Reload to get DB-managed fields (timestamps etc.) for the response.
 	if p, err := s.projectRepo.GetByID(context.Background(), project.ID); err == nil && p != nil {
 		project = p
 	}
-	if inst, err := s.dbInstanceRepo.GetByID(dbInstance.ID); err == nil && inst != nil {
-		dbInstance = inst
-	}
+
 	if project.Status == "" {
 		project.Status = "creating"
 	}
 
-	return project, dbInstance, nil
+	return project, nil
 }
 
 // provisionInstanceAsync provisions the database instance and updates its status.
 // Credentials are never stored — GetConnection derives them from K8s on demand.
-func (s *ProjectService) provisionInstanceAsync(projectID, instanceID uuid.UUID, dbType, resourceTier string) {
+func (s *ProjectService) provisionInstanceAsync(projectID uuid.UUID, dbType, resourceTier string) {
 	log.Printf("Provisioning DB instance for project %s (type=%s tier=%s)", projectID, dbType, resourceTier)
 
 	// Timeout must exceed the operator wait loops (10 min each) with margin.
@@ -149,18 +138,13 @@ func (s *ProjectService) provisionInstanceAsync(projectID, instanceID uuid.UUID,
 		if statusErr := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "failed"); statusErr != nil {
 			log.Printf("ERROR: failed to mark project %s as failed: %v", projectID, statusErr)
 		}
-		if statusErr := s.dbInstanceRepo.UpdateStatus(instanceID, "failed"); statusErr != nil {
-			log.Printf("ERROR: failed to mark instance %s as failed: %v", instanceID, statusErr)
-		}
+
 		return
 	}
 
 	// Only store status — not the DSN. Credentials are read from K8s at connection time.
 	if err := s.projectRepo.UpdateRuntimeStatus(context.Background(), projectID, "running"); err != nil {
 		log.Printf("ERROR: failed to mark project %s as running: %v", projectID, err)
-	}
-	if err := s.dbInstanceRepo.UpdateStatus(instanceID, "running"); err != nil {
-		log.Printf("ERROR: failed to mark instance %s as running: %v", instanceID, err)
 	}
 
 	log.Printf("DB instance provisioned for project %s", projectID)

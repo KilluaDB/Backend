@@ -16,12 +16,12 @@ type DashboardOverview struct {
 }
 
 type DashboardInstanceInfo struct {
-	ID        uuid.UUID `json:"id"`
-	Status    string    `json:"status"`
-	Host      *string   `json:"host,omitempty"`
-	Port      *int      `json:"port,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	Status    string     `json:"status"`
+	Host      *string    `json:"host,omitempty"`
+	Port      int        `json:"port,omitempty"`
+	CreatedAt *time.Time `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at"`
 }
 
 type DashboardDBInfo struct {
@@ -42,25 +42,23 @@ type DashboardSchemaSummary struct {
 
 type DashboardOverviewService struct {
 	instanceConn infra.InstanceConnectionService
-	instanceRepo *repositories.DatabaseInstanceRepository
+	projectRepo  repositories.ProjectRepository
 }
 
-func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo *repositories.DatabaseInstanceRepository) *DashboardOverviewService {
-	return &DashboardOverviewService{instanceConn: instanceConn, instanceRepo: instanceRepo}
+func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo repositories.ProjectRepository) *DashboardOverviewService {
+	return &DashboardOverviewService{instanceConn: instanceConn, projectRepo: instanceRepo}
 }
 
 func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, projectID uuid.UUID) (*DashboardOverview, error) {
-	// Resolve meta instance info (best-effort; dashboard still works if missing).
-	inst, _ := s.instanceRepo.GetByProjectID(projectID)
+	project, _ := s.projectRepo.GetByID(ctx, projectID)
 	var instInfo *DashboardInstanceInfo
-	if inst != nil {
+	if project != nil {
 		instInfo = &DashboardInstanceInfo{
-			ID:        inst.ID,
-			Status:    inst.Status,
-			Host:      inst.Host,
-			Port:      inst.Port,
-			CreatedAt: inst.CreatedAt,
-			UpdatedAt: inst.UpdatedAt,
+			ID:        project.ID,
+			Status:    project.Status,
+			Host:      nil,
+			CreatedAt: project.RuntimeCreatedAt,
+			UpdatedAt: project.RuntimeUpdatedAt,
 		}
 	}
 

@@ -16,20 +16,17 @@ var (
 
 // InstanceDsnService resolves credentials from K8s.
 type InstanceDsnService struct {
-	projectRepo  repositories.ProjectRepository
-	instanceRepo *repositories.DatabaseInstanceRepository
-	provisioner  *OperatorProvisioner
+	projectRepo repositories.ProjectRepository
+	provisioner *OperatorProvisioner
 }
 
 func NewInstanceDsnService(
 	projectRepo repositories.ProjectRepository,
-	instanceRepo *repositories.DatabaseInstanceRepository,
 	provisioner *OperatorProvisioner,
 ) *InstanceDsnService {
 	return &InstanceDsnService{
-		projectRepo:  projectRepo,
-		instanceRepo: instanceRepo,
-		provisioner:  provisioner,
+		projectRepo: projectRepo,
+		provisioner: provisioner,
 	}
 }
 
@@ -43,15 +40,6 @@ func (s *InstanceDsnService) GetConnectionDSN(ctx context.Context, userID, proje
 	if project == nil {
 		return "", uuid.Nil, ErrProjectNotAccessible
 	}
-
-	inst, err := s.instanceRepo.GetByProjectID(projectID)
-	if err != nil {
-		return "", uuid.Nil, err
-	}
-	if inst == nil {
-		return "", uuid.Nil, ErrNoRunningInstance
-	}
-
 	result, err := s.provisioner.GetConnection(ctx, projectID, project.DBType)
 	if err != nil {
 		if project.Status != "running" {
@@ -64,5 +52,5 @@ func (s *InstanceDsnService) GetConnectionDSN(ctx context.Context, userID, proje
 		_ = s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "running")
 	}
 
-	return result.DSN, inst.ID, nil
+	return result.DSN, project.ID, nil
 }
