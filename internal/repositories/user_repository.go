@@ -154,13 +154,6 @@ func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (r *UserRepository) DeleteRefreshTokensByUserID(userID uuid.UUID) error {
-	ctx := context.Background()
-
-	query := `DELETE FROM sessions WHERE user_id = $1`
-	_, err := r.pool.Exec(ctx, query, userID)
-	return err
-}
 
 func (r *UserRepository) Update(user *models.User) error {
 	ctx := context.Background()
