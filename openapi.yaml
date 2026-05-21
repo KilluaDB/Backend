@@ -430,6 +430,28 @@ components:
           type: string
           nullable: true
 
+    TextToSQLRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          description: Natural language question describing desired data, filters, or aggregations
+
+    TextToSQLResponse:
+      type: object
+      properties:
+        sql:
+          type: string
+          description: Generated SQL statement
+        result:
+          $ref: '#/components/schemas/SQLQueryResult'
+        execution_id:
+          type: string
+          format: uuid
+        execution_time_ms:
+          type: integer
+
     QueryHistoryItem:
       type: object
       required: [query, calls, total_time_ms, mean_time_ms, rows, shared_blks_hit, shared_blks_read, temp_blks_written]
@@ -727,9 +749,11 @@ components:
             $ref: '#/components/schemas/TableColumn'
           description: At least one column definition is required.
         foreign_keys:
-          $ref: '#/components/schemas/ForeignKey'
+          type: object
           nullable: true
           description: Optional foreign key configuration for the table.
+          allOf:
+            - $ref: '#/components/schemas/ForeignKey'
 
     DeleteTableRequestBody:
       type: object
@@ -1787,9 +1811,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status: error
-                message: Project not found or database instance not ready
     post:
       operationId: createPostgresTable
       tags: [Postgres]
@@ -1892,6 +1913,97 @@ paths:
               example:
                 status: error
                 message: Table already exists
+
+  /api/v1/projects/{id}/postgres/text-to-sql:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: generateAndExecuteTextToSQL
+      tags: [Postgres]
+      summary: Generate SQL from natural language and execute it against the project's PostgreSQL instance
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextToSQLRequest'
+            example:
+              question: "Show me the 10 most recent active users with email and created_at."
+      responses:
+        '200':
+          description: SQL generated and executed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sql:
+                            type: string
+                          result:
+                            $ref: '#/components/schemas/SQLQueryResult'
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
+              example:
+                status: success
+                message: Query executed successfully
+                data:
+                  sql: "SELECT id, email, created_at FROM public.users WHERE status='active' ORDER BY created_at DESC LIMIT 10;"
+                  execution_id: 8b3f0c1e-2a4d-4e1f-9c0b-111122223333
+                  execution_time_ms: 12
+                  result:
+                    columns:
+                      - id
+                      - email
+                      - created_at
+                    rows: []
+        '400':
+          description: Invalid input (missing question or invalid project ID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not accessible or database instance not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Invalid response from upstream text-to-sql service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Text-to-SQL service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Project not found or database instance not ready
 
   /api/v1/projects/{id}/postgres/tables/{table}:
     parameters:
@@ -2833,8 +2945,8 @@ paths:
             type: string
             default: public
             pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-            example: "public"
           description: PostgreSQL schema to visualize; defaults to `public` if omitted
+          example: public
       responses:
         '200':
           description: Schema visualization generated successfully
@@ -2885,7 +2997,7 @@ paths:
     post:
       operationId: generateSchemaFromTextStream
       tags: [Postgres]
-      summary: Generate a Mermaid ER diagram from requirement text (streaming)
+      summary: Generate a Mermaid ER diagram from requirement t (streaming)
       description: |
         Proxies the local SchemaAgent (AI) service and streams progress events as Server-Sent Events (SSE).
         The Mermaid ER diagram is provided in a streamed event with `type: "mermaid"`.
