@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -193,12 +194,19 @@ func (s *TableService) InsertRow(ctx context.Context, userID, projectID uuid.UUI
 }
 
 // AddColumnRequest represents the request body for adding a column (schema from query string).
+// Default is kept as interface{} for backward compatibility with existing clients that send
+// JSON literals like booleans or numbers; it is converted to a SQL literal string internally.
 type AddColumnRequest struct {
-	Schema    string
-	TableName string
-	Name      string
-	Type      string
-	Default   interface{}
+	Schema      string
+	TableName   string
+	Name        string
+	Type        string
+	Default     interface{}
+	Primary     bool
+	IsUnique    bool
+	IsIdentity  bool
+	Nullable    bool
+	ForeignKeys []model.AddColumnForeignKey
 }
 
 // AddColumnResponse represents the response for adding a column.
@@ -206,7 +214,35 @@ type AddColumnResponse struct {
 	ColumnID int64 `json:"column_id"`
 }
 
-// AddColumn adds a column to a table.
+// sqlLiteralFromDefault converts a JSON default value into a SQL literal expression suitable for
+// inlining into a CREATE/ALTER statement. Strings are treated as raw SQL expressions when they look
+// like function calls or numeric/boolean literals, otherwise they are single-quote escaped.
+// Returns nil when the input represents an absent default.
+func sqlLiteralFromDefault(v interface{}) *string {
+	if v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case string:
+		if x == "" {
+			return nil
+		}
+		escaped := "'" + strings.ReplaceAll(x, "'", "''") + "'"
+		return &escaped
+	case bool:
+		s := "FALSE"
+		if x {
+			s = "TRUE"
+		}
+		return &s
+	default:
+		s := fmt.Sprintf("%v", x)
+		return &s
+	}
+}
+
+// AddColumn adds a column (with optional constraints and single-column foreign keys) to a table.
+// The whole operation runs in a single transaction so any FK failure rolls back the column too.
 func (s *TableService) AddColumn(ctx context.Context, userID, projectID uuid.UUID, req AddColumnRequest) (*AddColumnResponse, error) {
 	if err := ValidatePostgresSchemaName(req.Schema); err != nil {
 		return nil, err
@@ -215,25 +251,79 @@ func (s *TableService) AddColumn(ctx context.Context, userID, projectID uuid.UUI
 	if err := validateRowColumnIdentifier(req.TableName); err != nil {
 		return nil, fmt.Errorf("invalid table name: %w", err)
 	}
-	if err := validateRowColumnIdentifier(req.Name); err != nil {
-		return nil, fmt.Errorf("invalid column name: %w", err)
+
+	def := model.TableColumnDef{
+		Name:       req.Name,
+		Type:       req.Type,
+		Default:    sqlLiteralFromDefault(req.Default),
+		Primary:    req.Primary,
+		IsUnique:   req.IsUnique,
+		IsIdentity: req.IsIdentity,
+		Nullable:   req.Nullable,
 	}
-	if req.Type == "" {
-		return nil, errors.New("column type cannot be empty")
+	if err := validateTableColumnDefs([]model.TableColumnDef{def}); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidTableRequest, err)
 	}
-	if !isValidColumnType(req.Type) {
-		return nil, fmt.Errorf("%w: invalid column type: %s", ErrInvalidTableRequest, req.Type)
+
+	for i := range req.ForeignKeys {
+		fk := &req.ForeignKeys[i]
+		fk.Schema = PostgresSchema(fk.Schema)
+		fk.Table = strings.TrimSpace(fk.Table)
+		if !isValidIdentifier(fk.Schema) {
+			return nil, fmt.Errorf("%w: foreign_keys[%d]: invalid schema name", ErrInvalidTableRequest, i)
+		}
+		if !isValidIdentifier(fk.Table) {
+			return nil, fmt.Errorf("%w: foreign_keys[%d]: invalid table name", ErrInvalidTableRequest, i)
+		}
+		if !isValidIdentifier(fk.ForeignColumn) {
+			return nil, fmt.Errorf("%w: foreign_keys[%d]: invalid foreign_column name", ErrInvalidTableRequest, i)
+		}
 	}
 
 	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*AddColumnResponse, error) {
-		var defaultVal interface{}
-		if req.Default != nil {
-			defaultVal = req.Default
+		schemaRepo := repository.NewSchemaRepository(pool)
+		exists, err := schemaRepo.TableExists(ctx, schema, req.TableName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check table: %w", err)
+		}
+		if !exists {
+			return nil, ErrTableNotFound
 		}
 
-		columnID, err := s.tableRepo.AddColumn(ctx, pool, schema, req.TableName, req.Name, req.Type, defaultVal)
+		pkList, err := schemaRepo.GetPrimaryKeys(ctx, schema, req.TableName)
 		if err != nil {
+			return nil, fmt.Errorf("failed to read primary keys: %w", err)
+		}
+		tableHasPK := len(pkList) > 0
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start transaction: %w", err)
+		}
+		defer tx.Rollback(ctx)
+
+		if err := s.tableRepo.AddColumnFromDefTx(ctx, tx, schema, req.TableName, def, tableHasPK); err != nil {
 			return nil, fmt.Errorf("failed to add column: %w", err)
+		}
+
+		for i, fk := range req.ForeignKeys {
+			name := generateFKConstraintName(req.TableName, def.Name, fk.Table, i+1)
+			if err := s.tableRepo.AddForeignKeyTx(ctx, tx, schema, req.TableName, name, def.Name, fk.Schema, fk.Table, fk.ForeignColumn, normalizeFKRule(fk.OnUpdate), normalizeFKRule(fk.OnDelete)); err != nil {
+				return nil, fmt.Errorf("failed to add foreign key to %q.%q: %w", fk.Schema, fk.Table, err)
+			}
+		}
+
+		var columnID int64
+		if err := tx.QueryRow(ctx, `
+			SELECT ordinal_position
+			FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = $2 AND column_name = $3
+		`, schema, req.TableName, def.Name).Scan(&columnID); err != nil {
+			return nil, fmt.Errorf("failed to read new column position: %w", err)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
 		return &AddColumnResponse{ColumnID: columnID}, nil

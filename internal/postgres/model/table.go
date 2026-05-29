@@ -31,12 +31,22 @@ type TableForeignKeyDef struct {
 	References []ForeignKeyRef `json:"references" binding:"required,min=1"`
 }
 
+// AddColumnForeignKey is a flat foreign key entry attached to a single newly-added column.
+// The local column is implicit (the column being added), so only the referenced side is specified.
+type AddColumnForeignKey struct {
+	Schema        string `json:"schema"` // Omitted or empty → "public" in service
+	Table         string `json:"table" binding:"required"`
+	ForeignColumn string `json:"foreign_column" binding:"required"`
+	OnUpdate      string `json:"on_update"`
+	OnDelete      string `json:"on_delete"`
+}
+
 // CreateTableRequest is the request body for creating a table.
 type CreateTableRequest struct {
 	Schema      string               `json:"schema"` // Omitted or empty → "public" in service
 	Table       string               `json:"table" binding:"required"`
 	Columns     []TableColumnDef     `json:"columns" binding:"required"`
-	ForeignKeys *TableForeignKeyDef  `json:"foreign_keys"`
+	ForeignKeys []TableForeignKeyDef `json:"foreign_keys" binding:"omitempty,dive"`
 }
 
 // UpdateTableRequest is the request body for updating a table.

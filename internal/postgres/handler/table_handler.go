@@ -433,17 +433,45 @@ func (h *TableHandler) AddColumn(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Name    string      `json:"name" binding:"required"`
-		Type    string      `json:"type" binding:"required"`
-		Default interface{} `json:"default,omitempty"`
+		Name        string                        `json:"name" binding:"required"`
+		Type        string                        `json:"type" binding:"required"`
+		Default     interface{}                   `json:"default,omitempty"`
+		Primary     bool                          `json:"primary,omitempty"`
+		IsUnique    bool                          `json:"is_unique,omitempty"`
+		IsIdentity  bool                          `json:"is_identity,omitempty"`
+		Nullable    *bool                         `json:"nullable,omitempty"`
+		ForeignKeys []model.AddColumnForeignKey   `json:"foreign_keys,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
-	req := service.AddColumnRequest{Schema: schema, TableName: table, Name: body.Name, Type: body.Type, Default: body.Default}
+	nullable := true
+	if body.Nullable != nil {
+		nullable = *body.Nullable
+	}
+	req := service.AddColumnRequest{
+		Schema:      schema,
+		TableName:   table,
+		Name:        body.Name,
+		Type:        body.Type,
+		Default:     body.Default,
+		Primary:     body.Primary,
+		IsUnique:    body.IsUnique,
+		IsIdentity:  body.IsIdentity,
+		Nullable:    nullable,
+		ForeignKeys: body.ForeignKeys,
+	}
 	result, err := h.tableService.AddColumn(c.Request.Context(), userUUID, projectUUID, req)
 	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTableRequest):
+			pgFail(c, http.StatusBadRequest, err, err.Error())
+			return
+		case errors.Is(err, service.ErrTableNotFound):
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		}
 		if failTableInstanceError(c, err) {
 			return
 		}

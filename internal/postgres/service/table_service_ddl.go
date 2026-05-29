@@ -92,9 +92,20 @@ func (s *TableService) validateCreateTableRequest(req *model.CreateTableRequest)
 	if err := validateTableColumnDefs(req.Columns); err != nil {
 		return err
 	}
-	if req.ForeignKeys != nil {
-		if err := validateTableForeignKeyDef(req.ForeignKeys); err != nil {
-			return err
+	if len(req.ForeignKeys) > 0 {
+		colSet := make(map[string]bool, len(req.Columns))
+		for _, c := range req.Columns {
+			colSet[c.Name] = true
+		}
+		for i := range req.ForeignKeys {
+			if err := validateTableForeignKeyDef(&req.ForeignKeys[i]); err != nil {
+				return fmt.Errorf("foreign_keys[%d]: %w", i, err)
+			}
+			for _, ref := range req.ForeignKeys[i].References {
+				if !colSet[ref.LocalColumn] {
+					return fmt.Errorf("foreign_keys[%d]: local_column %q is not defined in columns", i, ref.LocalColumn)
+				}
+			}
 		}
 	}
 

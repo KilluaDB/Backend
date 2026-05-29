@@ -599,6 +599,35 @@ components:
           additionalProperties: true
           description: Fields to update
 
+    PostgresAddColumnForeignKey:
+      type: object
+      required: [table, foreign_column]
+      description: >
+        A single-column foreign key attached to the newly added column. The local column is
+        implicit (it is the column being added).
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema of the referenced table. Defaults to `public` if omitted.
+        table:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Referenced table name.
+        foreign_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Referenced column name in the target table.
+        on_update:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION"]
+          description: Optional ON UPDATE action.
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, "NO ACTION", "SET NULL", "SET DEFAULT"]
+          description: Optional ON DELETE action.
+
     PostgresAddColumnRequest:
       type: object
       required: [name, type]
@@ -619,8 +648,35 @@ components:
             TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
             Parameterized variants like VARCHAR(50) are also accepted.
         default:
-          description: Default value for the column (any JSON value)
+          description: >
+            Default value for the column. Strings are quoted and escaped as SQL literals;
+            booleans become TRUE/FALSE; numbers are inlined. Send a string like `"NOW()"` for a
+            SQL expression — note that string defaults are always wrapped in single quotes.
           nullable: true
+        primary:
+          type: boolean
+          default: false
+          description: Whether the new column is a PRIMARY KEY. Rejected if the table already has a primary key.
+        is_unique:
+          type: boolean
+          default: false
+          description: Whether the new column has a UNIQUE constraint.
+        is_identity:
+          type: boolean
+          default: false
+          description: Whether the new column is GENERATED ALWAYS AS IDENTITY. Allowed only when type is smallint, integer, or bigint.
+        nullable:
+          type: boolean
+          default: true
+          description: Whether the new column allows NULL values.
+        foreign_keys:
+          type: array
+          nullable: true
+          description: >
+            Optional list of single-column foreign keys from the new column to one or more parent tables.
+            All entries apply to the column being added.
+          items:
+            $ref: '#/components/schemas/PostgresAddColumnForeignKey'
 
     TableColumn:
       type: object
@@ -727,9 +783,20 @@ components:
             $ref: '#/components/schemas/TableColumn'
           description: At least one column definition is required.
         foreign_keys:
+<<<<<<< Updated upstream
           $ref: '#/components/schemas/ForeignKey'
           nullable: true
           description: Optional foreign key configuration for the table.
+=======
+          type: array
+          nullable: true
+          description: >
+            Optional list of foreign key groups. Each group targets one referenced table and lists
+            one or more local-to-foreign column references. Each `local_column` must be defined in
+            `columns` of the same request.
+          items:
+            $ref: '#/components/schemas/ForeignKey'
+>>>>>>> Stashed changes
 
     DeleteTableRequestBody:
       type: object
@@ -1837,13 +1904,13 @@ paths:
                       default: "NOW()"
                       nullable: false
                   foreign_keys:
-                    schema: "public"
-                    table: "accounts"
-                    references:
-                      - local_column: "account_id"
-                        foreign_column: "id"
-                        on_update: "CASCADE"
-                        on_delete: "CASCADE"
+                    - schema: "public"
+                      table: "accounts"
+                      references:
+                        - local_column: "account_id"
+                          foreign_column: "id"
+                          on_update: "CASCADE"
+                          on_delete: "CASCADE"
       responses:
         '201':
           description: Table created successfully
@@ -2473,6 +2540,25 @@ paths:
                   name: is_verified
                   type: BOOLEAN
                   default: false
+              uniqueNotNullColumn:
+                summary: Unique NOT NULL column
+                value:
+                  name: email
+                  type: VARCHAR(255)
+                  is_unique: true
+                  nullable: false
+              columnWithForeignKey:
+                summary: Column with a single-column foreign key
+                value:
+                  name: account_id
+                  type: INTEGER
+                  nullable: false
+                  foreign_keys:
+                    - schema: public
+                      table: accounts
+                      foreign_column: id
+                      on_update: CASCADE
+                      on_delete: CASCADE
       responses:
         '200':
           description: Column added successfully
@@ -2506,7 +2592,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: Project not accessible or database instance not ready
+          description: Project not accessible, database instance not ready, or table does not exist
           content:
             application/json:
               schema:

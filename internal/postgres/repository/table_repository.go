@@ -45,6 +45,12 @@ func BuildCreateTableSQL(req *model.CreateTableRequest) (string, error) {
 	if req.Schema == "" {
 		req.Schema = "public"
 	}
+
+	totalFKs := 0
+	for _, fk := range req.ForeignKeys {
+		totalFKs += len(fk.References)
+	}
+
 	query := fmt.Sprintf("CREATE TABLE \"%s\".\"%s\" (\n", req.Schema, req.Table)
 	for i, col := range req.Columns {
 		columnDef := fmt.Sprintf("  \"%s\" %s", col.Name, col.Type)
@@ -69,35 +75,40 @@ func BuildCreateTableSQL(req *model.CreateTableRequest) (string, error) {
 			columnDef += fmt.Sprintf(" DEFAULT %s", *col.Default)
 		}
 
-		if i < len(req.Columns)-1 || (req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0) {
+		if i < len(req.Columns)-1 || totalFKs > 0 {
 			columnDef += ","
 		}
 
 		query += columnDef + "\n"
 	}
 
-	if req.ForeignKeys != nil && len(req.ForeignKeys.References) > 0 {
-		fkSchema := req.ForeignKeys.Schema
+	emitted := 0
+	for _, fk := range req.ForeignKeys {
+		if len(fk.References) == 0 {
+			continue
+		}
+		fkSchema := fk.Schema
 		if fkSchema == "" {
 			fkSchema = "public"
 		}
-		for i, fk := range req.ForeignKeys.References {
+		for _, ref := range fk.References {
 			fkDef := fmt.Sprintf("  FOREIGN KEY (\"%s\") REFERENCES \"%s\".\"%s\"(\"%s\")",
-				fk.LocalColumn,
+				ref.LocalColumn,
 				fkSchema,
-				req.ForeignKeys.Table,
-				fk.ForeignColumn,
+				fk.Table,
+				ref.ForeignColumn,
 			)
 
-			if fk.OnDelete != "" {
-				fkDef += " ON DELETE " + fk.OnDelete
+			if ref.OnDelete != "" {
+				fkDef += " ON DELETE " + ref.OnDelete
 			}
 
-			if fk.OnUpdate != "" {
-				fkDef += " ON UPDATE " + fk.OnUpdate
+			if ref.OnUpdate != "" {
+				fkDef += " ON UPDATE " + ref.OnUpdate
 			}
 
-			if i < len(req.ForeignKeys.References)-1 {
+			emitted++
+			if emitted < totalFKs {
 				fkDef += ","
 			}
 
