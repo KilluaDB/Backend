@@ -6,6 +6,7 @@ import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
+	"backend/internal/utils"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -55,7 +56,7 @@ func parseFilterForDeleteRows(c *gin.Context) map[string]interface{} {
 
 // requireUserAndProject parses auth user and path project id. On failure writes 400 for invalid :id or 401 for missing user.
 func requireUserAndProject(c *gin.Context) (userUUID, projectUUID uuid.UUID, ok bool) {
-	u, p, ok, projErr := userAndProjectFromGin(c)
+	u, p, ok, projErr := utils.UserAndProjectFromGin(c)
 	if !ok {
 		if projErr != nil {
 			pgFail(c, http.StatusBadRequest, projErr, "Invalid projectId format")
@@ -91,12 +92,12 @@ func schemaQueryOrDefault(c *gin.Context) (string, bool) {
 
 // CreateTable post /postgres/tables
 func (h *TableHandler) CreateTable(c *gin.Context) {
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
@@ -186,12 +187,12 @@ func (h *TableHandler) GetTable(c *gin.Context) {
 
 // DeleteTable DELETE /postgres/tables/:table
 func (h *TableHandler) DeleteTable(c *gin.Context) {
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return

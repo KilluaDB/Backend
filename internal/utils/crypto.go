@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
 var ErrMissingEncryptionKey = errors.New("DB_CRED_ENCRYPTION_KEY environment variable is required for encrypting database credentials")
@@ -105,4 +106,54 @@ func GeneratePasswordBase64(numBytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// ValidatePassword validates a database password against security requirements.
+// Requirements:
+// - Minimum 12 characters
+// - At least one uppercase letter (A-Z)
+// - At least one lowercase letter (a-z)
+// - At least one digit (0-9)
+// - At least one special character (!@#$%^&*-_+=)
+func ValidatePassword(password string) error {
+	if password == "" {
+		return errors.New("password is required")
+	}
+
+	if len(password) < 12 {
+		return errors.New("password must be at least 12 characters long")
+	}
+
+	hasUpper := false
+	hasLower := false
+	hasDigit := false
+	hasSpecial := false
+
+	for _, ch := range password {
+		switch {
+		case ch >= 'A' && ch <= 'Z':
+			hasUpper = true
+		case ch >= 'a' && ch <= 'z':
+			hasLower = true
+		case ch >= '0' && ch <= '9':
+			hasDigit = true
+		case strings.ContainsRune("!@#$%^&*-_+=", ch):
+			hasSpecial = true
+		}
+	}
+
+	if !hasUpper {
+		return errors.New("password must contain at least one uppercase letter (A-Z)")
+	}
+	if !hasLower {
+		return errors.New("password must contain at least one lowercase letter (a-z)")
+	}
+	if !hasDigit {
+		return errors.New("password must contain at least one digit (0-9)")
+	}
+	if !hasSpecial {
+		return errors.New("password must contain at least one special character (!@#$%^&*-_+=)")
+	}
+
+	return nil
 }

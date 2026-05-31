@@ -92,21 +92,27 @@ func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, proj
 		hasExt = false
 	}
 	if err := pool.QueryRow(ctx, `
+		WITH user_tables AS (
+			SELECT t.table_schema, t.table_name
+			FROM information_schema.tables t
+			WHERE t.table_type = 'BASE TABLE'
+			  AND t.table_schema = 'public'
+		)
 		SELECT
 			(SELECT COUNT(*)::bigint
-			 FROM information_schema.tables t
-			 WHERE t.table_type = 'BASE TABLE'
-			   AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-			   AND t.table_schema NOT LIKE 'pg_toast%') AS total_tables,
+			 FROM user_tables) AS total_tables,
 			(SELECT COUNT(*)::bigint
 			 FROM information_schema.columns c
-			 WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
-			   AND c.table_schema NOT LIKE 'pg_toast%') AS total_columns,
+			 JOIN user_tables ut
+			   ON ut.table_schema = c.table_schema
+			  AND ut.table_name = c.table_name) AS total_columns,
 			(SELECT COUNT(*)::bigint
 			 FROM information_schema.table_constraints tc
+			 JOIN user_tables ut
+			   ON ut.table_schema = tc.table_schema
+			  AND ut.table_name = tc.table_name
 			 WHERE tc.constraint_type = 'PRIMARY KEY'
-			   AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
-			   AND tc.table_schema NOT LIKE 'pg_toast%') AS total_primary_keys
+			) AS total_primary_keys
 	`).Scan(&totalTables, &totalColumns, &totalPKs); err != nil {
 		return nil, err
 	}

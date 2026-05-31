@@ -372,7 +372,7 @@ components:
 
     CreateProjectRequest:
       type: object
-      required: [name, db_type]
+       required: [name, db_type, password]
       properties:
         name:
           type: string
@@ -391,6 +391,17 @@ components:
           enum: [free, basic, premium]
           default: free
           description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
+         password:
+           type: string
+           minLength: 12
+           description: |
+             Database password. Required field. Must be at least 12 characters and contain:
+             - At least one uppercase letter (A-Z)
+             - At least one lowercase letter (a-z)
+             - At least one digit (0-9)
+             - At least one special character (!@#$%^&*-_+=)
+           
+             Applies to both PostgreSQL and MongoDB instances.
 
     CreateProjectResponse:
       type: object
@@ -3332,6 +3343,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIResponse'
+              example:
+                status: "success"
+                message: "Collections retrieved successfully"
+                data:
+                  - name: "users"
+                  - name: "orders"
         '400':
           description: Invalid project ID
           content:
@@ -3365,6 +3382,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIResponse'
+              example:
+                status: "success"
+                message: "Collection created successfully"
+                data:
+                  name: "orders"
         '400':
           description: Invalid request body or project ID
           content:

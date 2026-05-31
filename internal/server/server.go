@@ -4,8 +4,12 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/handlers"
+	mongodbhandler "backend/internal/mongodb/handler"
+	mongoinfra "backend/internal/mongodb/infra"
+	mongodbrepo "backend/internal/mongodb/repository"
+	mongosvc "backend/internal/mongodb/service"
 	pghandler "backend/internal/postgres/handler"
-	"backend/internal/postgres/infra"
+	pginfra "backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
 	postgressvc "backend/internal/postgres/service"
 	"backend/internal/repositories"
@@ -29,7 +33,8 @@ type Server struct {
 	pool *pgxpool.Pool
 }
 
-var pgInstanceManager *infra.PostgresConnectionManager
+var pgInstanceManager *pginfra.PostgresConnectionManager
+var mongoInstanceManager *mongoinfra.MongoConnectionManager
 
 func NewServer() *http.Server {
 	// Validate required environment variables
@@ -76,8 +81,8 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-	// sessionRepo := repositories.NewSessionRepository(pool)
-	userService := services.NewUserService(userRepo)
+	projectRepo := postgresrepo.NewProjectRepository(pool)
+	userService := services.NewUserService(userRepo, projectRepo, pool)
 	authService := services.NewAuthService(userRepo, refreshStore)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
@@ -91,13 +96,12 @@ func NewServer() *http.Server {
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
-	projectRepo := postgresrepo.NewProjectRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
 	dsnService := services.NewInstanceDsnService(projectRepo, provisioner)
-	instanceConn := infra.NewPostgresConnectionManager(dsnService)
+	instanceConn := pginfra.NewPostgresConnectionManager(dsnService)
 	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()
@@ -130,8 +134,13 @@ func NewServer() *http.Server {
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
 	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)
 
-	// MongoDB API handler
-	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
+	// Wire Mongo manager like Postgres: use the same InstanceDsnService as a DSNProvider.
+	mongoManager := mongoinfra.NewMongoConnectionManager(dsnService)
+	mongoInstanceManager = mongoManager
+	mongoCollectionRepo := mongodbrepo.NewCollectionRepositoryWithManager(mongoManager)
+	mongoCollectionService := mongosvc.NewCollectionService(mongoCollectionRepo)
+	mongoCollectionHandler := mongodbhandler.NewCollectionHandler(mongoCollectionService)
+	mongodbHandler := mongodbhandler.NewMongoDBHandler(mongoCollectionHandler)
 
 	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
 	router := gin.New()
@@ -150,7 +159,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongodbHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
