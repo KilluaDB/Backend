@@ -1,6 +1,7 @@
 package server
 
 import (
+	"backend/internal/backup"
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/handlers"
@@ -133,6 +134,10 @@ func NewServer() *http.Server {
 	// MongoDB API handler
 	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
 
+	// Backup (export/import) handler — dispatches by project.DBType internally.
+	backupService := backup.NewService(projectRepo, dsnService)
+	backupHandler := backup.NewHandler(backupService)
+
 	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
 	router := gin.New()
 	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
@@ -150,14 +155,14 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler)
-	// Create and configure the HTTP server
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, backupHandler)
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.port),
-		Handler:      router,
-		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 5 * time.Minute, // Increased to handle long-running queries
+		Addr:              fmt.Sprintf(":%d", s.port),
+		Handler:           router,
+		IdleTimeout:       time.Minute,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       0,
+		WriteTimeout:      0, // handlers manage their own write deadline for long downloads
 	}
 
 	return server
