@@ -81,7 +81,7 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-	projectRepo := postgresrepo.NewProjectRepository(pool)
+	projectRepo := repositories.NewProjectRepository(pool)
 	userService := services.NewUserService(userRepo, projectRepo, pool)
 	authService := services.NewAuthService(userRepo, refreshStore)
 	authHandler := handlers.NewAuthHandler(authService)

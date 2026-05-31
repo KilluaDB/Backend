@@ -11,11 +11,11 @@ import (
 // PostgresRoutes registers all /projects/:id/postgres/* endpoints.
 // Middleware ensures the project is PostgreSQL.
 type PostgresRoutes struct {
-	projectRepo repositories.ProjectRepository
+	projectRepo *repositories.PostgresProjectRepository
 	pg          *handler.PostgresHandler
 }
 
-func NewPostgresRoutes(projectRepo repositories.ProjectRepository, pg *handler.PostgresHandler) *PostgresRoutes {
+func NewPostgresRoutes(projectRepo *repositories.PostgresProjectRepository, pg *handler.PostgresHandler) *PostgresRoutes {
 	return &PostgresRoutes{
 		projectRepo: projectRepo,
 		pg:          pg,

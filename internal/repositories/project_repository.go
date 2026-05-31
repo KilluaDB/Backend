@@ -3,21 +3,235 @@ package repositories
 import (
 	"backend/internal/models"
 	"context"
+	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ProjectRepository defines the operations for managing projects in the
-// metadata store.
-type ProjectRepository interface {
-	Create(ctx context.Context, project *models.Project) error
-	GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error)
-	GetByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Project, error)
-	GetByUserID(ctx context.Context, userID uuid.UUID) ([]models.Project, error)
-	UpdateRuntimeStatus(ctx context.Context, id uuid.UUID, status string) error
-	Update(ctx context.Context, project *models.Project) error
-	Delete(ctx context.Context, id uuid.UUID) error
-	DeleteByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
-	DeleteByUserIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error
+// PostgresProjectRepository stores and reads project metadata.
+type PostgresProjectRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewProjectRepository(pool *pgxpool.Pool) *PostgresProjectRepository {
+	return &PostgresProjectRepository{pool: pool}
+}
+
+func (r *PostgresProjectRepository) Create(ctx context.Context, project *models.Project) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	project.Prepare()
+
+	query := `
+		INSERT INTO projects (id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`
+
+	now := time.Now()
+	_, err := r.pool.Exec(ctx, query,
+		project.ID,
+		project.UserID,
+		project.Name,
+		project.Description,
+		project.DBType,
+		project.ResourceTier,
+		now,
+		project.Status,
+		now,
+		now,
+	)
+
+	return err
+}
+
+func (r *PostgresProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
+		FROM projects WHERE id = $1
+	`
+
+	var project models.Project
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&project.ID,
+		&project.UserID,
+		&project.Name,
+		&project.Description,
+		&project.DBType,
+		&project.ResourceTier,
+		&project.CreatedAt,
+		&project.Status,
+		&project.RuntimeCreatedAt,
+		&project.RuntimeUpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &project, nil
+}
+
+func (r *PostgresProjectRepository) GetByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Project, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
+		FROM projects WHERE id = $1 AND user_id = $2
+	`
+
+	var project models.Project
+	err := r.pool.QueryRow(ctx, query, id, userID).Scan(
+		&project.ID,
+		&project.UserID,
+		&project.Name,
+		&project.Description,
+		&project.DBType,
+		&project.ResourceTier,
+		&project.CreatedAt,
+		&project.Status,
+		&project.RuntimeCreatedAt,
+		&project.RuntimeUpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &project, nil
+}
+
+func (r *PostgresProjectRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]models.Project, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		SELECT id, user_id, name, description, db_type, resource_tier, created_at, status, runtime_created_at, runtime_updated_at
+		FROM projects WHERE user_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []models.Project
+	for rows.Next() {
+		var project models.Project
+		err := rows.Scan(
+			&project.ID,
+			&project.UserID,
+			&project.Name,
+			&project.Description,
+			&project.DBType,
+			&project.ResourceTier,
+			&project.CreatedAt,
+			&project.Status,
+			&project.RuntimeCreatedAt,
+			&project.RuntimeUpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+
+	return projects, rows.Err()
+}
+
+func (r *PostgresProjectRepository) UpdateRuntimeStatus(ctx context.Context, id uuid.UUID, status string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		UPDATE projects
+		SET status = $2, runtime_updated_at = $3
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, id, status, time.Now())
+	return err
+}
+
+func (r *PostgresProjectRepository) Update(ctx context.Context, project *models.Project) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `
+		UPDATE projects SET
+			name = $2, description = $3, db_type = $4, resource_tier = $5
+		WHERE id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query,
+		project.ID,
+		project.Name,
+		project.Description,
+		project.DBType,
+		project.ResourceTier,
+	)
+
+	return err
+}
+
+func (r *PostgresProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `DELETE FROM projects WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, id)
+	return err
+}
+
+func (r *PostgresProjectRepository) DeleteByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	query := `DELETE FROM projects WHERE id = $1 AND user_id = $2`
+	result, err := r.pool.Exec(ctx, query, id, userID)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return errors.New("project not found or access denied")
+	}
+
+	return nil
+}
+
+func (r *PostgresProjectRepository) DeleteByUserIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil {
+		return errors.New("transaction is required")
+	}
+
+	query := `DELETE FROM projects WHERE user_id = $1`
+	_, err := tx.Exec(ctx, query, userID)
+	return err
 }

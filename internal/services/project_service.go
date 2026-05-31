@@ -26,7 +26,7 @@ var (
 )
 
 type ProjectService struct {
-	projectRepo          repositories.ProjectRepository
+	projectRepo          *repositories.PostgresProjectRepository
 	provisioner          *OperatorProvisioner
 	postgresTableService *service.TableService
 	poolEvicter          ProjectPoolEvicter
@@ -37,7 +37,7 @@ type ProjectPoolEvicter interface {
 }
 
 func NewProjectService(
-	projectRepo repositories.ProjectRepository,
+	projectRepo *repositories.PostgresProjectRepository,
 	provisioner *OperatorProvisioner,
 	postgresTableService *service.TableService,
 	poolEvicter ProjectPoolEvicter,

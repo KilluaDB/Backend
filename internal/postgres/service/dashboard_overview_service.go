@@ -42,10 +42,10 @@ type DashboardSchemaSummary struct {
 
 type DashboardOverviewService struct {
 	instanceConn infra.InstanceConnectionService
-	projectRepo  repositories.ProjectRepository
+	projectRepo  *repositories.PostgresProjectRepository
 }
 
-func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo repositories.ProjectRepository) *DashboardOverviewService {
+func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo *repositories.PostgresProjectRepository) *DashboardOverviewService {
 	return &DashboardOverviewService{instanceConn: instanceConn, projectRepo: instanceRepo}
 }
 

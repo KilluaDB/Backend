@@ -19,7 +19,7 @@ func RegisterRoutes(
 	userHandler *handlers.UserHandler,
 	userRepo *repositories.UserRepository,
 	projectHandler *handlers.ProjectHandler,
-	projectRepo repositories.ProjectRepository,
+	projectRepo *repositories.PostgresProjectRepository,
 	postgresHandler *postgreshandler.PostgresHandler,
 	mongodbHandler *mongodbhandler.MongoDBHandler,
 ) {

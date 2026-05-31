@@ -16,12 +16,12 @@ var (
 
 // InstanceDsnService resolves credentials from K8s.
 type InstanceDsnService struct {
-	projectRepo repositories.ProjectRepository
+	projectRepo *repositories.PostgresProjectRepository
 	provisioner *OperatorProvisioner
 }
 
 func NewInstanceDsnService(
-	projectRepo repositories.ProjectRepository,
+	projectRepo *repositories.PostgresProjectRepository,
 	provisioner *OperatorProvisioner,
 ) *InstanceDsnService {
 	return &InstanceDsnService{

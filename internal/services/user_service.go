@@ -14,11 +14,11 @@ import (
 
 type UserService struct {
 	userRepo    *repositories.UserRepository
-	projectRepo repositories.ProjectRepository
+	projectRepo *repositories.PostgresProjectRepository
 	pool        *pgxpool.Pool
 }
 
-func NewUserService(userRepo *repositories.UserRepository, projectRepo repositories.ProjectRepository, pool *pgxpool.Pool) *UserService {
+func NewUserService(userRepo *repositories.UserRepository, projectRepo *repositories.PostgresProjectRepository, pool *pgxpool.Pool) *UserService {
 	return &UserService{
 		userRepo:    userRepo,
 		projectRepo: projectRepo,

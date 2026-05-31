@@ -2,6 +2,7 @@ package service
 
 import (
 	"backend/internal/postgres/infra"
+	"backend/internal/repositories"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	postgresrepo "backend/internal/postgres/repository"
 	_ "backend/internal/repositories"
 	// "backend/internal/services"
 	_ "backend/internal/utils"
@@ -37,7 +37,7 @@ var (
 type TextToSQLService struct {
 	baseURL     string
 	httpClient  *http.Client
-	projectRepo *postgresrepo.PostgresProjectRepository
+	projectRepo *repositories.PostgresProjectRepository
 	dsnProvider infra.DSNProvider
 }
 
@@ -64,7 +64,7 @@ type TextToSQLResponse struct {
 }
 
 // NewTextToSQLService creates a new Text-to-SQL service client
-func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *postgresrepo.PostgresProjectRepository) *TextToSQLService {
+func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *repositories.PostgresProjectRepository) *TextToSQLService {
 	baseURL := os.Getenv("TEXT_TO_SQL")
 	timeout := 120 * time.Second
 	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {
