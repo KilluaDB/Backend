@@ -154,7 +154,6 @@ func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
 	return nil, errors.New("not implemented")
 }
 
-
 func (r *UserRepository) Update(user *models.User) error {
 	ctx := context.Background()
 
@@ -186,6 +185,33 @@ func (r *UserRepository) Delete(id uuid.UUID) error {
 	`
 	_, err := r.pool.Exec(ctx, query, id)
 	return err
+}
+
+func (r *UserRepository) DeleteTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil {
+		return errors.New("transaction is required")
+	}
+
+	// Soft delete: update deleted_at and status instead of hard delete.
+	query := `
+		UPDATE users
+		SET deleted_at = NOW(),
+		    status = 'deleted'
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	result, err := tx.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
 }
 
 func (r *UserRepository) FindAll() ([]models.User, error) {

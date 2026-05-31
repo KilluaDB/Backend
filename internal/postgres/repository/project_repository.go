@@ -226,3 +226,16 @@ func (r *PostgresProjectRepository) DeleteByIDAndUserID(ctx context.Context, id 
 
 	return nil
 }
+
+func (r *PostgresProjectRepository) DeleteByUserIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil {
+		return errors.New("transaction is required")
+	}
+
+	query := `DELETE FROM projects WHERE user_id = $1`
+	_, err := tx.Exec(ctx, query, userID)
+	return err
+}

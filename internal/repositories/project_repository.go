@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // ProjectRepository defines the operations for managing projects in the
@@ -18,4 +19,5 @@ type ProjectRepository interface {
 	Update(ctx context.Context, project *models.Project) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
+	DeleteByUserIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error
 }

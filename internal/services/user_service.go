@@ -3,19 +3,26 @@ package services
 import (
 	"backend/internal/models"
 	"backend/internal/repositories"
+	"context"
 	"errors"
+
 	// "time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type UserService struct {
 	userRepo    *repositories.UserRepository
+	projectRepo repositories.ProjectRepository
+	pool        *pgxpool.Pool
 }
 
-func NewUserService(userRepo *repositories.UserRepository) *UserService {
+func NewUserService(userRepo *repositories.UserRepository, projectRepo repositories.ProjectRepository, pool *pgxpool.Pool) *UserService {
 	return &UserService{
 		userRepo:    userRepo,
+		projectRepo: projectRepo,
+		pool:        pool,
 	}
 }
 
@@ -127,8 +134,26 @@ func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 		}
 	}
 
-	// Delete user (CASCADE will handle related records)
-	return s.userRepo.Delete(userID)
+	ctx := context.Background()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := s.projectRepo.DeleteByUserIDTx(ctx, tx, userID); err != nil {
+		return err
+	}
+
+	if err := s.userRepo.DeleteTx(ctx, tx, userID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // GetAllUsers retrieves all users
