@@ -27,8 +27,8 @@ func NewUserService(userRepo *repositories.UserRepository, projectRepo *reposito
 }
 
 // GetUser retrieves a user by ID
-func (s *UserService) GetUser(userID uuid.UUID) (*models.User, error) {
-	user, err := s.userRepo.FindUserByID(userID)
+func (s *UserService) GetUser(ctx context.Context, userID uuid.UUID) (*models.User, error) {
+	user, err := s.userRepo.FindUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,9 +48,9 @@ type UpdateUserRequest struct {
 
 // UpdateUser updates a user's information
 // authenticatedUserID is the ID of the user making the request (for policy checks)
-func (s *UserService) UpdateUser(userID uuid.UUID, authenticatedUserID uuid.UUID, req UpdateUserRequest) (*models.User, error) {
+func (s *UserService) UpdateUser(ctx context.Context, userID uuid.UUID, authenticatedUserID uuid.UUID, req UpdateUserRequest) (*models.User, error) {
 	// Get existing user
-	user, err := s.userRepo.FindUserByID(userID)
+	user, err := s.userRepo.FindUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (s *UserService) UpdateUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 	}
 
 	// Get authenticated user to check their role
-	authenticatedUser, err := s.userRepo.FindUserByID(authenticatedUserID)
+	authenticatedUser, err := s.userRepo.FindUserByID(ctx, authenticatedUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *UserService) UpdateUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 	}
 
 	// Save updated user
-	if err := s.userRepo.Update(user); err != nil {
+	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -99,9 +99,9 @@ func (s *UserService) UpdateUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 
 // DeleteUser deletes a user by ID
 // authenticatedUserID is the ID of the user making the request (for policy checks)
-func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID) error {
+func (s *UserService) DeleteUser(ctx context.Context, userID uuid.UUID, authenticatedUserID uuid.UUID) error {
 	// Check if user exists
-	user, err := s.userRepo.FindUserByID(userID)
+	user, err := s.userRepo.FindUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 		return errors.New("user not found")
 	}
 	// Get authenticated user to check their role
-	authenticatedUser, err := s.userRepo.FindUserByID(authenticatedUserID)
+	authenticatedUser, err := s.userRepo.FindUserByID(ctx, authenticatedUserID)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 	}
 	// Policy: Cannot delete last admin
 	if user.Role == "admin" {
-		adminCount, err := s.userRepo.CountAdmins()
+		adminCount, err := s.userRepo.CountAdmins(ctx)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,6 @@ func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 		}
 	}
 
-	ctx := context.Background()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -157,8 +156,8 @@ func (s *UserService) DeleteUser(userID uuid.UUID, authenticatedUserID uuid.UUID
 }
 
 // GetAllUsers retrieves all users
-func (s *UserService) GetAllUsers() ([]models.User, error) {
-	users, err := s.userRepo.FindAll()
+func (s *UserService) GetAllUsers(ctx context.Context) ([]models.User, error) {
+	users, err := s.userRepo.FindAll(ctx)
 	if err != nil {
 		return nil, err
 	}
