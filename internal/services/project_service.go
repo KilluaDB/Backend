@@ -22,6 +22,7 @@ var (
 	ErrInvalidResourceTier = errors.New("invalid resource_tier: must be 'free', 'basic', or 'premium'")
 	ErrProjectNotFound     = errors.New("project not found or access denied")
 	ErrProjectCreateDB     = errors.New("failed to create project or database instance")
+	ErrInvalidDBPassword   = errors.New("invalid password")
 )
 
 type ProjectService struct {
@@ -54,6 +55,7 @@ type CreateProjectRequest struct {
 	Description  *string `json:"description,omitempty"`
 	DBType       string  `json:"db_type" binding:"required"`
 	ResourceTier string  `json:"resource_tier,omitempty"`
+	Password     string  `json:"password" binding:"required"`
 }
 
 func normalizeDBType(raw string) (string, error) {
@@ -71,6 +73,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 	userUUID, err := utils.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
+	}
+
+	// Validate password before proceeding
+	if err := utils.ValidatePassword(req.Password); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidDBPassword, err)
 	}
 
 	if req.ResourceTier == "" {
@@ -109,7 +116,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 	}
 
 	// Provision asynchronously; project status transitions to "running" or "failed" once done.
-	go s.provisionInstanceAsync(ctx, project.ID, internalDBType, req.ResourceTier)
+	go s.provisionInstanceAsync(ctx, project.ID, internalDBType, req.ResourceTier, req.Password)
 
 	// Reload to get DB-managed fields (timestamps etc.) for the response.
 	if p, err := s.projectRepo.GetByID(ctx, project.ID); err == nil && p != nil {
@@ -125,14 +132,14 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 
 // provisionInstanceAsync provisions the database instance and updates its status.
 // Credentials are never stored — GetConnection derives them from K8s on demand.
-func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID uuid.UUID, dbType, resourceTier string) {
+func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID uuid.UUID, dbType, resourceTier, password string) {
 	log.Printf("Provisioning DB instance for project %s (type=%s tier=%s)", projectID, dbType, resourceTier)
 
 	// Timeout must exceed the operator wait loops (10 min each) with margin.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	_, err := s.provisioner.CreateInstance(ctx, projectID, dbType, resourceTier)
+	_, err := s.provisioner.CreateInstance(ctx, projectID, dbType, resourceTier, password)
 	if err != nil {
 		log.Printf("ERROR: provision failed for project %s: %v", projectID, err)
 		if statusErr := s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "failed"); statusErr != nil {

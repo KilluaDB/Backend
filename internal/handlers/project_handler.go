@@ -81,6 +81,9 @@ func (h *ProjectHandler) CreateProject(ctx *gin.Context) {
 		case errors.Is(err, services.ErrInvalidUserID):
 			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid user context")
 			return
+		case errors.Is(err, services.ErrInvalidDBPassword):
+			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid password: must be at least 12 characters with uppercase, lowercase, digits, and special characters")
+			return
 		case errors.Is(err, services.ErrInvalidDBType):
 			responses.Fail(ctx, http.StatusBadRequest, err, "Invalid db_type: must be 'postgresql', 'sql', 'mongodb', or 'nosql'")
 			return

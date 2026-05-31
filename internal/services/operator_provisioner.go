@@ -1,7 +1,6 @@
 package services
 
 import (
-	"backend/internal/utils"
 	"context"
 	"fmt"
 	"log"
@@ -128,7 +127,7 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 }
 
 // CreateInstance provisions a DB instance (PostgreSQL or MongoDB) via the appropriate operator.
-func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid.UUID, dbType string, tier string) (*ProvisionResult, error) {
+func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid.UUID, dbType string, tier string, password string) (*ProvisionResult, error) {
 	dbKind := dbType
 	if dbType == "postgres" {
 		dbKind = "postgresql"
@@ -141,9 +140,9 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 	}
 	switch dbKind {
 	case "postgresql":
-		return p.createPostgresCluster(ctx, name, cpu, memoryMB, storageGB)
+		return p.createPostgresCluster(ctx, name, cpu, memoryMB, storageGB, password)
 	case "mongodb":
-		return p.createMongoDBCluster(ctx, name, cpu, memoryMB, storageGB)
+		return p.createMongoDBCluster(ctx, name, cpu, memoryMB, storageGB, password)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
@@ -191,8 +190,29 @@ func (p *OperatorProvisioner) ClusterNameForProject(projectID uuid.UUID) string 
 	return fmt.Sprintf("db-%s", strings.ReplaceAll(projectID.String(), "-", ""))
 }
 
-func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int, password string) (*ProvisionResult, error) {
 	ns := p.postgresNamespace
+
+	// Create the app user secret with the provided password
+	appSecretName := name + "-app"
+	appSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      appSecretName,
+			Namespace: ns,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"username": []byte(postgresAppDBOwner),
+			"password": []byte(password),
+			"dbname":   []byte(postgresAppDBName),
+		},
+	}
+
+	_, err := p.core.CoreV1().Secrets(ns).Create(ctx, appSecret, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return nil, fmt.Errorf("create app credential secret: %w", err)
+	}
+
 	cluster := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "postgresql.cnpg.io/v1",
@@ -207,6 +227,9 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 					"initdb": map[string]interface{}{
 						"database": postgresAppDBName,
 						"owner":    postgresAppDBOwner,
+						"secret": map[string]interface{}{
+							"name": appSecretName,
+						},
 					},
 				},
 				"postgresql": map[string]interface{}{
@@ -231,7 +254,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 			},
 		},
 	}
-	_, err := p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
+	_, err = p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
@@ -291,12 +314,8 @@ func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespa
 	}, nil
 }
 
-func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int, password string) (*ProvisionResult, error) {
 	ns := p.mongoNamespace
-	password, err := utils.GeneratePasswordBase64(48)
-	if err != nil {
-		return nil, fmt.Errorf("generate cluster admin password: %w", err)
-	}
 
 	passSecretName := name + "-admin-password"
 	passSecret := &corev1.Secret{
@@ -310,7 +329,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name str
 		},
 	}
 
-	_, err = p.core.CoreV1().Secrets(ns).Create(ctx, passSecret, metav1.CreateOptions{})
+	_, err := p.core.CoreV1().Secrets(ns).Create(ctx, passSecret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("create cluster password secret: %w", err)
 	}
@@ -381,6 +400,8 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name str
 			},
 		},
 	}
+
+	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 
 	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
