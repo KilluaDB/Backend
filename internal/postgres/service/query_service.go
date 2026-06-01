@@ -1,7 +1,7 @@
 package service
 
 import (
-	"backend/internal/models"
+	"backend/internal/model"
 	"backend/internal/postgres/infra"
 	"context"
 	"errors"
@@ -128,7 +128,7 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 }
 
 // ExecuteSQLQuery executes a SQL query on the project's PostgreSQL database instance.
-func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *models.QueryHistory, error) {
+func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *model.QueryHistory, error) {
 	startTime := time.Now()
 
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
@@ -136,7 +136,7 @@ func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, re
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		execTimeInt := int(execTime)
-		exec := &models.QueryHistory{
+		exec := &model.QueryHistory{
 			DBInstanceID:    instanceID,
 			UserID:          userID,
 			QueryText:       req.Query,
@@ -160,7 +160,7 @@ func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, re
 
 	success := err == nil && (result == nil || result.Error == "")
 	execTimeInt := int(execTime)
-	exec := &models.QueryHistory{
+	exec := &model.QueryHistory{
 		DBInstanceID:    instanceID2,
 		UserID:          userID,
 		QueryText:       req.Query,

@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"backend/internal/responses"
+	"backend/internal/response"
 	"errors"
 	"log"
 	"regexp"
@@ -15,7 +15,7 @@ import (
 // - includes a sanitized error string (for DBaaS UX)
 // - optionally includes SQLSTATE code when available
 func pgFail(c *gin.Context, statusCode int, err error, message string) {
-	resp := responses.APIResponse{
+	resp := response.APIResponse{
 		Status:  "error",
 		Message: message,
 	}
@@ -36,7 +36,7 @@ func pgFail(c *gin.Context, statusCode int, err error, message string) {
 // pgFailWithData is like pgFail, but includes a structured payload in "data".
 // Useful when we want consistent error shape while returning partial execution results.
 func pgFailWithData(c *gin.Context, statusCode int, err error, message string, data any) {
-	resp := responses.APIResponse{
+	resp := response.APIResponse{
 		Status:  "error",
 		Message: message,
 		Data:    data,

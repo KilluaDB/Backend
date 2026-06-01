@@ -6,7 +6,8 @@ import (
 	"net/http"
 
 	"backend/internal/postgres/service"
-	"backend/internal/responses"
+	"backend/internal/response"
+	"backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -30,46 +31,30 @@ func NewTextToSQLHandler(
 func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 	projectID := c.Param("id")
 	if projectID == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Project id is required")
+		response.Fail(c, http.StatusBadRequest, nil, "Project id is required")
 		return
 	}
 
-	userID, exists := c.Get("userId")
-	if !exists {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+	userUUID, ok := utils.UserIDFromGin(c)
+	if !ok {
+		response.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
 	var req service.TextToSQLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
 
 	if req.Question == "" {
-		responses.Fail(c, http.StatusBadRequest, nil, "Question is required: Cannot be empty")
+		response.Fail(c, http.StatusBadRequest, nil, "Question is required: Cannot be empty")
 		return
 	}
 
-	// Convert userID to UUID (handle both uuid.UUID and string types)
-	var userUUID uuid.UUID
-	switch v := userID.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		parsed, err := uuid.Parse(v)
-		if err != nil {
-			responses.Fail(c, http.StatusUnauthorized, err, "Invalid user ID format")
-			return
-		}
-		userUUID = parsed
-	default:
-		responses.Fail(c, http.StatusUnauthorized, nil, "Invalid user ID format")
-		return
-	}
 	projectUUID, err := uuid.Parse(projectID)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		response.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 
@@ -78,23 +63,23 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrProjectNotFound):
-			responses.Fail(c, http.StatusNotFound, err, "Project not found or not accessible")
+			response.Fail(c, http.StatusNotFound, err, "Project not found or not accessible")
 		case errors.Is(err, service.ErrNoRunningDBInstance):
-			responses.Fail(c, http.StatusBadRequest, err, "No running database instance for this project")
+			response.Fail(c, http.StatusBadRequest, err, "No running database instance for this project")
 		case errors.Is(err, service.ErrNoDBCredentials):
-			responses.Fail(c, http.StatusBadRequest, err, "Database credentials not configured")
+			response.Fail(c, http.StatusBadRequest, err, "Database credentials not configured")
 		case errors.Is(err, service.ErrTextToSQLUnavailable):
-			responses.Fail(c, http.StatusServiceUnavailable, err, fmt.Sprintf("Text-to-SQL service unavailable: %v", err))
+			response.Fail(c, http.StatusServiceUnavailable, err, fmt.Sprintf("Text-to-SQL service unavailable: %v", err))
 		case errors.Is(err, service.ErrTextToSQLInvalidResponse):
-			responses.Fail(c, http.StatusBadGateway, err, fmt.Sprintf("Invalid response from text-to-SQL service: %v", err))
+			response.Fail(c, http.StatusBadGateway, err, fmt.Sprintf("Invalid response from text-to-SQL service: %v", err))
 		default:
-			responses.Fail(c, http.StatusInternalServerError, err, "Text-to-SQL request failed")
+			response.Fail(c, http.StatusInternalServerError, err, "Text-to-SQL request failed")
 		}
 		return
 	}
 
 	if !genResult.Success {
-		responses.Success(c, http.StatusOK, err, "SQL generation failed")
+		response.Success(c, http.StatusOK, err, "SQL generation failed")
 		return
 	}
 
@@ -106,16 +91,16 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 
 	execResult, exec, err := h.queryService.ExecuteSQLQuery(c.Request.Context(), userUUID, execReq, projectUUID)
 	if err != nil {
-		responses.Fail(c, http.StatusInternalServerError, err, "Query execution failed")
+		response.Fail(c, http.StatusInternalServerError, err, "Query execution failed")
 		return
 	}
 
-	response := gin.H{
+	res := gin.H{
 		"sql":               genResult.SQL,
 		"result":            execResult,
 		"execution_id":      exec.ID,
 		"execution_time_ms": execResult.ExecutionTime,
 	}
 
-	responses.Success(c, http.StatusOK, response, "Query executed successfully")
+	response.Success(c, http.StatusOK, res, "Query executed successfully")
 }

@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"backend/internal/postgres/service"
-	"backend/internal/responses"
-	"backend/internal/services"
+	pgservice "backend/internal/postgres/service"
+	"backend/internal/response"
+	"backend/internal/service"
 	"backend/internal/utils"
 	"errors"
 	"net/http"
@@ -12,13 +12,13 @@ import (
 )
 
 type DashboardHandler struct {
-	overview *service.DashboardOverviewService
-	metrics  *service.DashboardMetricsService
+	overview *pgservice.DashboardOverviewService
+	metrics  *pgservice.DashboardMetricsService
 }
 
 func NewDashboardHandler(
-	overview *service.DashboardOverviewService,
-	metrics *service.DashboardMetricsService,
+	overview *pgservice.DashboardOverviewService,
+	metrics *pgservice.DashboardMetricsService,
 ) *DashboardHandler {
 	return &DashboardHandler{overview: overview, metrics: metrics}
 }
@@ -37,7 +37,7 @@ func (h *DashboardHandler) GetOverview(c *gin.Context) {
 	overview, err := h.overview.GetOverview(c.Request.Context(), userID, projectID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -45,7 +45,7 @@ func (h *DashboardHandler) GetOverview(c *gin.Context) {
 			return
 		}
 	}
-	responses.Success(c, http.StatusOK, overview, "Overview retrieved successfully")
+	response.Success(c, http.StatusOK, overview, "Overview retrieved successfully")
 }
 
 func (h *DashboardHandler) GetMetrics(c *gin.Context) {
@@ -62,7 +62,7 @@ func (h *DashboardHandler) GetMetrics(c *gin.Context) {
 	metrics, err := h.metrics.GetMetrics(c.Request.Context(), userID, projectID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -70,5 +70,5 @@ func (h *DashboardHandler) GetMetrics(c *gin.Context) {
 			return
 		}
 	}
-	responses.Success(c, http.StatusOK, metrics, "Metrics retrieved successfully")
+	response.Success(c, http.StatusOK, metrics, "Metrics retrieved successfully")
 }

@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// InstanceConnectionService is the subset of internal/services.InstanceConnectionService
-// needed by Postgres DB-facing services. Using an interface avoids circular dependencies.
+// InstanceConnectionService is the subset of internal/service.InstanceConnectionService
+// needed by Postgres DB-facing service. Using an interface avoids circular dependencies.
 // GetPool / GetPoolWithMeta return shared cached pools; callers must not Close them.
 type InstanceConnectionService interface {
 	GetPool(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, error)

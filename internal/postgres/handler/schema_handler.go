@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"backend/internal/postgres/service"
-	"backend/internal/responses"
-	"backend/internal/services"
+	pgservice "backend/internal/postgres/service"
+	"backend/internal/response"
+	"backend/internal/service"
 	"backend/internal/utils"
 	"bytes"
 	"encoding/json"
@@ -18,10 +18,10 @@ import (
 )
 
 type SchemaHandler struct {
-	schemaService *service.SchemaService
+	schemaService *pgservice.SchemaService
 }
 
-func NewSchemaHandler(schemaService *service.SchemaService) *SchemaHandler {
+func NewSchemaHandler(schemaService *pgservice.SchemaService) *SchemaHandler {
 	return &SchemaHandler{
 		schemaService: schemaService,
 	}
@@ -42,19 +42,19 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 	}
 
 	rawSchema := c.Query("schema")
-	if err := service.ValidatePostgresSchemaName(rawSchema); err != nil {
+	if err := pgservice.ValidatePostgresSchemaName(rawSchema); err != nil {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	schema := service.PostgresSchema(rawSchema)
+	schema := pgservice.PostgresSchema(rawSchema)
 
 	mermaidDiagram, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidSchema):
+		case errors.Is(err, pgservice.ErrInvalidSchema):
 			pgFail(c, http.StatusBadRequest, err, "Invalid schema name")
 			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -63,7 +63,7 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 		}
 	}
 
-	responses.Success(c, http.StatusOK, gin.H{
+	response.Success(c, http.StatusOK, gin.H{
 		"mermaid": mermaidDiagram,
 		"schema":  schema,
 	}, "Schema visualization generated successfully")
@@ -85,7 +85,7 @@ func (h *SchemaHandler) ListSchemas(c *gin.Context) {
 	schemas, err := h.schemaService.ListSchemas(c.Request.Context(), userUUID, projectUUID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -93,7 +93,7 @@ func (h *SchemaHandler) ListSchemas(c *gin.Context) {
 			return
 		}
 	}
-	responses.Success(c, http.StatusOK, gin.H{"schemas": schemas}, "Schemas listed successfully")
+	response.Success(c, http.StatusOK, gin.H{"schemas": schemas}, "Schemas listed successfully")
 }
 
 type generateSchemaFromTextStreamRequest struct {

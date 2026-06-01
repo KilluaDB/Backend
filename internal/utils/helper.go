@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const UserIDContextKey = "userId"
+
 func ParseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
 }
@@ -34,7 +36,7 @@ func ParseUserID(v any) (uuid.UUID, error) {
 
 // UserIDFromGin returns the authenticated user UUID from context (set by auth middleware).
 func UserIDFromGin(c *gin.Context) (uuid.UUID, bool) {
-	raw, exists := c.Get("userId")
+	raw, exists := c.Get(UserIDContextKey)
 	if !exists {
 		return uuid.Nil, false
 	}

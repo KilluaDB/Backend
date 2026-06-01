@@ -14,25 +14,25 @@ import (
 	"io"
 	"strings"
 
-	"backend/internal/repositories"
-	"backend/internal/services"
+	"backend/internal/repository"
+	"backend/internal/service"
 
 	"github.com/google/uuid"
 )
 
 // DSNResolver returns a usable connection string for a project's database instance.
-// Implemented by services.InstanceDsnService.
+// Implemented by service.InstanceDSNService.
 type DSNResolver interface {
 	GetConnectionDSN(ctx context.Context, userID, projectID uuid.UUID) (dsn string, instanceID uuid.UUID, err error)
 }
 
 // Service is the cross-DB backup orchestrator.
 type Service struct {
-	projectRepo *repositories.ProjectRepository
+	projectRepo *repository.ProjectRepository
 	dsn         DSNResolver
 }
 
-func NewService(projectRepo *repositories.ProjectRepository, dsn DSNResolver) *Service {
+func NewService(projectRepo *repository.ProjectRepository, dsn DSNResolver) *Service {
 	return &Service{
 		projectRepo: projectRepo,
 		dsn:         dsn,
@@ -171,7 +171,7 @@ func (s *Service) resolveKind(ctx context.Context, userID, projectID uuid.UUID) 
 		return "", err
 	}
 	if project == nil {
-		return "", services.ErrProjectNotAccessible
+		return "", service.ErrProjectNotAccessible
 	}
 	switch strings.ToLower(strings.TrimSpace(project.DBType)) {
 	case "postgres", "postgresql", "sql":

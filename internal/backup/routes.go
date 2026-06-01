@@ -1,7 +1,7 @@
 package backup
 
 import (
-	"backend/internal/middlewares"
+	"backend/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,7 +20,7 @@ func NewRoutes(handler *Handler) *Routes {
 
 func (r *Routes) RegisterRoutes(router *gin.RouterGroup) {
 	g := router.Group("/projects/:id")
-	g.Use(middlewares.Authenticate)
+	g.Use(middleware.Authenticate)
 	{
 		g.GET("/export", r.handler.Export)
 		g.POST("/import", r.handler.Import)

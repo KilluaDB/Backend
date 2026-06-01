@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"backend/internal/postgres/service"
-	"backend/internal/responses"
-	"backend/internal/services"
+	pgservice "backend/internal/postgres/service"
+	"backend/internal/response"
+	"backend/internal/service"
 	"backend/internal/utils"
 	"errors"
 	"net/http"
@@ -14,10 +14,10 @@ import (
 )
 
 type QueryHandler struct {
-	queryService *service.QueryService
+	queryService *pgservice.QueryService
 }
 
-func NewQueryHandler(queryService *service.QueryService) *QueryHandler {
+func NewQueryHandler(queryService *pgservice.QueryService) *QueryHandler {
 	return &QueryHandler{queryService: queryService}
 }
 
@@ -35,7 +35,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		return
 	}
 
-	var req service.ExecuteQueryRequest
+	var req pgservice.ExecuteQueryRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid request body: query is required")
 		return
@@ -48,7 +48,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 	result, exec, err := h.queryService.ExecuteSQLQuery(c.Request.Context(), userUUID, &req, projectUUID)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidQuery):
+		case errors.Is(err, pgservice.ErrInvalidQuery):
 			message := "Invalid or disallowed query"
 			if result != nil && result.Error != "" {
 				message = result.Error
@@ -59,7 +59,7 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 				pgFail(c, http.StatusBadRequest, err, message)
 			}
 			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -81,12 +81,12 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 		execMs = int64(*exec.ExecutionTimeMs)
 	}
 
-	response := gin.H{
+	res := gin.H{
 		"result":            result,
 		"execution_id":      exec.ID,
 		"execution_time_ms": execMs,
 	}
-	responses.Success(c, http.StatusOK, response, "Query executed successfully")
+	response.Success(c, http.StatusOK, res, "Query executed successfully")
 }
 
 // GetQueryHistory returns recent pg_stat_statements data for this project's database instance.
@@ -114,7 +114,7 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 	history, err := h.queryService.GetQueryHistory(c.Request.Context(), userUUID, projectUUID, limit)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -123,5 +123,5 @@ func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
 		}
 	}
 
-	responses.Success(c, http.StatusOK, history, "Query history retrieved successfully")
+	response.Success(c, http.StatusOK, history, "Query history retrieved successfully")
 }

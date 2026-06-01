@@ -49,12 +49,12 @@ func RedisClient() (*redis.Client, error) {
 // RefreshTokenStore persists refresh tokens in Redis for validation and revocation.
 type RefreshTokenStore struct {
 	client *redis.Client
-	ttl   time.Duration
+	TTL    time.Duration
 }
 
 // NewRefreshTokenStore creates a store with the given TTL for new keys.
 func NewRefreshTokenStore(client *redis.Client, ttl time.Duration) *RefreshTokenStore {
-	return &RefreshTokenStore{client: client, ttl: ttl}
+	return &RefreshTokenStore{client: client, TTL: ttl}
 }
 
 func key(token string) string {
@@ -64,7 +64,7 @@ func key(token string) string {
 // Set stores a refresh token for the given user with TTL.
 func (s *RefreshTokenStore) Set(ctx context.Context, refreshToken string, userID uuid.UUID) error {
 	k := key(refreshToken)
-	return s.client.Set(ctx, k, userID.String(), s.ttl).Err()
+	return s.client.Set(ctx, k, userID.String(), s.TTL).Err()
 }
 
 // Get returns the user ID for the token if it exists and is not expired.

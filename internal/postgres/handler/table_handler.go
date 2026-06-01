@@ -3,9 +3,9 @@ package handler
 import (
 	"backend/internal/postgres/model"
 	"backend/internal/postgres/repository"
-	"backend/internal/postgres/service"
-	"backend/internal/responses"
-	"backend/internal/services"
+	pgservice "backend/internal/postgres/service"
+	"backend/internal/response"
+	"backend/internal/service"
 	"backend/internal/utils"
 	"encoding/json"
 	"errors"
@@ -18,10 +18,10 @@ import (
 )
 
 type TableHandler struct {
-	tableService *service.TableService
+	tableService *pgservice.TableService
 }
 
-func NewTableHandler(tableService *service.TableService) *TableHandler {
+func NewTableHandler(tableService *pgservice.TableService) *TableHandler {
 	return &TableHandler{
 		tableService: tableService,
 	}
@@ -73,7 +73,7 @@ func failTableInstanceError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, services.ErrProjectNotAccessible) || errors.Is(err, services.ErrNoRunningInstance) {
+	if errors.Is(err, service.ErrProjectNotAccessible) || errors.Is(err, service.ErrNoRunningInstance) {
 		pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 		return true
 	}
@@ -83,11 +83,11 @@ func failTableInstanceError(c *gin.Context, err error) bool {
 // schemaQueryOrDefault reads `schema` from the query string, defaulting empty to "public", validates it, or writes 400.
 func schemaQueryOrDefault(c *gin.Context) (string, bool) {
 	raw := c.Query("schema")
-	if err := service.ValidatePostgresSchemaName(raw); err != nil {
+	if err := pgservice.ValidatePostgresSchemaName(raw); err != nil {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return "", false
 	}
-	return service.PostgresSchema(raw), true
+	return pgservice.PostgresSchema(raw), true
 }
 
 // CreateTable post /postgres/tables
@@ -112,13 +112,13 @@ func (h *TableHandler) CreateTable(c *gin.Context) {
 	result, err := h.tableService.CreateTable(c.Request.Context(), &req, userUUID, projectUUID)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
+		case errors.Is(err, pgservice.ErrInvalidTableRequest):
 			pgFail(c, http.StatusBadRequest, err, "Invalid request: schema, table, or column names or types are invalid")
 			return
-		case errors.Is(err, service.ErrTableAlreadyExists):
+		case errors.Is(err, pgservice.ErrTableAlreadyExists):
 			pgFail(c, http.StatusConflict, err, "Table already exists")
 			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -127,11 +127,11 @@ func (h *TableHandler) CreateTable(c *gin.Context) {
 		}
 	}
 
-	response := gin.H{
+	res := gin.H{
 		"result": result,
 	}
 
-	responses.Success(c, http.StatusCreated, response, "Table created successfully")
+	response.Success(c, http.StatusCreated, res, "Table created successfully")
 }
 
 // GetTables GET /postgres/tables
@@ -152,7 +152,7 @@ func (h *TableHandler) GetTables(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, "Failed to list tables")
 		return
 	}
-	responses.Success(c, http.StatusOK, tables, "Tables retrieved successfully")
+	response.Success(c, http.StatusOK, tables, "Tables retrieved successfully")
 }
 
 // GetTable GET /postgres/tables/:table — column and key metadata (no rows).
@@ -172,7 +172,7 @@ func (h *TableHandler) GetTable(c *gin.Context) {
 	}
 	meta, err := h.tableService.GetTableMetadata(c.Request.Context(), projectUUID, userUUID, schema, table)
 	if err != nil {
-		if errors.Is(err, service.ErrTableNotFound) {
+		if errors.Is(err, pgservice.ErrTableNotFound) {
 			pgFail(c, http.StatusNotFound, err, "Table does not exist")
 			return
 		}
@@ -182,7 +182,7 @@ func (h *TableHandler) GetTable(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusOK, meta, "Table metadata retrieved successfully")
+	response.Success(c, http.StatusOK, meta, "Table metadata retrieved successfully")
 }
 
 // DeleteTable DELETE /postgres/tables/:table
@@ -207,13 +207,13 @@ func (h *TableHandler) DeleteTable(c *gin.Context) {
 	result, err := h.tableService.DeleteTable(c.Request.Context(), &req, userUUID, projectUUID)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
+		case errors.Is(err, pgservice.ErrInvalidTableRequest):
 			pgFail(c, http.StatusBadRequest, err, "Invalid request: schema or table name is invalid")
 			return
-		case errors.Is(err, service.ErrTableNotFound):
+		case errors.Is(err, pgservice.ErrTableNotFound):
 			pgFail(c, http.StatusNotFound, err, "Table does not exist")
 			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -222,11 +222,11 @@ func (h *TableHandler) DeleteTable(c *gin.Context) {
 		}
 	}
 
-	response := gin.H{
+	res := gin.H{
 		"result": result,
 	}
 
-	responses.Success(c, http.StatusOK, response, "Table deleted successfully")
+	response.Success(c, http.StatusOK, res, "Table deleted successfully")
 }
 
 // UpdateTable PATCH /postgres/tables/:table
@@ -253,13 +253,13 @@ func (h *TableHandler) UpdateTable(c *gin.Context) {
 	result, err := h.tableService.UpdateTable(c.Request.Context(), userUUID, projectUUID, schema, table, &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
+		case errors.Is(err, pgservice.ErrInvalidTableRequest):
 			pgFail(c, http.StatusBadRequest, err, err.Error())
 			return
-		case errors.Is(err, service.ErrTableNotFound):
+		case errors.Is(err, pgservice.ErrTableNotFound):
 			pgFail(c, http.StatusNotFound, err, "Table does not exist")
 			return
-		case errors.Is(err, services.ErrProjectNotAccessible), errors.Is(err, services.ErrNoRunningInstance):
+		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
 			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
 			return
 		default:
@@ -268,7 +268,7 @@ func (h *TableHandler) UpdateTable(c *gin.Context) {
 		}
 	}
 
-	responses.Success(c, http.StatusOK, gin.H{"result": result}, "Table updated successfully")
+	response.Success(c, http.StatusOK, gin.H{"result": result}, "Table updated successfully")
 }
 
 // InsertRow POST /postgres/tables/:table/rows
@@ -293,7 +293,7 @@ func (h *TableHandler) InsertRow(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
 		return
 	}
-	req := service.InsertRowRequest{Schema: schema, Table: table, Values: body.Values}
+	req := pgservice.InsertRowRequest{Schema: schema, Table: table, Values: body.Values}
 	result, err := h.tableService.InsertRow(c.Request.Context(), userUUID, projectUUID, req)
 	if err != nil {
 		if failTableInstanceError(c, err) {
@@ -302,7 +302,7 @@ func (h *TableHandler) InsertRow(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusCreated, result, "Row inserted successfully")
+	response.Success(c, http.StatusCreated, result, "Row inserted successfully")
 }
 
 // GetRows GET /postgres/tables/:table/rows
@@ -356,7 +356,7 @@ func (h *TableHandler) GetRows(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusOK, records, "Rows retrieved successfully")
+	response.Success(c, http.StatusOK, records, "Rows retrieved successfully")
 }
 
 // UpdateRows PATCH /postgres/tables/:table/rows
@@ -389,7 +389,7 @@ func (h *TableHandler) UpdateRows(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusOK, nil, "Rows updated successfully")
+	response.Success(c, http.StatusOK, nil, "Rows updated successfully")
 }
 
 // DeleteRows DELETE /postgres/tables/:table/rows
@@ -451,7 +451,7 @@ func (h *TableHandler) AddColumn(c *gin.Context) {
 	if body.Nullable != nil {
 		nullable = *body.Nullable
 	}
-	req := service.AddColumnRequest{
+	req := pgservice.AddColumnRequest{
 		Schema:      schema,
 		TableName:   table,
 		Name:        body.Name,
@@ -466,10 +466,10 @@ func (h *TableHandler) AddColumn(c *gin.Context) {
 	result, err := h.tableService.AddColumn(c.Request.Context(), userUUID, projectUUID, req)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
+		case errors.Is(err, pgservice.ErrInvalidTableRequest):
 			pgFail(c, http.StatusBadRequest, err, err.Error())
 			return
-		case errors.Is(err, service.ErrTableNotFound):
+		case errors.Is(err, pgservice.ErrTableNotFound):
 			pgFail(c, http.StatusNotFound, err, "Table does not exist")
 			return
 		}
@@ -479,7 +479,7 @@ func (h *TableHandler) AddColumn(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusOK, result, "Column added successfully")
+	response.Success(c, http.StatusOK, result, "Column added successfully")
 }
 
 // DropColumn DELETE /postgres/tables/:table/columns/:column
@@ -498,7 +498,7 @@ func (h *TableHandler) DropColumn(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req := service.DeleteColumnRequest{Schema: schema, TableName: table}
+	req := pgservice.DeleteColumnRequest{Schema: schema, TableName: table}
 	if err := h.tableService.DeleteColumn(c.Request.Context(), userUUID, projectUUID, req, column); err != nil {
 		if failTableInstanceError(c, err) {
 			return
@@ -532,7 +532,7 @@ func (h *TableHandler) ListIndexes(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusOK, gin.H{"indexes": list}, "Indexes listed successfully")
+	response.Success(c, http.StatusOK, gin.H{"indexes": list}, "Indexes listed successfully")
 }
 
 // CreateIndex POST /postgres/tables/:table/indexes
@@ -557,10 +557,10 @@ func (h *TableHandler) CreateIndex(c *gin.Context) {
 	}
 	if err := h.tableService.CreateTableIndex(c.Request.Context(), projectUUID, userUUID, schema, table, &req); err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTableRequest):
+		case errors.Is(err, pgservice.ErrInvalidTableRequest):
 			pgFail(c, http.StatusBadRequest, err, err.Error())
 			return
-		case errors.Is(err, service.ErrIndexAlreadyExists):
+		case errors.Is(err, pgservice.ErrIndexAlreadyExists):
 			pgFail(c, http.StatusConflict, err, "Index already exists")
 			return
 		}
@@ -570,7 +570,7 @@ func (h *TableHandler) CreateIndex(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	responses.Success(c, http.StatusCreated, nil, "Index created successfully")
+	response.Success(c, http.StatusCreated, nil, "Index created successfully")
 }
 
 // DropIndex DELETE /postgres/tables/:table/indexes/:index

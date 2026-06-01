@@ -1,8 +1,9 @@
 package backup
 
 import (
-	"backend/internal/responses"
-	"backend/internal/services"
+	"backend/internal/response"
+	"backend/internal/service"
+	"backend/internal/utils"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // importMaxDuration bounds a single import. Backups much larger than this should
@@ -33,14 +33,14 @@ func NewHandler(svc *Service) *Handler {
 // query param selects plain SQL (default) or pg_dump custom format. MongoDB
 // always emits a gzipped mongodump archive.
 func (h *Handler) Export(c *gin.Context) {
-	userID, ok := userUUID(c)
+	userID, ok := utils.UserIDFromGin(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		response.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	projectID, err := projectUUID(c)
+	projectID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		response.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 
@@ -74,14 +74,14 @@ func (h *Handler) Export(c *gin.Context) {
 // to force pg_restore (custom) or psql (sql); empty triggers auto-detect by
 // magic bytes.
 func (h *Handler) Import(c *gin.Context) {
-	userID, ok := userUUID(c)
+	userID, ok := utils.UserIDFromGin(c)
 	if !ok {
-		responses.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		response.Fail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	projectID, err := projectUUID(c)
+	projectID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		response.Fail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 
@@ -95,7 +95,7 @@ func (h *Handler) Import(c *gin.Context) {
 
 	body, closeBody, err := importBodyReader(c.Request)
 	if err != nil {
-		responses.Fail(c, http.StatusBadRequest, err, "Failed to read upload body")
+		response.Fail(c, http.StatusBadRequest, err, "Failed to read upload body")
 		return
 	}
 	defer closeBody()
@@ -107,7 +107,7 @@ func (h *Handler) Import(c *gin.Context) {
 		return
 	}
 
-	responses.Success(c, http.StatusOK, nil, "Import completed successfully")
+	response.Success(c, http.StatusOK, nil, "Import completed successfully")
 }
 
 // importBodyReader returns a streaming reader for the import body, supporting
@@ -144,43 +144,16 @@ func importBodyReader(r *http.Request) (io.Reader, func(), error) {
 // writeServiceError maps service-layer errors to HTTP status codes.
 func writeServiceError(c *gin.Context, err error, fallback string) {
 	switch {
-	case errors.Is(err, services.ErrProjectNotAccessible):
-		responses.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
-	case errors.Is(err, services.ErrNoRunningInstance):
-		responses.Fail(c, http.StatusConflict, err, "Database instance is not running")
+	case errors.Is(err, service.ErrProjectNotAccessible):
+		response.Fail(c, http.StatusNotFound, err, "Project not found or access denied")
+	case errors.Is(err, service.ErrNoRunningInstance):
+		response.Fail(c, http.StatusConflict, err, "Database instance is not running")
 	case errors.Is(err, ErrUnsupportedDBType):
-		responses.Fail(c, http.StatusBadRequest, err, "Project database type does not support backup/restore")
+		response.Fail(c, http.StatusBadRequest, err, "Project database type does not support backup/restore")
 	default:
 		// Surface tool-level errors as 500 with a sanitized message.
-		responses.JSON(c, http.StatusInternalServerError, "error", nil, fallback, err)
+		response.JSON(c, http.StatusInternalServerError, "error", nil, fallback, err)
 	}
-}
-
-func userUUID(c *gin.Context) (uuid.UUID, bool) {
-	raw, exists := c.Get("userId")
-	if !exists {
-		return uuid.Nil, false
-	}
-	switch v := raw.(type) {
-	case uuid.UUID:
-		return v, true
-	case string:
-		u, err := uuid.Parse(v)
-		if err != nil {
-			return uuid.Nil, false
-		}
-		return u, true
-	default:
-		return uuid.Nil, false
-	}
-}
-
-func projectUUID(c *gin.Context) (uuid.UUID, error) {
-	id := c.Param("id")
-	if id == "" {
-		return uuid.Nil, errors.New("project id is required")
-	}
-	return uuid.Parse(id)
 }
 
 var filenameUnsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)

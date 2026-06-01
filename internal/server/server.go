@@ -4,7 +4,7 @@ import (
 	"backend/internal/backup"
 	"backend/internal/config"
 	"backend/internal/database"
-	"backend/internal/handlers"
+	"backend/internal/handler"
 	mongohandler "backend/internal/mongodb/handler"
 	mongoinfra "backend/internal/mongodb/infra"
 	mongorepo "backend/internal/mongodb/repository"
@@ -13,9 +13,9 @@ import (
 	pginfra "backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
 	postgressvc "backend/internal/postgres/service"
-	"backend/internal/repositories"
-	"backend/internal/routes"
-	"backend/internal/services"
+	"backend/internal/repository"
+	"backend/internal/route"
+	"backend/internal/service"
 	"fmt"
 	"log"
 	"net/http"
@@ -81,47 +81,47 @@ func NewServer() *http.Server {
 	refreshStore := config.NewRefreshTokenStore(redisClient, 30*24*time.Hour) // 30 days TTL
 
 	// Dependency injection
-	userRepo := repositories.NewUserRepository(pool)
-	projectRepo := repositories.NewProjectRepository(pool)
-	userService := services.NewUserService(userRepo, projectRepo, pool)
-	authService := services.NewAuthService(userRepo, refreshStore)
-	authHandler := handlers.NewAuthHandler(authService)
-	userHandler := handlers.NewUserHandler(userService)
+	userRepo := repository.NewUserRepository(pool)
+	projectRepo := repository.NewProjectRepository(pool)
+	userService := service.NewUserService(userRepo, projectRepo, pool)
+	authService := service.NewAuthService(userRepo, refreshStore)
+	authHandler := handler.NewAuthHandler(authService)
+	userHandler := handler.NewUserHandler(userService)
 
 	// Google Auth dependencies
-	googleAuthService := services.NewGoogleAuthService(userRepo)
+	googleAuthService := service.NewGoogleAuthService(userRepo)
 	oauthConfig, err := config.OAuthConfig()
 	if err != nil {
 		log.Fatalf("failed to initialize OAuth config: %v", err)
 	}
-	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
+	googleAuthHandler := handler.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
-	provisioner, err := services.NewOperatorProvisioner()
+	provisioner, err := service.NewOperatorProvisioner()
 	if err != nil {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
-	dsnService := services.NewInstanceDsnService(projectRepo, provisioner)
+	dsnService := service.NewInstanceDSNService(projectRepo, provisioner)
 	instanceConn := pginfra.NewPostgresConnectionManager(dsnService)
 	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()
 	tableService := postgressvc.NewTableService(instanceConn, tableRepo)
-	projectService := services.NewProjectService(projectRepo, provisioner, tableService, instanceConn)
-	projectHandler := handlers.NewProjectHandler(projectService)
+	projectService := service.NewProjectService(projectRepo, provisioner, tableService, instanceConn)
+	projectHandler := handler.NewProjectHandler(projectService)
 
 	// Query dependencies
 	const maxPostgresQueryLimit = 50
 	pgQueryService := postgressvc.NewQueryService(instanceConn, maxPostgresQueryLimit)
 	pgQueryHandler := pghandler.NewQueryHandler(pgQueryService)
 
-	// textToSqlRepo := repositories.NewQueryHistoryRepository(pool)
-	textToSqlService := postgressvc.NewTextToSQLService(dsnService, projectRepo)
-	textToSqlHandler := pghandler.NewTextToSQLHandler(textToSqlService, pgQueryService)
+	// textToSqlRepo := repository.NewQueryHistoryRepository(pool)
+	textToSQLService := postgressvc.NewTextToSQLService(dsnService, projectRepo)
+	textToSQLHandler := pghandler.NewTextToSQLHandler(textToSQLService, pgQueryService)
 
 	//
-	// tableRepo := repositories.NewTableRepository(pool)
-	// tableService := services.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
+	// tableRepo := repository.NewTableRepository(pool)
+	// tableService := service.NewTableService(projectRepo, dbInstanceRepo, dbCredentialRepo, queryHistoryRepo, tableRepo)
 
 	//	mongoQueryHistoryRepo := mongorepo.NewQueryHistoryRepository(pool)
 	//	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
@@ -133,7 +133,7 @@ func NewServer() *http.Server {
 	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, projectRepo)
 	dashMetricsSvc := postgressvc.NewDashboardMetricsService(instanceConn)
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
-	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)
+	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSQLHandler)
 
 	// MongoDB collection management
 	mongoConn := mongoinfra.NewMongoConnectionManager(dsnService)
@@ -164,7 +164,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongoHandler, backupHandler)
+	route.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongoHandler, backupHandler)
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
 		Handler:           router,

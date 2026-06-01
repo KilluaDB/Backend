@@ -9,15 +9,15 @@ type PostgresHandler struct {
 	Schema *SchemaHandler
 	Query  *QueryHandler
 	Dashboard *DashboardHandler
-	TextToSql *TextToSQLHandler
+	TextToSQL *TextToSQLHandler
 }
 
-func NewPostgresHandler(table *TableHandler, schema *SchemaHandler, query *QueryHandler, dashboard *DashboardHandler, TextToSql *TextToSQLHandler) *PostgresHandler {
+func NewPostgresHandler(table *TableHandler, schema *SchemaHandler, query *QueryHandler, dashboard *DashboardHandler, textToSQL *TextToSQLHandler) *PostgresHandler {
 	return &PostgresHandler{
 		Table:     table,
 		Schema:    schema,
 		Query:     query,
 		Dashboard: dashboard,
-		TextToSql: TextToSql,
+		TextToSQL: textToSQL,
 	}
 }
