@@ -3,6 +3,8 @@ package routes
 import (
 	"backend/internal/backup"
 	"backend/internal/handlers"
+	mongohandler "backend/internal/mongodb/handler"
+	mongoroutes "backend/internal/mongodb/routes"
 	postgreshandler "backend/internal/postgres/handler"
 	postgresroutes "backend/internal/postgres/routes"
 	"backend/internal/repositories"
@@ -20,6 +22,7 @@ func RegisterRoutes(
 	projectHandler *handlers.ProjectHandler,
 	projectRepo *repositories.ProjectRepository,
 	postgresHandler *postgreshandler.PostgresHandler,
+	mongoHandler *mongohandler.MongoHandler,
 	backupHandler *backup.Handler,
 ) {
 	api := router.Group("/api/v1")
@@ -35,6 +38,9 @@ func RegisterRoutes(
 
 	postgresRoutes := postgresroutes.NewPostgresRoutes(projectRepo, postgresHandler)
 	postgresRoutes.RegisterRoutes(api)
+
+	mongodbRoutes := mongoroutes.NewMongoRoutes(projectRepo, mongoHandler)
+	mongodbRoutes.RegisterRoutes(api)
 
 	backupRoutes := backup.NewRoutes(backupHandler)
 	backupRoutes.RegisterRoutes(api)

@@ -445,8 +445,6 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	}
 
 	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
-
-	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			return p.getMongoConnection(ctx, ns, name)

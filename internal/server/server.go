@@ -5,6 +5,10 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/handlers"
+	mongohandler "backend/internal/mongodb/handler"
+	mongoinfra "backend/internal/mongodb/infra"
+	mongorepo "backend/internal/mongodb/repository"
+	mongosvc "backend/internal/mongodb/service"
 	pghandler "backend/internal/postgres/handler"
 	pginfra "backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
@@ -31,6 +35,7 @@ type Server struct {
 }
 
 var pgInstanceManager *pginfra.PostgresConnectionManager
+var mongoInstanceManager *mongoinfra.MongoConnectionManager
 
 func NewServer() *http.Server {
 	// Validate required environment variables
@@ -130,8 +135,13 @@ func NewServer() *http.Server {
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
 	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)
 
-	// MongoDB API handler
-	//mongodbHandler := mongodbhandler.NewMongoDBHandler(recordService)
+	// MongoDB collection management
+	mongoConn := mongoinfra.NewMongoConnectionManager(dsnService)
+	mongoInstanceManager = mongoConn
+	mongoColRepo := mongorepo.NewCollectionRepository()
+	mongoColService := mongosvc.NewCollectionService(mongoConn, mongoColRepo)
+	mongoColHandler := mongohandler.NewCollectionHandler(mongoColService)
+	mongoHandler := mongohandler.NewMongoHandler(mongoColHandler)
 
 	// Backup (export/import) handler — dispatches by project.DBType internally.
 	backupService := backup.NewService(projectRepo, dsnService)
@@ -154,7 +164,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, backupHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongoHandler, backupHandler)
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
 		Handler:           router,
@@ -171,6 +181,9 @@ func NewServer() *http.Server {
 func CloseResources() {
 	if pgInstanceManager != nil {
 		pgInstanceManager.CloseAll()
+	}
+	if mongoInstanceManager != nil {
+		mongoInstanceManager.CloseAll()
 	}
 	database.Close()
 }
