@@ -18,12 +18,9 @@ func RegisterRoutes(
 	userHandler *handlers.UserHandler,
 	userRepo *repositories.UserRepository,
 	projectHandler *handlers.ProjectHandler,
-	projectRepo repositories.ProjectRepository,
+	projectRepo *repositories.ProjectRepository,
 	postgresHandler *postgreshandler.PostgresHandler,
 	backupHandler *backup.Handler,
-	// mongodbHandler *mongodbhandler.MongoDBHandler,
-
-	// mongoQueryHandler *mongodbhandler.QueryHandler,
 ) {
 	api := router.Group("/api/v1")
 
@@ -41,9 +38,6 @@ func RegisterRoutes(
 
 	backupRoutes := backup.NewRoutes(backupHandler)
 	backupRoutes.RegisterRoutes(api)
-
-	//mongodbRoutes := mongodbroutes.NewMongoDBRoutes(projectRepo, mongodbHandler, mongoQueryHandler)
-	//mongodbRoutes.RegisterRoutes(api)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

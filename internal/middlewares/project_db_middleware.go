@@ -12,16 +12,16 @@ import (
 
 // RequirePostgresProject ensures the project exists, belongs to the user, and is PostgreSQL.
 // Use after Authenticate. Expects project id in Param("id") and userId in context.
-func RequirePostgresProject(projectRepo repositories.ProjectRepository) gin.HandlerFunc {
+func RequirePostgresProject(projectRepo *repositories.ProjectRepository) gin.HandlerFunc {
 	return requireProjectDBType(projectRepo, "postgresql")
 }
 
 // RequireMongoProject ensures the project exists, belongs to the user, and is MongoDB.
-func RequireMongoProject(projectRepo repositories.ProjectRepository) gin.HandlerFunc {
+func RequireMongoProject(projectRepo *repositories.ProjectRepository) gin.HandlerFunc {
 	return requireProjectDBType(projectRepo, "mongodb")
 }
 
-func requireProjectDBType(projectRepo repositories.ProjectRepository, wantDBType string) gin.HandlerFunc {
+func requireProjectDBType(projectRepo *repositories.ProjectRepository, wantDBType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, exists := c.Get("userId")
 		if !exists {

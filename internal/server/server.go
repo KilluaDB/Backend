@@ -6,7 +6,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/handlers"
 	pghandler "backend/internal/postgres/handler"
-	"backend/internal/postgres/infra"
+	pginfra "backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
 	postgressvc "backend/internal/postgres/service"
 	"backend/internal/repositories"
@@ -30,7 +30,7 @@ type Server struct {
 	pool *pgxpool.Pool
 }
 
-var pgInstanceManager *infra.PostgresConnectionManager
+var pgInstanceManager *pginfra.PostgresConnectionManager
 
 func NewServer() *http.Server {
 	// Validate required environment variables
@@ -77,8 +77,8 @@ func NewServer() *http.Server {
 
 	// Dependency injection
 	userRepo := repositories.NewUserRepository(pool)
-	// sessionRepo := repositories.NewSessionRepository(pool)
-	userService := services.NewUserService(userRepo)
+	projectRepo := repositories.NewProjectRepository(pool)
+	userService := services.NewUserService(userRepo, projectRepo, pool)
 	authService := services.NewAuthService(userRepo, refreshStore)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
@@ -92,13 +92,12 @@ func NewServer() *http.Server {
 	googleAuthHandler := handlers.NewGoogleAuthHandler(googleAuthService, oauthConfig)
 
 	// Project dependencies (provisioner uses K8s operators for DB instances)
-	projectRepo := postgresrepo.NewProjectRepository(pool)
 	provisioner, err := services.NewOperatorProvisioner()
 	if err != nil {
 		log.Fatalf("failed to initialize operator provisioner: %v", err)
 	}
 	dsnService := services.NewInstanceDsnService(projectRepo, provisioner)
-	instanceConn := infra.NewPostgresConnectionManager(dsnService)
+	instanceConn := pginfra.NewPostgresConnectionManager(dsnService)
 	pgInstanceManager = instanceConn
 	// Postgres-specific: table (includes row/column ops), schema, query
 	tableRepo := postgresrepo.NewTableRepository()

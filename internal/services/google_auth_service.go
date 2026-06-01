@@ -68,14 +68,14 @@ func (s *GoogleAuthService) Callback(ctx context.Context, token *oauth2.Token) (
 		return "", fmt.Errorf("email is not verified by Google")
 	}
 
-	user, err := s.userRepo.FindUserByEmail(googleUser.Email)
+	user, err := s.userRepo.FindUserByEmail(ctx, googleUser.Email)
 	if err != nil || user == nil {
 		// User doesn't exist, create new one
 		newUser := &models.User{
 			Email: googleUser.Email,
 		}
 
-		if err := s.userRepo.Create(newUser); err != nil {
+		if err := s.userRepo.Create(ctx, newUser); err != nil {
 			return "", fmt.Errorf("failed to create user: %w", err)
 		}
 

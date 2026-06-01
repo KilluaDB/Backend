@@ -4,6 +4,7 @@ import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
+	"backend/internal/utils"
 	"errors"
 	"net/http"
 	"strconv"
@@ -22,13 +23,13 @@ func NewQueryHandler(queryService *service.QueryService) *QueryHandler {
 
 // ExecuteQuery executes a SQL query for a Postgres project.
 func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}
 
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
@@ -90,13 +91,12 @@ func (h *QueryHandler) ExecuteQuery(c *gin.Context) {
 
 // GetQueryHistory returns recent pg_stat_statements data for this project's database instance.
 func (h *QueryHandler) GetQueryHistory(c *gin.Context) {
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return

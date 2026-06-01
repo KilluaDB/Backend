@@ -37,16 +37,16 @@ func NewAuthService(userRepo *repositories.UserRepository, refreshStore *config.
 	}
 }
 
-func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken, refreshToken string, err error) {
+func (s *AuthService) Register(ctx context.Context, user *models.User) (userID uuid.UUID, accessToken, refreshToken string, err error) {
 	// 1. Check if active user already exists
-	existing, _ := s.userRepo.FindUserByEmail(user.Email)
+	existing, _ := s.userRepo.FindUserByEmail(ctx, user.Email)
 	if existing != nil {
 		return uuid.Nil, "", "", ErrUserAlreadyExists
 	}
 
 	// 2. If a soft-deleted user exists with this email, hard-delete so we can create a new user
-	if deleted, _ := s.userRepo.FindUserByEmailIncludingDeleted(user.Email); deleted != nil && deleted.DeletedAt != nil {
-		if delErr := s.userRepo.HardDeleteSoftDeletedByEmail(user.Email); delErr != nil {
+	if deleted, _ := s.userRepo.FindUserByEmailIncludingDeleted(ctx, user.Email); deleted != nil && deleted.DeletedAt != nil {
+		if delErr := s.userRepo.HardDeleteSoftDeletedByEmail(ctx, user.Email); delErr != nil {
 			return uuid.Nil, "", "", delErr
 		}
 	}
@@ -64,7 +64,7 @@ func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken
 	user.Password = "" // Clear plain password
 
 	// 4. Save user in DB
-	if createErr := s.userRepo.Create(user); createErr != nil {
+	if createErr := s.userRepo.Create(ctx, user); createErr != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(createErr, &pgErr) && pgErr.Code == "23505" {
 			return uuid.Nil, "", "", ErrUserAlreadyExists
@@ -84,7 +84,7 @@ func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken
 	}
 
 	if s.refreshStore != nil {
-		if setErr := s.refreshStore.Set(context.Background(), refreshToken, user.ID); setErr != nil {
+		if setErr := s.refreshStore.Set(ctx, refreshToken, user.ID); setErr != nil {
 			return uuid.Nil, "", "", setErr
 		}
 	}
@@ -92,8 +92,8 @@ func (s *AuthService) Register(user *models.User) (userID uuid.UUID, accessToken
 	return user.ID, accessToken, refreshToken, nil
 }
 
-func (s *AuthService) Login(email, password string) (userID uuid.UUID, accessToken, refreshToken string, err error) {
-	user, findErr := s.userRepo.FindUserByEmail(email)
+func (s *AuthService) Login(ctx context.Context, email, password string) (userID uuid.UUID, accessToken, refreshToken string, err error) {
+	user, findErr := s.userRepo.FindUserByEmail(ctx, email)
 	if findErr != nil {
 		return uuid.Nil, "", "", ErrUserNotFound
 	}
@@ -117,7 +117,7 @@ func (s *AuthService) Login(email, password string) (userID uuid.UUID, accessTok
 	}
 
 	if s.refreshStore != nil {
-		if setErr := s.refreshStore.Set(context.Background(), refreshToken, user.ID); setErr != nil {
+		if setErr := s.refreshStore.Set(ctx, refreshToken, user.ID); setErr != nil {
 			return uuid.Nil, "", "", setErr
 		}
 	}
@@ -126,16 +126,15 @@ func (s *AuthService) Login(email, password string) (userID uuid.UUID, accessTok
 }
 
 // Logout revokes the refresh token by removing it from the store.
-func (s *AuthService) Logout(refreshToken string) error {
+func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	if s.refreshStore == nil {
 		return nil
 	}
-	return s.refreshStore.Delete(context.Background(), refreshToken)
+	return s.refreshStore.Delete(ctx, refreshToken)
 }
 
 // Refresh validates the refresh token (JWT + Redis), then rotates it: issues new tokens and stores new refresh token in Redis.
-func (s *AuthService) Refresh(refreshToken string) (userID uuid.UUID, accessToken, newRefreshToken string, err error) {
-	ctx := context.Background()
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (userID uuid.UUID, accessToken, newRefreshToken string, err error) {
 
 	// 1. Check token exists in Redis (persisted and not revoked/expired)
 	if s.refreshStore != nil {
@@ -156,7 +155,7 @@ func (s *AuthService) Refresh(refreshToken string) (userID uuid.UUID, accessToke
 	}
 
 	// 3. Verify user still exists
-	user, err := s.userRepo.FindUserByID(claims.UserID)
+	user, err := s.userRepo.FindUserByID(ctx, claims.UserID)
 	if err != nil || user == nil {
 		return uuid.Nil, "", "", errors.New("user not found")
 	}

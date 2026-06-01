@@ -309,9 +309,10 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 		if err := rows.Scan(&item.Query, &item.Calls, &item.TotalTimeMs, &item.MeanTimeMs, &item.Rows, &item.SharedBlksHit, &item.SharedBlksRead, &item.TempBlksWritten); err != nil {
 			return nil, err
 		}
-		// if IsSystemQueryText(item.Query) {
-		// 	continue
-		// }
+		// Skip system-generated queries (autovacuum, CHECKPOINT, VACUUM, etc.)
+		if isSystemQueryText(item.Query) {
+			continue
+		}
 		items = append(items, item)
 		if len(items) >= limit {
 			break
@@ -319,4 +320,49 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 	}
 
 	return items, rows.Err()
+}
+
+// isSystemQueryText filters out non-user queries (autovacuum, background maintenance, etc.)
+func isSystemQueryText(query string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(query))
+
+	// Transaction control and empty queries
+	if normalized == "BEGIN" || normalized == "COMMIT" || normalized == "ROLLBACK" || normalized == "" {
+		return true
+	}
+
+	systemPatterns := []string{
+		"AUTOVACUUM",
+		"CHECKPOINT",
+		"VACUUM",
+		"ANALYZE",
+		"REINDEX",
+		"CLUSTER",
+		"REFRESH MATERIALIZED VIEW",
+		"CALL pg_",                 // system functions
+		"SELECT pg_",               // system introspection
+		"UPDATE pg_",               // system catalog updates
+		"DELETE FROM pg_",          // system catalog deletes
+		"INFORMATION_SCHEMA",       // system schema queries
+		"PG_CATALOG",               // Postgres catalog
+		"PG_STAT_STATEMENTS",       // stats collection itself
+		"PG_EXTENSION",             // extension checking
+		"PG_STAT_ACTIVITY",         // activity monitoring
+		"PG_STAT_DATABASE",         // database statistics
+		"PG_STAT_USER_TABLES",      // table statistics
+		"FROM pg_",                 // any FROM pg_*
+		"JOIN pg_",                 // joins to system catalogs
+		"PG_DATABASE_SIZE",         // size functions
+		"PG_POSTMASTER_START_TIME", // server uptime
+		"PG_IS_IN_RECOVERY",        // recovery status
+		"VERSION()",                // server version
+		"UNNEST",                   // utility functions
+	}
+
+	for _, pattern := range systemPatterns {
+		if strings.Contains(normalized, pattern) {
+			return true
+		}
+	}
+	return false
 }

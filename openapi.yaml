@@ -372,7 +372,7 @@ components:
 
     CreateProjectRequest:
       type: object
-      required: [name, db_type]
+       required: [name, db_type, password]
       properties:
         name:
           type: string
@@ -391,6 +391,17 @@ components:
           enum: [free, basic, premium]
           default: free
           description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
+         password:
+           type: string
+           minLength: 12
+           description: |
+             Database password. Required field. Must be at least 12 characters and contain:
+             - At least one uppercase letter (A-Z)
+             - At least one lowercase letter (a-z)
+             - At least one digit (0-9)
+             - At least one special character (!@#$%^&*-_+=)
+           
+             Applies to both PostgreSQL and MongoDB instances.
 
     CreateProjectResponse:
       type: object
@@ -429,6 +440,28 @@ components:
         error:
           type: string
           nullable: true
+
+    TextToSQLRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          description: Natural language question describing desired data, filters, or aggregations
+
+    TextToSQLResponse:
+      type: object
+      properties:
+        sql:
+          type: string
+          description: Generated SQL statement
+        result:
+          $ref: '#/components/schemas/SQLQueryResult'
+        execution_id:
+          type: string
+          format: uuid
+        execution_time_ms:
+          type: integer
 
     QueryHistoryItem:
       type: object
@@ -599,35 +632,6 @@ components:
           additionalProperties: true
           description: Fields to update
 
-    PostgresAddColumnForeignKey:
-      type: object
-      required: [table, foreign_column]
-      description: >
-        A single-column foreign key attached to the newly added column. The local column is
-        implicit (it is the column being added).
-      properties:
-        schema:
-          type: string
-          default: public
-          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-          description: Schema of the referenced table. Defaults to `public` if omitted.
-        table:
-          type: string
-          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-          description: Referenced table name.
-        foreign_column:
-          type: string
-          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-          description: Referenced column name in the target table.
-        on_update:
-          type: string
-          enum: [CASCADE, RESTRICT, "NO ACTION"]
-          description: Optional ON UPDATE action.
-        on_delete:
-          type: string
-          enum: [CASCADE, RESTRICT, "NO ACTION", "SET NULL", "SET DEFAULT"]
-          description: Optional ON DELETE action.
-
     PostgresAddColumnRequest:
       type: object
       required: [name, type]
@@ -648,35 +652,8 @@ components:
             TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, JSON, JSONB, BYTEA.
             Parameterized variants like VARCHAR(50) are also accepted.
         default:
-          description: >
-            Default value for the column. Strings are quoted and escaped as SQL literals;
-            booleans become TRUE/FALSE; numbers are inlined. Send a string like `"NOW()"` for a
-            SQL expression — note that string defaults are always wrapped in single quotes.
+          description: Default value for the column (any JSON value)
           nullable: true
-        primary:
-          type: boolean
-          default: false
-          description: Whether the new column is a PRIMARY KEY. Rejected if the table already has a primary key.
-        is_unique:
-          type: boolean
-          default: false
-          description: Whether the new column has a UNIQUE constraint.
-        is_identity:
-          type: boolean
-          default: false
-          description: Whether the new column is GENERATED ALWAYS AS IDENTITY. Allowed only when type is smallint, integer, or bigint.
-        nullable:
-          type: boolean
-          default: true
-          description: Whether the new column allows NULL values.
-        foreign_keys:
-          type: array
-          nullable: true
-          description: >
-            Optional list of single-column foreign keys from the new column to one or more parent tables.
-            All entries apply to the column being added.
-          items:
-            $ref: '#/components/schemas/PostgresAddColumnForeignKey'
 
     TableColumn:
       type: object
@@ -783,20 +760,11 @@ components:
             $ref: '#/components/schemas/TableColumn'
           description: At least one column definition is required.
         foreign_keys:
-<<<<<<< Updated upstream
-          $ref: '#/components/schemas/ForeignKey'
+          type: object
           nullable: true
           description: Optional foreign key configuration for the table.
-=======
-          type: array
-          nullable: true
-          description: >
-            Optional list of foreign key groups. Each group targets one referenced table and lists
-            one or more local-to-foreign column references. Each `local_column` must be defined in
-            `columns` of the same request.
-          items:
-            $ref: '#/components/schemas/ForeignKey'
->>>>>>> Stashed changes
+          allOf:
+            - $ref: '#/components/schemas/ForeignKey'
 
     DeleteTableRequestBody:
       type: object
@@ -1854,9 +1822,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status: error
-                message: Project not found or database instance not ready
     post:
       operationId: createPostgresTable
       tags: [Postgres]
@@ -1904,13 +1869,13 @@ paths:
                       default: "NOW()"
                       nullable: false
                   foreign_keys:
-                    - schema: "public"
-                      table: "accounts"
-                      references:
-                        - local_column: "account_id"
-                          foreign_column: "id"
-                          on_update: "CASCADE"
-                          on_delete: "CASCADE"
+                    schema: "public"
+                    table: "accounts"
+                    references:
+                      - local_column: "account_id"
+                        foreign_column: "id"
+                        on_update: "CASCADE"
+                        on_delete: "CASCADE"
       responses:
         '201':
           description: Table created successfully
@@ -1959,6 +1924,97 @@ paths:
               example:
                 status: error
                 message: Table already exists
+
+  /api/v1/projects/{id}/postgres/text-to-sql:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: generateAndExecuteTextToSQL
+      tags: [Postgres]
+      summary: Generate SQL from natural language and execute it against the project's PostgreSQL instance
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextToSQLRequest'
+            example:
+              question: "Show me the 10 most recent active users with email and created_at."
+      responses:
+        '200':
+          description: SQL generated and executed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sql:
+                            type: string
+                          result:
+                            $ref: '#/components/schemas/SQLQueryResult'
+                          execution_id:
+                            type: string
+                            format: uuid
+                          execution_time_ms:
+                            type: integer
+              example:
+                status: success
+                message: Query executed successfully
+                data:
+                  sql: "SELECT id, email, created_at FROM public.users WHERE status='active' ORDER BY created_at DESC LIMIT 10;"
+                  execution_id: 8b3f0c1e-2a4d-4e1f-9c0b-111122223333
+                  execution_time_ms: 12
+                  result:
+                    columns:
+                      - id
+                      - email
+                      - created_at
+                    rows: []
+        '400':
+          description: Invalid input (missing question or invalid project ID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not accessible or database instance not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Invalid response from upstream text-to-sql service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Text-to-SQL service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Project not found or database instance not ready
 
   /api/v1/projects/{id}/postgres/tables/{table}:
     parameters:
@@ -2540,25 +2596,6 @@ paths:
                   name: is_verified
                   type: BOOLEAN
                   default: false
-              uniqueNotNullColumn:
-                summary: Unique NOT NULL column
-                value:
-                  name: email
-                  type: VARCHAR(255)
-                  is_unique: true
-                  nullable: false
-              columnWithForeignKey:
-                summary: Column with a single-column foreign key
-                value:
-                  name: account_id
-                  type: INTEGER
-                  nullable: false
-                  foreign_keys:
-                    - schema: public
-                      table: accounts
-                      foreign_column: id
-                      on_update: CASCADE
-                      on_delete: CASCADE
       responses:
         '200':
           description: Column added successfully
@@ -2592,7 +2629,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: Project not accessible, database instance not ready, or table does not exist
+          description: Project not accessible or database instance not ready
           content:
             application/json:
               schema:
@@ -2919,8 +2956,8 @@ paths:
             type: string
             default: public
             pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
-            example: "public"
           description: PostgreSQL schema to visualize; defaults to `public` if omitted
+          example: public
       responses:
         '200':
           description: Schema visualization generated successfully
@@ -2971,7 +3008,7 @@ paths:
     post:
       operationId: generateSchemaFromTextStream
       tags: [Postgres]
-      summary: Generate a Mermaid ER diagram from requirement text (streaming)
+      summary: Generate a Mermaid ER diagram from requirement t (streaming)
       description: |
         Proxies the local SchemaAgent (AI) service and streams progress events as Server-Sent Events (SSE).
         The Mermaid ER diagram is provided in a streamed event with `type: "mermaid"`.
@@ -3306,6 +3343,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIResponse'
+              example:
+                status: "success"
+                message: "Collections retrieved successfully"
+                data:
+                  - name: "users"
+                  - name: "orders"
         '400':
           description: Invalid project ID
           content:
@@ -3339,6 +3382,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIResponse'
+              example:
+                status: "success"
+                message: "Collection created successfully"
+                data:
+                  name: "orders"
         '400':
           description: Invalid request body or project ID
           content:

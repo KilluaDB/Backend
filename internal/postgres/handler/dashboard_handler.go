@@ -4,6 +4,7 @@ import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
+	"backend/internal/utils"
 	"errors"
 	"net/http"
 
@@ -23,7 +24,7 @@ func NewDashboardHandler(
 }
 
 func (h *DashboardHandler) GetOverview(c *gin.Context) {
-	userID, projectID, ok, projectErr := userAndProjectFromGin(c)
+	userID, projectID, ok, projectErr := utils.UserAndProjectFromGin(c)
 	if !ok {
 		if projectErr != nil {
 			pgFail(c, http.StatusBadRequest, projectErr, "Invalid projectId format")
@@ -48,7 +49,7 @@ func (h *DashboardHandler) GetOverview(c *gin.Context) {
 }
 
 func (h *DashboardHandler) GetMetrics(c *gin.Context) {
-	userID, projectID, ok, projectErr := userAndProjectFromGin(c)
+	userID, projectID, ok, projectErr := utils.UserAndProjectFromGin(c)
 	if !ok {
 		if projectErr != nil {
 			pgFail(c, http.StatusBadRequest, projectErr, "Invalid projectId format")

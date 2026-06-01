@@ -28,12 +28,12 @@ type ExternalConnectionInfo struct {
 
 // InstanceDsnService resolves credentials from K8s.
 type InstanceDsnService struct {
-	projectRepo repositories.ProjectRepository
+	projectRepo *repositories.ProjectRepository
 	provisioner *OperatorProvisioner
 }
 
 func NewInstanceDsnService(
-	projectRepo repositories.ProjectRepository,
+	projectRepo *repositories.ProjectRepository,
 	provisioner *OperatorProvisioner,
 ) *InstanceDsnService {
 	return &InstanceDsnService{

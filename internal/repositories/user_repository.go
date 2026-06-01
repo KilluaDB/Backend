@@ -19,8 +19,10 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-func (r *UserRepository) Create(user *models.User) error {
-	ctx := context.Background()
+func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	user.Prepare()
 
@@ -52,8 +54,10 @@ func (r *UserRepository) Create(user *models.User) error {
 	return err
 }
 
-func (r *UserRepository) FindUserByID(id uuid.UUID) (*models.User, error) {
-	ctx := context.Background()
+func (r *UserRepository) FindUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT id, email, password_hash, role, status, created_at, last_login_at, deleted_at
 		FROM users WHERE id = $1 AND deleted_at IS NULL`
@@ -80,8 +84,10 @@ func (r *UserRepository) FindUserByID(id uuid.UUID) (*models.User, error) {
 	return &user, nil
 }
 
-func (r *UserRepository) FindUserByEmail(email string) (*models.User, error) {
-	ctx := context.Background()
+func (r *UserRepository) FindUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT id, email, password_hash, role, status, created_at, last_login_at, deleted_at
 		FROM users WHERE email = $1 AND deleted_at IS NULL`
@@ -110,8 +116,10 @@ func (r *UserRepository) FindUserByEmail(email string) (*models.User, error) {
 
 // FindUserByEmailIncludingDeleted returns a user by email whether active or soft-deleted.
 // If multiple rows exist for the same email (e.g. multiple soft-deleted), returns one (most recently deleted).
-func (r *UserRepository) FindUserByEmailIncludingDeleted(email string) (*models.User, error) {
-	ctx := context.Background()
+func (r *UserRepository) FindUserByEmailIncludingDeleted(ctx context.Context, email string) (*models.User, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT id, email, password_hash, role, status, created_at, last_login_at, deleted_at
 		FROM users WHERE email = $1
@@ -141,8 +149,10 @@ func (r *UserRepository) FindUserByEmailIncludingDeleted(email string) (*models.
 }
 
 // HardDeleteSoftDeletedByEmail removes soft-deleted user(s) with the given email so the email can be reused on register.
-func (r *UserRepository) HardDeleteSoftDeletedByEmail(email string) error {
-	ctx := context.Background()
+func (r *UserRepository) HardDeleteSoftDeletedByEmail(ctx context.Context, email string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query := `DELETE FROM users WHERE email = $1 AND deleted_at IS NOT NULL`
 	_, err := r.pool.Exec(ctx, query, email)
 	return err
@@ -154,9 +164,10 @@ func (r *UserRepository) FindUserByName(username string) (*models.User, error) {
 	return nil, errors.New("not implemented")
 }
 
-
-func (r *UserRepository) Update(user *models.User) error {
-	ctx := context.Background()
+func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `
 		UPDATE users 
@@ -174,8 +185,10 @@ func (r *UserRepository) Update(user *models.User) error {
 	return err
 }
 
-func (r *UserRepository) Delete(id uuid.UUID) error {
-	ctx := context.Background()
+func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// Soft delete: update deleted_at and status instead of hard delete
 	query := `
@@ -188,8 +201,37 @@ func (r *UserRepository) Delete(id uuid.UUID) error {
 	return err
 }
 
-func (r *UserRepository) FindAll() ([]models.User, error) {
-	ctx := context.Background()
+func (r *UserRepository) DeleteTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil {
+		return errors.New("transaction is required")
+	}
+
+	// Soft delete: update deleted_at and status instead of hard delete.
+	query := `
+		UPDATE users
+		SET deleted_at = NOW(),
+		    status = 'deleted'
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	result, err := tx.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+func (r *UserRepository) FindAll(ctx context.Context) ([]models.User, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT id, email, password_hash, role, status, created_at, last_login_at, deleted_at
 		FROM users
@@ -229,8 +271,10 @@ func (r *UserRepository) FindAll() ([]models.User, error) {
 }
 
 // CountUsers returns the total number of active (non-deleted) users
-func (r *UserRepository) CountUsers() (int, error) {
-	ctx := context.Background()
+func (r *UserRepository) CountUsers(ctx context.Context) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`
 
@@ -244,8 +288,10 @@ func (r *UserRepository) CountUsers() (int, error) {
 }
 
 // CountAdmins returns the number of active users with admin role
-func (r *UserRepository) CountAdmins() (int, error) {
-	ctx := context.Background()
+func (r *UserRepository) CountAdmins(ctx context.Context) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	query := `SELECT COUNT(*) FROM users WHERE role = 'admin' AND deleted_at IS NULL`
 

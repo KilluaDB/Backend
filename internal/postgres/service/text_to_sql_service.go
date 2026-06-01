@@ -2,6 +2,7 @@ package service
 
 import (
 	"backend/internal/postgres/infra"
+	"backend/internal/repositories"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	postgresrepo "backend/internal/postgres/repository"
 	_ "backend/internal/repositories"
 	// "backend/internal/services"
 	_ "backend/internal/utils"
@@ -37,7 +37,7 @@ var (
 type TextToSQLService struct {
 	baseURL     string
 	httpClient  *http.Client
-	projectRepo *postgresrepo.PostgresProjectRepository
+	projectRepo *repositories.ProjectRepository
 	dsnProvider infra.DSNProvider
 }
 
@@ -64,7 +64,7 @@ type TextToSQLResponse struct {
 }
 
 // NewTextToSQLService creates a new Text-to-SQL service client
-func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *postgresrepo.PostgresProjectRepository) *TextToSQLService {
+func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *repositories.ProjectRepository) *TextToSQLService {
 	baseURL := os.Getenv("TEXT_TO_SQL")
 	timeout := 120 * time.Second
 	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {
@@ -83,10 +83,12 @@ func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *postgresrep
 	}
 }
 
-func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, projectId uuid.UUID) (*TextToSQLResponse, error) {
-	ctx := context.Background()
+func (s *TextToSQLService) GenerateSQL(ctx context.Context, userID uuid.UUID, req *TextToSQLRequest, projectId uuid.UUID) (*TextToSQLResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	project, err := s.projectRepo.GetByIDAndUserID(context.Background(), projectId, userID)
+	project, err := s.projectRepo.GetByIDAndUserID(ctx, projectId, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +139,12 @@ func (s *TextToSQLService) GenerateSQL(userID uuid.UUID, req *TextToSQLRequest, 
 	// Send request to FastAPI
 	targetURL := s.baseURL + "/api/v1/generate"
 	log.Printf("[TextToSQLService] Sending request to FastAPI url=%s project=%s user=%s", targetURL, projectId.String(), userID.String())
-	resp, err := s.httpClient.Post(
-		targetURL,
-		"application/json",
-		bytes.NewBuffer(jsonBody),
-	)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("[TextToSQLService] Request failed: %v", err)
 		return nil, fmt.Errorf("%w: %v", ErrTextToSQLUnavailable, err)

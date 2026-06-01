@@ -74,7 +74,7 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 	}
 
 	// Call FastAPI to generate SQL
-	genResult, err := h.textToSQLService.GenerateSQL(userUUID, &req, projectUUID)
+	genResult, err := h.textToSQLService.GenerateSQL(c.Request.Context(), userUUID, &req, projectUUID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrProjectNotFound):
@@ -111,7 +111,7 @@ func (h *TextToSQLHandler) GenerateAndExecuteSQL(c *gin.Context) {
 	}
 
 	response := gin.H{
-		"sql":					genResult.SQL,
+		"sql":               genResult.SQL,
 		"result":            execResult,
 		"execution_id":      exec.ID,
 		"execution_time_ms": execResult.ExecutionTime,

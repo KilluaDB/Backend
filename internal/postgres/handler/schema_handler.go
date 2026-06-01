@@ -4,6 +4,7 @@ import (
 	"backend/internal/postgres/service"
 	"backend/internal/responses"
 	"backend/internal/services"
+	"backend/internal/utils"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -28,13 +29,13 @@ func NewSchemaHandler(schemaService *service.SchemaService) *SchemaHandler {
 
 // VisualizeSchema handles GET /api/v1/projects/:id/postgres/schema/visualize
 func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
 
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
@@ -70,12 +71,12 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 
 // ListSchemas handles GET /api/v1/projects/:id/postgres/schemas
 func (h *SchemaHandler) ListSchemas(c *gin.Context) {
-	userUUID, ok := userIDFromGin(c)
+	userUUID, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	projectUUID, err := projectIDFromGin(c)
+	projectUUID, err := utils.ProjectIDFromGin(c)
 	if err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
@@ -112,12 +113,12 @@ func schemaAIBaseURL() string {
 // GenerateSchemaFromTextStream handles POST /api/v1/projects/:id/postgres/schema/from-text/stream
 // It proxies the local AI service SSE stream and passes events through to the client.
 func (h *SchemaHandler) GenerateSchemaFromTextStream(c *gin.Context) {
-	_, ok := userIDFromGin(c)
+	_, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
 		return
 	}
-	if _, err := projectIDFromGin(c); err != nil {
+	if _, err := utils.ProjectIDFromGin(c); err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
 		return
 	}

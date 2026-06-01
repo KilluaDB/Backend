@@ -40,7 +40,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:    req.Email,
 		Password: req.Password,
 	}
-	userID, accessToken, refreshToken, err := h.authService.Register(user)
+	userID, accessToken, refreshToken, err := h.authService.Register(c, user)
 	if err != nil {
 		if errors.Is(err, services.ErrUserAlreadyExists) {
 			responses.Fail(c, http.StatusConflict, err, "An account with this email already exists")
@@ -71,7 +71,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	userID, accessToken, refreshToken, err := h.authService.Login(req.Email, req.Password)
+	userID, accessToken, refreshToken, err := h.authService.Login(c, req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, services.ErrUserNotFound) || errors.Is(err, services.ErrInvalidPassword) {
 			responses.Fail(c, http.StatusUnauthorized, err, "Invalid email or password")
@@ -100,7 +100,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	if revokeErr := h.authService.Logout(refreshToken); revokeErr != nil {
+	if revokeErr := h.authService.Logout(c, refreshToken); revokeErr != nil {
 		responses.Fail(c, http.StatusInternalServerError, revokeErr, "Could not revoke session")
 		return
 	}
@@ -116,7 +116,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	userID, accessToken, newRefreshToken, err := h.authService.Refresh(refreshToken)
+	userID, accessToken, newRefreshToken, err := h.authService.Refresh(c, refreshToken)
 	if err != nil {
 		c.SetCookie(RefreshTokenCookieName, "", -1, "/", "", true, true)
 		responses.Fail(c, http.StatusUnauthorized, err, "Invalid or expired refresh token")
