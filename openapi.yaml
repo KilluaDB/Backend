@@ -372,7 +372,7 @@ components:
 
     CreateProjectRequest:
       type: object
-       required: [name, db_type, password]
+      required: [name, db_type, password]
       properties:
         name:
           type: string
@@ -391,17 +391,17 @@ components:
           enum: [free, basic, premium]
           default: free
           description: Optional; defaults to 'free' if omitted. Allowed values are 'free', 'basic', or 'premium'
-         password:
-           type: string
-           minLength: 12
-           description: |
-             Database password. Required field. Must be at least 12 characters and contain:
-             - At least one uppercase letter (A-Z)
-             - At least one lowercase letter (a-z)
-             - At least one digit (0-9)
-             - At least one special character (!@#$%^&*-_+=)
-           
-             Applies to both PostgreSQL and MongoDB instances.
+        password:
+          type: string
+          minLength: 12
+          description: |
+            Database password. Required field. Must be at least 12 characters and contain:
+            - At least one uppercase letter (A-Z)
+            - At least one lowercase letter (a-z)
+            - At least one digit (0-9)
+            - At least one special character (!@#$%^&*-_+=)
+          
+            Applies to both PostgreSQL and MongoDB instances.
 
     CreateProjectResponse:
       type: object
@@ -654,6 +654,50 @@ components:
         default:
           description: Default value for the column (any JSON value)
           nullable: true
+        primary:
+          type: boolean
+          default: false
+          description: Whether this column is a primary key (allowed only if no primary key exists yet).
+        is_unique:
+          type: boolean
+          default: false
+          description: Whether this column has a UNIQUE constraint.
+        is_identity:
+          type: boolean
+          default: false
+          description: Whether this column is GENERATED ALWAYS AS IDENTITY.
+        nullable:
+          type: boolean
+          default: true
+          description: Whether this column allows NULL values.
+        foreign_keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostgresAddColumnForeignKey'
+
+    PostgresAddColumnForeignKey:
+      type: object
+      required: [table, foreign_column]
+      properties:
+        schema:
+          type: string
+          default: public
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Schema name of the referenced table. Defaults to `public` if omitted.
+        table:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Target table name for the foreign key relation.
+        foreign_column:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_$]*$'
+          description: Referenced column name in the target table.
+        on_update:
+          type: string
+          description: Optional ON UPDATE action.
+        on_delete:
+          type: string
+          description: Optional ON DELETE action.
 
     TableColumn:
       type: object
@@ -1754,9 +1798,235 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/projects/{id}/access:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getProjectAccess
+      tags: [Projects]
+      summary: Get external connection info for a project
+      description: |
+        Returns the external connection string and credentials for direct database access via Traefik TCP SNI.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: External database connection details retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          connection_string:
+                            type: string
+                            example: "postgresql://user:pass@host:5432/db"
+                          host:
+                            type: string
+                            example: "host.example.com"
+                          port:
+                            type: integer
+                            example: 5432
+                          database:
+                            type: string
+                            example: "db_name"
+                          username:
+                            type: string
+                            example: "db_user"
+                          password:
+                            type: string
+                            example: "db_password"
+              example:
+                status: success
+                message: Connection info retrieved successfully
+                data:
+                  connection_string: "postgresql://user:pass@host:5432/db"
+                  host: "host.example.com"
+                  port: 5432
+                  database: "db_name"
+                  username: "db_user"
+                  password: "db_password"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not found or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Database is not running yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: External access not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/export:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          For PostgreSQL projects, selects either 'sql' (plain SQL, default) or 'custom' (pg_dump custom format).
+          MongoDB projects ignore this parameter and always emit a gzipped mongodump archive.
+    get:
+      operationId: exportProjectDatabase
+      tags: [Backups]
+      summary: Export a project database backup
+      description: |
+        Streams a full database backup file for the specified project. PostgreSQL projects can be exported
+        as plain SQL or a pg_dump custom format. MongoDB projects are exported as a gzipped mongodump archive.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: A binary database backup file stream
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: "attachment; filename=\"projectName-20260601-072745.sql\""
+            Content-Type:
+              schema:
+                type: string
+                example: "application/octet-stream"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid project ID format or unsupported format parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not found or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Database instance is not running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/import:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          For PostgreSQL projects, forces 'custom' (pg_restore) or 'sql' (psql).
+          If omitted, the server will attempt to auto-detect by matching magic bytes of the file.
+    post:
+      operationId: importProjectDatabase
+      tags: [Backups]
+      summary: Import a database backup
+      description: |
+        Accepts a database backup file (either via multipart/form-data with the 'file' field,
+        or as a raw binary body) and restores it into the project's database.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The database backup file to import.
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Database backup imported and restored successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
+              example:
+                status: success
+                message: Import completed successfully
+        '400':
+          description: Invalid input or failed to read upload body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not found or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Database instance is not running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   # ────────────────────────────────────────────────────────────
   # Postgres — Tables
   # ────────────────────────────────────────────────────────────
+
 
   /api/v1/projects/{id}/postgres/tables:
     parameters:
@@ -3420,8 +3690,26 @@ paths:
       security:
         - BearerAuth: []
       responses:
-        '204':
+        '200':
           description: Collection deleted successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            example: "orders"
+              example:
+                status: success
+                message: Collection deleted successfully
+                data:
+                  name: "orders"
         '400':
           description: Invalid project ID or collection name
           content:
@@ -3435,157 +3723,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/v1/projects/{id}/mongodb/collections/{collection}/documents:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: collection
-        in: path
-        required: true
-        schema:
-          type: string
-    get:
-      operationId: getMongoDocuments
-      tags: [MongoDB]
-      summary: Get documents from a MongoDB collection
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: filter
-          in: query
-          required: false
-          schema:
-            type: string
-          description: URL-encoded JSON filter applied to documents
-          example: "%7B%22status%22%3A%22pending%22%7D"
-      responses:
-        '200':
-          description: Documents retrieved successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIResponse'
-        '400':
-          description: Invalid project ID or collection name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    post:
-      operationId: insertMongoDocument
-      tags: [MongoDB]
-      summary: Insert a document into a MongoDB collection
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MongoInsertDocumentRequest'
-            example:
-              data:
-                orderId: "ORD-2026-0001"
-                customerEmail: "alice@example.com"
-                totalAmount: 129.99
-                currency: "USD"
-                status: "pending"
-                createdAt: "2026-03-14T09:30:00Z"
-      responses:
-        '201':
-          description: Document inserted successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIResponse'
-        '400':
-          description: Invalid request body, project ID or collection name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      operationId: updateMongoDocuments
-      tags: [MongoDB]
-      summary: Update documents in a MongoDB collection
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MongoUpdateDocumentsRequest'
-            example:
-              filter:
-                status: "pending"
-              update:
-                status: "shipped"
-                shippedAt: "2026-03-15T14:00:00Z"
-      responses:
-        '200':
-          description: Documents updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIResponse'
-        '400':
-          description: Invalid request body, project ID or collection name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      operationId: deleteMongoDocuments
-      tags: [MongoDB]
-      summary: Delete documents from a MongoDB collection
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: filter
-          in: query
-          required: false
-          schema:
-            type: string
-          description: URL-encoded JSON filter applied to documents; if omitted, all documents are deleted
-          example: "%7B%22status%22%3A%22cancelled%22%7D"
-      responses:
-        '204':
-          description: Documents deleted successfully
-        '400':
-          description: Invalid project ID or collection name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /api/v1/projects/{id}/mongodb/collections/{collection}/fields:
     parameters:
@@ -3660,50 +3797,8 @@ paths:
       security:
         - BearerAuth: []
       responses:
-        '204':
-          description: Field removed successfully
-        '400':
-          description: Invalid project ID, collection name, or field name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /api/v1/projects/{id}/mongodb/query/execute:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      operationId: executeMongoQuery
-      tags: [MongoDB]
-      summary: Execute a MongoDB query operation for a MongoDB project
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MongoQueryRequest'
-            example:
-              collection: "orders"
-              operation: "find"
-              filter:
-                status: "pending"
-              limit: 20
-      responses:
         '200':
-          description: Query executed successfully
+          description: Field removed successfully
           content:
             application/json:
               schema:
@@ -3714,79 +3809,28 @@ paths:
                       data:
                         type: object
                         properties:
-                          result:
-                            type: object
-                            description: Operation result (e.g. documents for find, modifiedCount for updateMany/deleteMany)
-                          execution_id:
-                            type: string
-                            format: uuid
-                          execution_time_ms:
+                          matched:
                             type: integer
+                            format: int64
+                            example: 15
+                          modified:
+                            type: integer
+                            format: int64
+                            example: 15
+              example:
+                status: success
+                message: Field removed successfully
+                data:
+                  matched: 15
+                  modified: 15
         '400':
-          description: Invalid request body or project ID
+          description: Invalid project ID, collection name, or field name
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Failed to execute query
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /api/v1/projects/{id}/mongodb/query/history:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    get:
-      operationId: getMongoQueryHistory
-      tags: [MongoDB]
-      summary: Get MongoDB query execution history for the authenticated user
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 30
-          description: Max number of history items to return (default 10, max 30)
-          example: 10
-      responses:
-        '200':
-          description: Query history
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/APIResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/QueryHistoryItem'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Failed to get query history
           content:
             application/json:
               schema:
