@@ -37,7 +37,7 @@ func RequireAdmin(userRepo *repositories.UserRepository) gin.HandlerFunc {
 		}
 
 		// Get authenticated user to check their role
-		authenticatedUser, err := userRepo.FindUserByID(authenticatedUserID)
+		authenticatedUser, err := userRepo.FindUserByID(c, authenticatedUserID)
 		if err != nil || authenticatedUser == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "User not found"})
 			return

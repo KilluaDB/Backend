@@ -43,7 +43,7 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.GetUser(userUUID)
+	user, err := h.userService.GetUser(c, userUUID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -66,7 +66,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.GetUser(userUUID)
+	user, err := h.userService.GetUser(c, userUUID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -111,7 +111,7 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.UpdateUser(userUUID, userUUID, req)
+	user, err := h.userService.UpdateUser(c, userUUID, userUUID, req)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -170,7 +170,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.UpdateUser(userUUID, authenticatedUUID, req)
+	user, err := h.userService.UpdateUser(c, userUUID, authenticatedUUID, req)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -215,7 +215,7 @@ func (h *UserHandler) DeleteMe(c *gin.Context) {
 		return
 	}
 
-	err := h.userService.DeleteUser(userUUID, userUUID)
+	err := h.userService.DeleteUser(c, userUUID, userUUID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -274,7 +274,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	err = h.userService.DeleteUser(userUUID, authenticatedUUID)
+	err = h.userService.DeleteUser(c, userUUID, authenticatedUUID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			responses.Fail(c, http.StatusNotFound, err, "User not found")
@@ -295,7 +295,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 
 // ListUsers handles GET /api/v1/users
 func (h *UserHandler) ListUsers(c *gin.Context) {
-	users, err := h.userService.GetAllUsers()
+	users, err := h.userService.GetAllUsers(c)
 	if err != nil {
 		responses.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve users")
 		return

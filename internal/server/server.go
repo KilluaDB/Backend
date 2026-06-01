@@ -4,10 +4,6 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/handlers"
-	mongodbhandler "backend/internal/mongodb/handler"
-	mongoinfra "backend/internal/mongodb/infra"
-	mongodbrepo "backend/internal/mongodb/repository"
-	mongosvc "backend/internal/mongodb/service"
 	pghandler "backend/internal/postgres/handler"
 	pginfra "backend/internal/postgres/infra"
 	postgresrepo "backend/internal/postgres/repository"
@@ -34,7 +30,6 @@ type Server struct {
 }
 
 var pgInstanceManager *pginfra.PostgresConnectionManager
-var mongoInstanceManager *mongoinfra.MongoConnectionManager
 
 func NewServer() *http.Server {
 	// Validate required environment variables
@@ -134,14 +129,6 @@ func NewServer() *http.Server {
 	dashboardHandler := pghandler.NewDashboardHandler(dashOverviewSvc, dashMetricsSvc)
 	postgresHandler := pghandler.NewPostgresHandler(tableHandler, schemaHandler, pgQueryHandler, dashboardHandler, textToSqlHandler)
 
-	// Wire Mongo manager like Postgres: use the same InstanceDsnService as a DSNProvider.
-	mongoManager := mongoinfra.NewMongoConnectionManager(dsnService)
-	mongoInstanceManager = mongoManager
-	mongoCollectionRepo := mongodbrepo.NewCollectionRepositoryWithManager(mongoManager)
-	mongoCollectionService := mongosvc.NewCollectionService(mongoCollectionRepo)
-	mongoCollectionHandler := mongodbhandler.NewCollectionHandler(mongoCollectionService)
-	mongodbHandler := mongodbhandler.NewMongoDBHandler(mongoCollectionHandler)
-
 	// Initialize Gin router (custom logger skips /health to avoid health-check log noise)
 	router := gin.New()
 	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
@@ -159,7 +146,7 @@ func NewServer() *http.Server {
 	}))
 
 	// Register all routes
-	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongodbHandler)
+	routes.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler)
 	// Create and configure the HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
