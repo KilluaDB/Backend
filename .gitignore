@@ -33,3 +33,5 @@ main
 .DS_Store
 
 bin/
+
+pgproxy
