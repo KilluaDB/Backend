@@ -171,6 +171,55 @@ func (h *ProjectHandler) ListProjects(ctx *gin.Context) {
 	responses.Success(ctx, http.StatusOK, list, "Projects retrieved successfully")
 }
 
+// GetProjectAccess handles GET /api/v1/projects/:id/access
+// Returns the external connection string for direct DB access via Traefik TCP SNI.
+func (h *ProjectHandler) GetProjectAccess(ctx *gin.Context) {
+	userID, exists := ctx.Get("userId")
+	if !exists {
+		responses.Fail(ctx, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+
+	projectID := ctx.Param("id")
+
+	userIDStr := ""
+	switch v := userID.(type) {
+	case uuid.UUID:
+		userIDStr = v.String()
+	case string:
+		userIDStr = v
+	default:
+		userIDStr = fmt.Sprintf("%v", v)
+	}
+
+	info, err := h.projectService.GetExternalConnectionInfo(ctx, projectID, userIDStr)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrExternalAccessNotConfigured):
+			responses.Fail(ctx, http.StatusServiceUnavailable, err, "External database access is not configured on this server")
+		case errors.Is(err, services.ErrProjectNotAccessible),
+			errors.Is(err, services.ErrProjectNotFound),
+			errors.Is(err, services.ErrInvalidProjectID),
+			errors.Is(err, services.ErrInvalidUserID):
+			responses.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
+		case errors.Is(err, services.ErrNoRunningInstance):
+			responses.Fail(ctx, http.StatusConflict, err, "Database is not running yet")
+		default:
+			responses.Fail(ctx, http.StatusInternalServerError, err, "Failed to retrieve connection info")
+		}
+		return
+	}
+
+	responses.Success(ctx, http.StatusOK, gin.H{
+		"connection_string": info.ConnectionString,
+		"host":              info.Host,
+		"port":              info.Port,
+		"database":          info.Database,
+		"username":          info.Username,
+		"password":          info.Password,
+	}, "Connection info retrieved successfully")
+}
+
 // DeleteProject handles DELETE /api/v1/projects/:id
 func (h *ProjectHandler) DeleteProject(ctx *gin.Context) {
 	// Get user ID from context (set by auth middleware)

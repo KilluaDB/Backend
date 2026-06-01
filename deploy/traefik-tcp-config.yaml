@@ -1,0 +1,18 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      postgres:
+        port: 5432
+        expose: true
+        exposedPort: 5432
+        protocol: TCP
+      mongodb:
+        port: 27017
+        expose: true
+        exposedPort: 27017
+        protocol: TCP

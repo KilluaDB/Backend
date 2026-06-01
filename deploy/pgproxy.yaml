@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgproxy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgproxy
+  template:
+    metadata:
+      labels:
+        app: pgproxy
+    spec:
+      serviceAccountName: backend
+      containers:
+        - name: pgproxy
+          image: backend-api:latest
+          imagePullPolicy: Never
+          command: ["/app/pgproxy"]
+          ports:
+            - containerPort: 5432
+          env:
+            - name: PG_NAMESPACE
+              value: "postgres-instances"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgproxy
+  namespace: default
+spec:
+  selector:
+    app: pgproxy
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: pgproxy
+  namespace: default
+spec:
+  entryPoints:
+    - postgres
+  routes:
+    - match: HostSNI(`*`)
+      services:
+        - name: pgproxy
+          port: 5432

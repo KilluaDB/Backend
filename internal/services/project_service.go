@@ -29,6 +29,7 @@ type ProjectService struct {
 	provisioner          *OperatorProvisioner
 	postgresTableService *service.TableService
 	poolEvicter          ProjectPoolEvicter
+	dsnService           *InstanceDsnService
 }
 
 type ProjectPoolEvicter interface {
@@ -46,6 +47,7 @@ func NewProjectService(
 		provisioner:          provisioner,
 		postgresTableService: postgresTableService,
 		poolEvicter:          poolEvicter,
+		dsnService:           NewInstanceDsnService(projectRepo, provisioner),
 	}
 }
 
@@ -234,4 +236,17 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(ctx context.Context, project
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
 	return nil
+}
+
+// GetExternalConnectionInfo returns the external connection string for a user's database.
+func (s *ProjectService) GetExternalConnectionInfo(ctx context.Context, projectID, userID string) (*ExternalConnectionInfo, error) {
+	projectUUID, err := utils.ParseUUID(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectID, err)
+	}
+	userUUID, err := utils.ParseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidUserID, err)
+	}
+	return s.dsnService.GetExternalConnectionInfo(ctx, userUUID, projectUUID)
 }

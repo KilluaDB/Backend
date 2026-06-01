@@ -22,6 +22,7 @@ func (r *ProjectRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		projects.POST("", r.handler.CreateProject)
 		projects.GET("", r.handler.ListProjects)
 		projects.GET("/:id", r.handler.GetProject)
+		projects.GET("/:id/access", r.handler.GetProjectAccess)
 		projects.DELETE("/:id", r.handler.DeleteProject)
 	}
 }

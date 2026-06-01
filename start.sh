@@ -92,6 +92,21 @@ deploy_backend() {
     print_success "Backend deployed"
 }
 
+# ─── Deploy pgproxy ───────────────────────────────────────────────────────────
+# PostgreSQL SNI routing proxy for external DB access. Runs the /pgproxy binary
+# from the same backend-api image, so it relies on build_image having imported
+# the freshly built image into k3d first. The Deployment, Service and the
+# HostSNI(*) IngressRouteTCP all live in deploy/pgproxy.yaml. The Traefik
+# `postgres` entrypoint it routes through is created by scripts/k3s-local-setup.sh
+# (deploy/traefik-tcp-config.yaml).
+deploy_pgproxy() {
+    kubectl apply -f deploy/pgproxy.yaml
+
+    kubectl rollout restart deployment/pgproxy -n default
+    kubectl rollout status  deployment/pgproxy -n default --timeout=120s
+    print_success "pgproxy deployed (external DB access via Traefik :5432)"
+}
+
 # ─── Port-forward ─────────────────────────────────────────────────────────────
 PF_PID=""
 
@@ -138,6 +153,7 @@ main() {
     deploy_meta_dbs
     build_image
     deploy_backend
+    deploy_pgproxy
     start_port_forward
     stream_logs
 }

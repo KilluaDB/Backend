@@ -78,7 +78,10 @@ if k3d_cluster_exists; then
   fi
 else
   info "No k3d cluster named '${CLUSTER_NAME}' (kubectl context may be stale). Creating cluster..."
-  k3d cluster create "${CLUSTER_NAME}" --wait --timeout 5m
+  k3d cluster create "${CLUSTER_NAME}" \
+    --port "5432:5432/tcp@loadbalancer" \
+    --port "27017:27017/tcp@loadbalancer" \
+    --wait --timeout 5m
 fi
 
 if ! kubectl config get-contexts "${K3D_CONTEXT}" >/dev/null 2>&1; then
@@ -110,6 +113,7 @@ helm repo update cnpg
 
 info "Installing CloudNativePG operator in postgres-operator (cluster-wide watch; instances in postgres-instances)..."
 helm upgrade --install cnpg cnpg/cloudnative-pg \
+  --version 0.21.6 \
   --namespace postgres-operator \
   --create-namespace \
   --set config.clusterWide=true \
@@ -156,6 +160,12 @@ fi
 if [ -f deploy/rbac.yaml ]; then
   info "Applying backend RBAC (postgres-instances, mongodb-instances)..."
   kubectl apply -f deploy/rbac.yaml || warn "Backend RBAC apply failed"
+fi
+
+# Traefik TCP entrypoints for external DB access (postgres:5432, mongodb:27017)
+if [ -f deploy/traefik-tcp-config.yaml ]; then
+  info "Applying Traefik TCP entrypoints config..."
+  kubectl apply -f deploy/traefik-tcp-config.yaml || warn "Traefik TCP config apply failed"
 fi
 if [ -f deploy/mongodb-operator-mongodb-instances-rbac.yaml ]; then
   info "Applying MongoDB operator RBAC (mongodb-instances only)..."

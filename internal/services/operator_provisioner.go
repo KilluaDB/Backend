@@ -51,10 +51,17 @@ import (
 // Do not decrease numShards after deployment — it reshuffles project→namespace
 // mapping and loses cluster references.
 
+// ExternalAccess holds the external hostname and port for direct DB access via Traefik TCP SNI.
+type ExternalAccess struct {
+	Hostname string // e.g. db-abc123def456.postgres.db.example.com
+	Port     int    // 5432 or 27017
+}
+
 // ProvisionResult holds connection info and resource ref after successful provisioning.
 type ProvisionResult struct {
-	DSN         string // postgresql://user:pass@host:5432/app?sslmode=disable
-	ResourceRef string // namespace/name for deletion
+	DSN            string          // postgresql://user:pass@host:5432/app?sslmode=require
+	ResourceRef    string          // namespace/name for deletion
+	ExternalAccess *ExternalAccess // nil if EXTERNAL_DB_DOMAIN not set
 }
 
 const (
@@ -70,6 +77,10 @@ type OperatorProvisioner struct {
 	core              kubernetes.Interface
 	cnpgGVR           schema.GroupVersionResource
 	mongoGVR          schema.GroupVersionResource
+	ingressRouteTCPGVR schema.GroupVersionResource
+	externalDomain    string // EXTERNAL_DB_DOMAIN env; empty = no external access
+	postgresExtPort   int    // POSTGRES_EXTERNAL_PORT (default 5432)
+	mongoExtPort      int    // MONGO_EXTERNAL_PORT (default 27017)
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
@@ -117,13 +128,30 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 		return nil, fmt.Errorf("core client: %w", err)
 	}
 
+	postgresExtPort := 5432
+	mongoExtPort := 27017
+	if v := os.Getenv("POSTGRES_EXTERNAL_PORT"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &postgresExtPort); n != 1 || err != nil {
+			postgresExtPort = 5432
+		}
+	}
+	if v := os.Getenv("MONGO_EXTERNAL_PORT"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &mongoExtPort); n != 1 || err != nil {
+			mongoExtPort = 27017
+		}
+	}
+
 	return &OperatorProvisioner{
-		postgresNamespace: postgresNS,
-		mongoNamespace:    mongoNS,
-		dynamic:           dyn,
-		core:              core,
-		cnpgGVR:           schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
-		mongoGVR:          schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
+		postgresNamespace:  postgresNS,
+		mongoNamespace:     mongoNS,
+		dynamic:            dyn,
+		core:               core,
+		cnpgGVR:            schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
+		mongoGVR:           schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
+		ingressRouteTCPGVR: schema.GroupVersionResource{Group: "traefik.containo.us", Version: "v1alpha1", Resource: "ingressroutetcps"},
+		externalDomain:     os.Getenv("EXTERNAL_DB_DOMAIN"),
+		postgresExtPort:    postgresExtPort,
+		mongoExtPort:       mongoExtPort,
 	}, nil
 }
 
@@ -141,9 +169,9 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 	}
 	switch dbKind {
 	case "postgresql":
-		return p.createPostgresCluster(ctx, name, cpu, memoryMB, storageGB)
+		return p.createPostgresCluster(ctx, projectID, name, cpu, memoryMB, storageGB)
 	case "mongodb":
-		return p.createMongoDBCluster(ctx, name, cpu, memoryMB, storageGB)
+		return p.createMongoDBCluster(ctx, projectID, name, cpu, memoryMB, storageGB)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
@@ -167,6 +195,7 @@ func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.
 // DeleteInstance deletes the K8s resource (Cluster or MongoDBCommunity) identified by resourceRef (namespace/name).
 func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid.UUID, dbType string) error {
 	name := p.ClusterNameForProject(projectID)
+	_ = p.deleteIngressRouteTCP(ctx, projectID, dbType)
 	switch dbType {
 	case "postgres", "postgresql":
 		err := p.dynamic.Resource(p.cnpgGVR).Namespace(p.postgresNamespace).Delete(ctx, name, metav1.DeleteOptions{})
@@ -191,7 +220,7 @@ func (p *OperatorProvisioner) ClusterNameForProject(projectID uuid.UUID) string 
 	return fmt.Sprintf("db-%s", strings.ReplaceAll(projectID.String(), "-", ""))
 }
 
-func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
 	ns := p.postgresNamespace
 	cluster := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -247,7 +276,21 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, name st
 		return nil, fmt.Errorf("postgres cluster not ready: %w", err)
 	}
 
-	return p.getPostgresConnection(ctx, ns, name)
+	result, err := p.getPostgresConnection(ctx, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	if p.externalDomain != "" {
+		if routeErr := p.createIngressRouteTCP(ctx, projectID, "postgresql"); routeErr != nil {
+			log.Printf("Warning: failed to create IngressRouteTCP for %s: %v", name, routeErr)
+		} else {
+			result.ExternalAccess = &ExternalAccess{
+				Hostname: p.ExternalHostname(projectID, "postgresql"),
+				Port:     p.postgresExtPort,
+			}
+		}
+	}
+	return result, nil
 }
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
@@ -291,7 +334,7 @@ func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespa
 	}, nil
 }
 
-func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
+func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int) (*ProvisionResult, error) {
 	ns := p.mongoNamespace
 	password, err := utils.GeneratePasswordBase64(48)
 	if err != nil {
@@ -397,7 +440,21 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, name str
 		return nil, fmt.Errorf("mongodb not ready: %w", err)
 	}
 
-	return p.getMongoConnection(ctx, ns, name)
+	result, err := p.getMongoConnection(ctx, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	if p.externalDomain != "" {
+		if routeErr := p.createIngressRouteTCP(ctx, projectID, "mongodb"); routeErr != nil {
+			log.Printf("Warning: failed to create IngressRouteTCP for %s: %v", name, routeErr)
+		} else {
+			result.ExternalAccess = &ExternalAccess{
+				Hostname: p.ExternalHostname(projectID, "mongodb"),
+				Port:     p.mongoExtPort,
+			}
+		}
+	}
+	return result, nil
 }
 func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
@@ -445,4 +502,112 @@ func (p *OperatorProvisioner) tierResources(tier string) (float64, float64, int,
 	default:
 		return 0, 0, 0, fmt.Errorf("unknown tier: %s", tier)
 	}
+}
+
+// HasExternalAccess reports whether Traefik TCP SNI routing is configured.
+func (p *OperatorProvisioner) HasExternalAccess() bool {
+	return p.externalDomain != ""
+}
+
+// ExternalHostname returns the deterministic external hostname for a project's DB.
+// Uses the full 32-char UUID (no dashes) so pgproxy can derive the CNPG service name
+// without any storage or K8s API lookup.
+// Format: db-{32hexchars}.postgres.{domain} or ...mongodb...
+func (p *OperatorProvisioner) ExternalHostname(projectID uuid.UUID, dbType string) string {
+	nodashes := strings.ReplaceAll(projectID.String(), "-", "")
+	sub := "postgres"
+	if dbType == "mongodb" {
+		sub = "mongodb"
+	}
+	return fmt.Sprintf("db-%s.%s.%s", nodashes, sub, p.externalDomain)
+}
+
+// ExternalPort returns the external port for the given DB type.
+func (p *OperatorProvisioner) ExternalPort(dbType string) int {
+	if dbType == "mongodb" {
+		return p.mongoExtPort
+	}
+	return p.postgresExtPort
+}
+
+func (p *OperatorProvisioner) createIngressRouteTCP(ctx context.Context, projectID uuid.UUID, dbType string) error {
+	if p.externalDomain == "" {
+		return nil
+	}
+	// PostgreSQL is handled by the pgproxy catch-all (HostSNI(*)).
+	// Only MongoDB needs per-project IngressRouteTCP (TLS passthrough works for MongoDB).
+	switch dbType {
+	case "postgres", "postgresql":
+		return nil
+	}
+
+	name := p.ClusterNameForProject(projectID)
+	hostname := p.ExternalHostname(projectID, dbType)
+
+	var ns, entryPoint, svcName string
+	var port int64
+	switch dbType {
+	case "mongodb":
+		ns = p.mongoNamespace
+		entryPoint = "mongodb"
+		svcName = name + "-svc"
+		port = 27017
+	default:
+		return fmt.Errorf("unsupported db type: %s", dbType)
+	}
+
+	route := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.containo.us/v1alpha1",
+			"kind":       "IngressRouteTCP",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": ns,
+			},
+			"spec": map[string]interface{}{
+				"entryPoints": []interface{}{entryPoint},
+				"routes": []interface{}{
+					map[string]interface{}{
+						"match": fmt.Sprintf("HostSNI(`%s`)", hostname),
+						"services": []interface{}{
+							map[string]interface{}{
+								"name": svcName,
+								"port": port,
+							},
+						},
+					},
+				},
+				"tls": map[string]interface{}{
+					"passthrough": true,
+				},
+			},
+		},
+	}
+
+	_, err := p.dynamic.Resource(p.ingressRouteTCPGVR).Namespace(ns).Create(ctx, route, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("create IngressRouteTCP: %w", err)
+	}
+	return nil
+}
+
+func (p *OperatorProvisioner) deleteIngressRouteTCP(ctx context.Context, projectID uuid.UUID, dbType string) error {
+	if p.externalDomain == "" {
+		return nil
+	}
+	name := p.ClusterNameForProject(projectID)
+	var ns string
+	switch dbType {
+	case "postgres", "postgresql":
+		ns = p.postgresNamespace
+	case "mongodb":
+		ns = p.mongoNamespace
+	default:
+		return fmt.Errorf("unsupported db type: %s", dbType)
+	}
+	err := p.dynamic.Resource(p.ingressRouteTCPGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete IngressRouteTCP: %w", err)
+	}
+	return nil
 }
