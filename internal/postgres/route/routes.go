@@ -57,7 +57,9 @@ func (r *PostgresRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		// Schema
 		postgres.GET("/schemas", h.Schema.ListSchemas)
 		postgres.GET("/schema/visualize", h.Schema.VisualizeSchema)
+		postgres.POST("/schema/from-text", h.Schema.GenerateSchemaFromText)
 		postgres.POST("/schema/from-text/stream", h.Schema.GenerateSchemaFromTextStream)
+		postgres.POST("/schema/approve", h.Schema.ApplySchemaDDL)
 
 		// Query
 		postgres.POST("/query/execute", h.Query.ExecuteQuery)

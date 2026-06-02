@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // Sentinel errors for schema operations so handlers can return proper HTTP status.
 var (
 	ErrInvalidSchema = errors.New("invalid schema name")
+	ErrNoPendingDDL  = errors.New("no pending schema suggestion found or it has expired")
 )
 
 const (
@@ -27,12 +29,14 @@ const (
 
 type SchemaService struct {
 	instanceConn infra.InstanceConnectionService
+	redisClient  *redis.Client
 }
 
 // NewSchemaService creates a new SchemaService
-func NewSchemaService(instanceConn infra.InstanceConnectionService) *SchemaService {
+func NewSchemaService(instanceConn infra.InstanceConnectionService, redisClient *redis.Client) *SchemaService {
 	return &SchemaService{
 		instanceConn: instanceConn,
+		redisClient:  redisClient,
 	}
 }
 
@@ -352,4 +356,46 @@ func GenerateSchemaVisualization(ctx context.Context, schemaRepo *repository.Sch
 
 	mermaidDiagram := generateMermaid(tables, relationships)
 	return mermaidDiagram, nil
+}
+
+// CachePendingDDL securely caches the generated DDL in Redis under a project-scoped key for 1 hour.
+func (s *SchemaService) CachePendingDDL(ctx context.Context, projectID uuid.UUID, ddl string) error {
+	trimmed := strings.TrimSpace(ddl)
+	if trimmed == "" {
+		return nil
+	}
+	key := fmt.Sprintf("pending_schema:%s", projectID.String())
+	return s.redisClient.Set(ctx, key, trimmed, 1*time.Hour).Err()
+}
+
+// ApplyDDL executes the approved DDL (Data Definition Language) SQL cached in Redis on the project's database instance.
+func (s *SchemaService) ApplyDDL(ctx context.Context, userID, projectID uuid.UUID) error {
+	key := fmt.Sprintf("pending_schema:%s", projectID.String())
+	ddl, err := s.redisClient.Get(ctx, key).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return ErrNoPendingDDL
+		}
+		return fmt.Errorf("failed to retrieve pending DDL: %w", err)
+	}
+
+	trimmed := strings.TrimSpace(ddl)
+	if trimmed == "" {
+		return ErrNoPendingDDL
+	}
+
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection pool: %w", err)
+	}
+
+	// Exec executing full batch of DDL statements inside the transaction/session
+	_, err = pool.Exec(ctx, trimmed)
+	if err != nil {
+		return fmt.Errorf("failed to apply DDL: %w", err)
+	}
+
+	// Clear cache key on successful execution
+	_ = s.redisClient.Del(ctx, key)
+	return nil
 }

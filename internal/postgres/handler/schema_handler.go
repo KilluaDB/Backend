@@ -41,31 +41,21 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 		return
 	}
 
-	rawSchema := c.Query("schema")
-	if err := pgservice.ValidatePostgresSchemaName(rawSchema); err != nil {
-		pgFail(c, http.StatusBadRequest, err, err.Error())
-		return
-	}
-	schema := pgservice.PostgresSchema(rawSchema)
+	schema := c.DefaultQuery("schema", "public")
 
-	mermaidDiagram, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
+	mermaid, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
 	if err != nil {
-		switch {
-		case errors.Is(err, pgservice.ErrInvalidSchema):
-			pgFail(c, http.StatusBadRequest, err, "Invalid schema name")
-			return
-		case errors.Is(err, service.ErrProjectNotAccessible), errors.Is(err, service.ErrNoRunningInstance):
-			pgFail(c, http.StatusNotFound, err, "Project not found or database instance not ready")
-			return
-		default:
-			pgFail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
+		if errors.Is(err, service.ErrProjectNotFound) {
+			pgFail(c, http.StatusNotFound, err, "Project not found or not accessible")
 			return
 		}
+		pgFail(c, http.StatusInternalServerError, err, "Failed to visualize schema")
+		return
 	}
 
 	response.Success(c, http.StatusOK, gin.H{
-		"mermaid": mermaidDiagram,
 		"schema":  schema,
+		"mermaid": mermaid,
 	}, "Schema visualization generated successfully")
 }
 
@@ -103,16 +93,13 @@ type generateSchemaFromTextStreamRequest struct {
 }
 
 func schemaAIBaseURL() string {
-	base := strings.TrimSpace(os.Getenv("SCHEMA_AI_BASE_URL"))
-	if base == "" {
-		return "http://localhost:8090"
-	}
-	return strings.TrimRight(base, "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("SCHEMA_AI_BASE_URL")), "/")
 }
 
-// GenerateSchemaFromTextStream handles POST /api/v1/projects/:id/postgres/schema/from-text/stream
-// It proxies the local AI service SSE stream and passes events through to the client.
-func (h *SchemaHandler) GenerateSchemaFromTextStream(c *gin.Context) {
+// proxySchemaSSE validates auth/project, binds the request body, and proxies
+// an SSE stream from the upstream AI service at the given path suffix.
+// Both the real and mock stream handlers delegate to this helper.
+func (h *SchemaHandler) proxySchemaSSE(c *gin.Context, upstreamPath string) {
 	_, ok := utils.UserIDFromGin(c)
 	if !ok {
 		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
@@ -132,7 +119,12 @@ func (h *SchemaHandler) GenerateSchemaFromTextStream(c *gin.Context) {
 		reqBody.ModelName = "deepseek"
 	}
 
-	upstreamURL := schemaAIBaseURL() + "/schema/generate/stream/mock"
+	base := schemaAIBaseURL()
+	if base == "" {
+		pgFail(c, http.StatusServiceUnavailable, nil, "Schema AI service is not configured (SCHEMA_AI_BASE_URL)")
+		return
+	}
+	upstreamURL := base + upstreamPath
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		pgFail(c, http.StatusInternalServerError, err, "Failed to prepare request")
@@ -198,4 +190,142 @@ func (h *SchemaHandler) GenerateSchemaFromTextStream(c *gin.Context) {
 			return
 		}
 	}
+}
+
+// GenerateSchemaFromTextStream handles POST /api/v1/projects/:id/postgres/schema/from-text/stream
+// It proxies the real AI service SSE stream and passes events through to the client.
+func (h *SchemaHandler) GenerateSchemaFromTextStream(c *gin.Context) {
+	h.proxySchemaSSE(c, "/schema/generate/stream/mock")
+}
+
+// schemaGenerateResponse mirrors the AI service's SchemaGenerateResponse.
+type schemaGenerateResponse struct {
+	Success         bool                   `json:"success"`
+	Message         string                 `json:"message"`
+	Error           *string                `json:"error,omitempty"`
+	Mmd             *string                `json:"mmd,omitempty"`
+	MmdValid        *bool                  `json:"mmd_valid,omitempty"`
+	DBSchema        map[string]interface{} `json:"db_schema,omitempty"`
+	FullReport      *string                `json:"full_report,omitempty"`
+	DDL             *string                `json:"ddl,omitempty"`
+	IndexStatements *string                `json:"index_statements,omitempty"`
+	GenerationTime  *float64               `json:"generation_time,omitempty"`
+}
+
+// GenerateSchemaFromText handles POST /api/v1/projects/:id/postgres/schema/from-text
+// Non-streaming variant: proxies to the AI service's /schema/generate and returns
+// the full JSON response once the multi-agent pipeline completes.
+func (h *SchemaHandler) GenerateSchemaFromText(c *gin.Context) {
+	_, ok := utils.UserIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	if _, err := utils.ProjectIDFromGin(c); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	var reqBody generateSchemaFromTextStreamRequest
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(reqBody.ModelName) == "" {
+		reqBody.ModelName = "deepseek"
+	}
+
+	base := schemaAIBaseURL()
+	if base == "" {
+		pgFail(c, http.StatusServiceUnavailable, nil, "Schema AI service is not configured (SCHEMA_AI_BASE_URL)")
+		return
+	}
+
+	upstreamURL := base + "/schema/generate/mock"
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		pgFail(c, http.StatusInternalServerError, err, "Failed to prepare request")
+		return
+	}
+
+	upReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payload))
+	if err != nil {
+		pgFail(c, http.StatusInternalServerError, err, "Failed to create upstream request")
+		return
+	}
+	upReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Timeout: 5 * time.Minute, // LLM multi-agent pipeline can be slow
+	}
+
+	upResp, err := client.Do(upReq)
+	if err != nil {
+		pgFail(c, http.StatusBadGateway, err, "Schema generator service is unavailable")
+		return
+	}
+	defer upResp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(upResp.Body, 10*1024*1024)) // 10 MB cap
+	if err != nil {
+		pgFail(c, http.StatusBadGateway, err, "Failed to read response from schema generator")
+		return
+	}
+
+	if upResp.StatusCode < 200 || upResp.StatusCode >= 300 {
+		pgFail(c, http.StatusBadGateway, errors.New(string(body)), "Schema generator service returned an error")
+		return
+	}
+
+	var result schemaGenerateResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		pgFail(c, http.StatusBadGateway, err, "Invalid response from schema generator")
+		return
+	}
+
+	if !result.Success {
+		errMsg := "Schema generation failed"
+		if result.Error != nil {
+			errMsg = *result.Error
+		}
+		pgFail(c, http.StatusUnprocessableEntity, errors.New(errMsg), result.Message)
+		return
+	}
+
+	projectUUID, _ := utils.ProjectIDFromGin(c)
+	if result.DDL != nil {
+		// Cache the pending DDL securely in Redis for the project
+		_ = h.schemaService.CachePendingDDL(c.Request.Context(), projectUUID, *result.DDL)
+	}
+
+	response.Success(c, http.StatusOK, gin.H{
+		"mermaid": result.Mmd,
+	}, result.Message)
+}
+
+// ApplySchemaDDL handles POST /api/v1/projects/:id/postgres/schema/approve
+// It executes the user-approved DDL securely cached in Redis directly on their postgres database.
+// No body request is needed, which prevents raw SQL injection tampering from client payloads.
+func (h *SchemaHandler) ApplySchemaDDL(c *gin.Context) {
+	userID, ok := utils.UserIDFromGin(c)
+	if !ok {
+		pgFail(c, http.StatusUnauthorized, nil, "Unauthorized")
+		return
+	}
+	projectID, err := utils.ProjectIDFromGin(c)
+	if err != nil {
+		pgFail(c, http.StatusBadRequest, err, "Invalid projectId format")
+		return
+	}
+
+	if err := h.schemaService.ApplyDDL(c.Request.Context(), userID, projectID); err != nil {
+		if errors.Is(err, pgservice.ErrNoPendingDDL) {
+			pgFail(c, http.StatusNotFound, err, "No pending schema suggestion found or it has expired")
+			return
+		}
+		pgFail(c, http.StatusInternalServerError, err, "Failed to apply generated DDL schema")
+		return
+	}
+
+	response.Success(c, http.StatusCreated, nil, "Schema suggestion applied and executed successfully")
 }

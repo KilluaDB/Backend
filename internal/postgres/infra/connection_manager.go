@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -102,6 +103,9 @@ func (s *PostgresConnectionManager) connectPostgresPool(ctx context.Context, dsn
 	if err != nil {
 		return nil, fmt.Errorf("parse instance postgres DSN: %w", err)
 	}
+
+
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
 	if config.MaxConns == 0 {
 		config.MaxConns = 5

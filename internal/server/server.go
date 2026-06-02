@@ -127,7 +127,7 @@ func NewServer() *http.Server {
 	//	mongoQueryService := mongosvc.NewQueryService(instanceConn, mongoDBDriver, mongoQueryHistoryRepo)
 	//	mongoQueryHandler := mongodbhandler.NewQueryHandler(mongoQueryService)
 
-	schemaService := postgressvc.NewSchemaService(instanceConn)
+	schemaService := postgressvc.NewSchemaService(instanceConn, redisClient)
 	schemaHandler := pghandler.NewSchemaHandler(schemaService)
 	tableHandler := pghandler.NewTableHandler(tableService)
 	dashOverviewSvc := postgressvc.NewDashboardOverviewService(instanceConn, projectRepo)
