@@ -1,0 +1,219 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+
+	mongoservice "backend/internal/mongodb/service"
+	"backend/internal/mongodb/model"
+	"backend/internal/response"
+
+	"github.com/gin-gonic/gin"
+)
+
+// DocumentHandler handles MongoDB document endpoints.
+type DocumentHandler struct {
+	documentService *mongoservice.DocumentService
+}
+
+func NewDocumentHandler(documentService *mongoservice.DocumentService) *DocumentHandler {
+	return &DocumentHandler{documentService: documentService}
+}
+
+func (h *DocumentHandler) QueryDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection name is required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.QueryDocumentsRequest
+	// filter/sort are optional so we allow an empty body
+	_ = c.ShouldBindJSON(&req)
+
+	result, err := h.documentService.QueryDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, result, "Documents retrieved successfully")
+}
+
+func (h *DocumentHandler) GetDocument(c *gin.Context) {
+	collection := c.Param("collection")
+	id := c.Param("id")
+	if collection == "" || id == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection and document ID are required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	doc, err := h.documentService.GetDocumentByID(c.Request.Context(), userUUID, projectUUID, collection, id)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, doc, "Document retrieved successfully")
+}
+
+func (h *DocumentHandler) GetDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == ""{
+		response.Fail(c, http.StatusBadRequest, nil, "Collection and document ID are required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.GetDocumentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.documentService.GetDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, result, "Document retrieved successfully")
+}
+
+func (h *DocumentHandler) InsertDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection name is required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.InsertDocumentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.documentService.InsertDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusCreated, result, "Documents inserted successfully")
+}
+
+func (h *DocumentHandler) UpdateDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection name is required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.UpdateDocumentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.documentService.UpdateDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, result, "Documents updated successfully")
+}
+
+func (h *DocumentHandler) DeleteDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection name is required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.DeleteDocumentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	result, err := h.documentService.DeleteDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, result, "Documents deleted successfully")
+}
+
+func (h *DocumentHandler) CountDocuments(c *gin.Context) {
+	collection := c.Param("collection")
+	if collection == "" {
+		response.Fail(c, http.StatusBadRequest, nil, "Collection name is required")
+		return
+	}
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.CountDocumentsRequest
+	_ = c.ShouldBindJSON(&req)
+
+	result, err := h.documentService.CountDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
+	if err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, result, "Documents counted successfully")
+}
+
+func handleDocumentError(c *gin.Context, err error) { 
+	switch {
+		case errors.Is(err, mongoservice.ErrDocumentNotFound):
+			response.Fail(c, http.StatusNotFound, err, "Document not found")
+		case errors.Is(err, mongoservice.ErrInvalidDocumentID):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid document ID")
+		case errors.Is(err, mongoservice.ErrInvalidFilter):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid filter")
+		case errors.Is(err, mongoservice.ErrInvalidUpdate):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid update")
+		case errors.Is(err, mongoservice.ErrInvalidCollectionName):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
+		case failMongoInstanceError(c, err):
+			return
+		default:
+			response.Fail(c, http.StatusBadRequest, err, "Operation failed")
+	}
+}
