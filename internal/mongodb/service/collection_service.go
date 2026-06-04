@@ -139,6 +139,9 @@ func validateFieldName(name string) error {
 	if trimmed == "" || strings.HasPrefix(trimmed, "$") || strings.ContainsRune(trimmed, '\x00') {
 		return ErrInvalidFieldName
 	}
+	if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
+		return ErrInvalidCollectionName
+   }
 	return nil
 }
 
