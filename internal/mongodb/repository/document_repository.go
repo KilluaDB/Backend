@@ -18,7 +18,7 @@ func (r *DocumentRepository) InsertDocuments(ctx context.Context, db *mongo.Data
 	return db.Collection(collection).InsertMany(ctx, docs)
 }
 
-func (r *DocumentRepository) FindDocumentByID(ctx context.Context, db *mongo.Database, collection string, id bson.ObjectID) (map[string]interface{}, error) {
+func (r *DocumentRepository) FindDocumentByID(ctx context.Context, db *mongo.Database, collection string, id interface{}) (map[string]interface{}, error) {
 	filter := bson.M{"_id": id}
 
 	result := db.Collection(collection).FindOne(ctx, filter)
