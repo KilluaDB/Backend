@@ -67,3 +67,7 @@ type GetDocumentsResult struct {
    Page      int64                    `json:"page"`
    Limit     int64                    `json:"limit"`
 }
+
+type UpdateFieldRequest struct {
+	Value interface{} `json:"value"`
+}

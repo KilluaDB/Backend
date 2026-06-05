@@ -47,7 +47,7 @@ func (h *DocumentHandler) QueryDocuments(c *gin.Context) {
 
 func (h *DocumentHandler) GetDocument(c *gin.Context) {
 	collection := c.Param("collection")
-	id := c.Param("id")
+	id := c.Param("docId")
 	if collection == "" || id == "" {
 		response.Fail(c, http.StatusBadRequest, nil, "Collection and document ID are required")
 		return
@@ -197,6 +197,65 @@ func (h *DocumentHandler) CountDocuments(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, result, "Documents counted successfully")
+}
+
+func (h *DocumentHandler) UpdateDocumentField(c *gin.Context) {
+	collection := c.Param("collection")
+	id := c.Param("docId")
+	field := c.Param("field")
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.UpdateFieldRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	if err := h.documentService.UpdateDocumentField(c.Request.Context(), userUUID, projectUUID, collection, id, field, req.Value); err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, nil, "Field updated successfully")
+}
+
+func (h *DocumentHandler) DeleteDocumentField(c *gin.Context) {
+	collection := c.Param("collection")
+	id := c.Param("docId")
+	field := c.Param("field")
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	if err := h.documentService.DeleteDocumentField(c.Request.Context(), userUUID, projectUUID, collection, id, field); err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, nil, "Field deleted successfully")
+}
+
+func (h *DocumentHandler) DeleteDocument(c *gin.Context) {
+	collection := c.Param("collection")
+	id := c.Param("docId")
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	if err := h.documentService.DeleteDocument(c.Request.Context(), userUUID, projectUUID, collection, id); err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+	
+	response.Success(c, http.StatusOK, nil, "Document deleted successfully")
 }
 
 func handleDocumentError(c *gin.Context, err error) { 
