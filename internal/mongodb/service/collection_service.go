@@ -43,7 +43,23 @@ func (s *CollectionService) ListCollections(ctx context.Context, userID, project
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.ListCollections(ctx, db)
+
+	rawCollections, err := s.repo.ListCollections(ctx, db);
+	if err != nil {
+		return nil, err
+	}
+
+	filteredCollections := make([]string, 0)
+	for _, col := range rawCollections {
+		trimmed := strings.TrimSpace(col)
+
+		if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
+			continue
+		}
+
+		filteredCollections = append(filteredCollections, col)
+	}
+	return filteredCollections, nil
 }
 
 func (s *CollectionService) CreateCollection(ctx context.Context, userID, projectID uuid.UUID, name string) error {
@@ -139,6 +155,9 @@ func validateFieldName(name string) error {
 	if trimmed == "" || strings.HasPrefix(trimmed, "$") || strings.ContainsRune(trimmed, '\x00') {
 		return ErrInvalidFieldName
 	}
+	if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
+		return ErrInvalidCollectionName
+   }
 	return nil
 }
 
