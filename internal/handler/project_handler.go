@@ -174,14 +174,20 @@ func (h *ProjectHandler) GetProjectAccess(ctx *gin.Context) {
 		return
 	}
 
-	response.Success(ctx, http.StatusOK, gin.H{
+	data := gin.H{
 		"connection_string": info.ConnectionString,
 		"host":              info.Host,
 		"port":              info.Port,
 		"database":          info.Database,
 		"username":          info.Username,
 		"password":          info.Password,
-	}, "Connection info retrieved successfully")
+	}
+	if info.PostgRESTURL != "" {
+		data["postgrest_url"] = info.PostgRESTURL
+		data["api_key"] = info.APIKey
+		data["jwt_secret"] = info.JWTSecret
+	}
+	response.Success(ctx, http.StatusOK, data, "Connection info retrieved successfully")
 }
 
 // DeleteProject handles DELETE /api/v1/projects/:id

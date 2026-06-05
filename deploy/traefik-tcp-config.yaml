@@ -8,13 +8,13 @@ spec:
     ports:
       postgres:
         port: 5432
-        expose: 
-           default:true
+        expose:
+          default: true
         exposedPort: 5432
         protocol: TCP
       mongodb:
         port: 27017
         expose:
-           default:true
+          default: true
         exposedPort: 27017
         protocol: TCP

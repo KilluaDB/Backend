@@ -24,6 +24,9 @@ type ExternalConnectionInfo struct {
 	Database         string
 	Username         string
 	Password         string
+	PostgRESTURL     string // PostgREST API URL (empty for MongoDB)
+	APIKey           string // pre-signed JWT with role=app_user (empty for MongoDB)
+	JWTSecret        string // raw JWT secret for signing custom tokens (empty for MongoDB)
 }
 
 // InstanceDSNService resolves credentials from K8s.
@@ -117,6 +120,12 @@ func (s *InstanceDSNService) GetExternalConnectionInfo(ctx context.Context, user
 		connStr = fmt.Sprintf("postgresql://%s@%s:%d/%s?sslmode=require", userInfo.String(), host, port, database)
 	}
 
+	var postgrestURL, postgrestAPIKey, postgrestJWTSecret string
+	if project.DBType != "mongodb" {
+		postgrestURL = s.provisioner.PostgRESTURL(projectID)
+		postgrestJWTSecret, postgrestAPIKey, _ = s.provisioner.GetPostgRESTCredentials(ctx, projectID)
+	}
+
 	return &ExternalConnectionInfo{
 		ConnectionString: connStr,
 		Host:             host,
@@ -124,5 +133,8 @@ func (s *InstanceDSNService) GetExternalConnectionInfo(ctx context.Context, user
 		Database:         database,
 		Username:         username,
 		Password:         password,
+		PostgRESTURL:     postgrestURL,
+		APIKey:           postgrestAPIKey,
+		JWTSecret:        postgrestJWTSecret,
 	}, nil
 }
