@@ -80,8 +80,8 @@ func (h *DocumentHandler) GetDocuments(c *gin.Context) {
 	}
 
 	var req model.GetDocumentsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid query parameters")
 		return
 	}
 
