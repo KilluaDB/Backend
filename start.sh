@@ -85,7 +85,8 @@ deploy_backend() {
     kubectl apply \
         -f deploy/rbac.yaml \
         -f deploy/deployment.yaml \
-        -f deploy/service.yaml
+        -f deploy/service.yaml \
+        -f deploy/ingress.yaml
 
     kubectl rollout restart deployment/backend -n default
     kubectl rollout status  deployment/backend -n default --timeout=120s

@@ -106,12 +106,18 @@ func handle(client net.Conn) {
 		return
 	}
 
-	backendAddr := fmt.Sprintf("db-%s-rw.%s.svc.cluster.local:5432", projectID, pgNamespace)
-	upstream, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
+	projectNamespace := "pg-" + projectID
+	backendAddr := fmt.Sprintf("db-%s-rw.%s.svc.cluster.local:5432", projectID, projectNamespace)
+	upstream, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
 	if err != nil {
-		log.Printf("dial %s: %v", backendAddr, err)
-		writeError(client, "cannot connect to project database")
-		return
+		legacyAddr := fmt.Sprintf("db-%s-rw.%s.svc.cluster.local:5432", projectID, pgNamespace)
+		backendAddr = legacyAddr
+		upstream, err = net.DialTimeout("tcp", backendAddr, 5*time.Second)
+		if err != nil {
+			log.Printf("dial %s: %v", backendAddr, err)
+			writeError(client, "cannot connect to project database")
+			return
+		}
 	}
 	defer upstream.Close()
 

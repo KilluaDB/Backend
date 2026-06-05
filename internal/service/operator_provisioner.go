@@ -61,6 +61,9 @@ type ProvisionResult struct {
 	DSN            string          // postgresql://user:pass@host:5432/app?sslmode=require
 	ResourceRef    string          // namespace/name for deletion
 	ExternalAccess *ExternalAccess // nil if EXTERNAL_DB_DOMAIN not set
+	PostgRESTURL   string          // e.g. https://rest-abc123.api.example.com (empty for MongoDB)
+	JWTSecret      string          // PostgREST JWT secret (empty for MongoDB)
+	APIKey         string          // pre-signed JWT with role=app_user (empty for MongoDB)
 }
 
 const (
@@ -179,11 +182,24 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 // GetConnection returns live connection info for an existing database instance.
 // Credentials are read from the operator-managed secret at call time and never stored.
 // name is derived deterministically from projectID so no resource ref needs to be persisted.
+//
+// For PostgreSQL: tries the per-project namespace (pg-<id>) first, then falls back
+// to the legacy shared namespace (postgres-instances) for pre-migration projects.
 func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.UUID, dbType string) (*ProvisionResult, error) {
 	name := p.ClusterNameForProject(projectID)
 	switch dbType {
 	case "postgres", "postgresql":
-		return p.getPostgresConnection(ctx, p.postgresNamespace, name)
+		// Try per-project namespace first.
+		ns := p.NamespaceForProject(projectID)
+		result, err := p.getPostgresConnection(ctx, ns, name)
+		if err != nil {
+			// Fallback: try legacy shared namespace for pre-migration projects.
+			result, err = p.getPostgresConnection(ctx, p.postgresNamespace, name)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
 	case "mongodb":
 		return p.getMongoConnection(ctx, p.mongoNamespace, name)
 	default:
@@ -192,12 +208,26 @@ func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.
 }
 
 // DeleteInstance deletes the K8s resource (Cluster or MongoDBCommunity) identified by resourceRef (namespace/name).
+//
+// For PostgreSQL: deletes the entire per-project namespace (cascading all resources).
+// Falls back to legacy shared namespace deletion for pre-migration projects.
 func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid.UUID, dbType string) error {
 	name := p.ClusterNameForProject(projectID)
 	_ = p.deleteIngressRouteTCP(ctx, projectID, dbType)
 	switch dbType {
 	case "postgres", "postgresql":
-		err := p.dynamic.Resource(p.cnpgGVR).Namespace(p.postgresNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+		// Try deleting the per-project namespace (cascades all resources: CNPG, PostgREST, secrets, etc.).
+		ns := p.NamespaceForProject(projectID)
+		err := p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
+		if err == nil {
+			log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+			return nil
+		}
+		if !errors.IsNotFound(err) {
+			return fmt.Errorf("delete project namespace %s: %w", ns, err)
+		}
+		// Fallback: legacy shared namespace.
+		err = p.dynamic.Resource(p.cnpgGVR).Namespace(p.postgresNamespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {
 			return fmt.Errorf("delete postgres cluster: %w", err)
 		}
@@ -220,14 +250,27 @@ func (p *OperatorProvisioner) ClusterNameForProject(projectID uuid.UUID) string 
 }
 
 func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int, password string) (*ProvisionResult, error) {
-	ns := p.postgresNamespace
+	ns := p.NamespaceForProject(projectID)
 
-	// Create the app user secret with the provided password
+	// 1. Create per-project namespace.
+	nsObj := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   ns,
+			Labels: p.projectLabels(projectID),
+		},
+	}
+	if _, err := p.core.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
+		return nil, fmt.Errorf("create project namespace %s: %w", ns, err)
+	}
+	log.Printf("Created namespace %s for project %s", ns, projectID)
+
+	// 2. Create the app user secret with the provided password.
 	appSecretName := name + "-app"
 	appSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appSecretName,
 			Namespace: ns,
+			Labels:    p.projectLabels(projectID),
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
@@ -242,6 +285,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 		return nil, fmt.Errorf("create app credential secret: %w", err)
 	}
 
+	// 3. Create CNPG Cluster in the per-project namespace.
 	cluster := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "postgresql.cnpg.io/v1",
@@ -249,9 +293,11 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": ns,
+				"labels":    p.projectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
 				"instances": 1,
+				"enableSuperuserAccess": true,
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
 						"database": postgresAppDBName,
@@ -295,14 +341,35 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 
 	log.Printf("Created PostgreSQL cluster %s/%s, waiting for ready", ns, name)
 	if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
-		_ = p.dynamic.Resource(p.cnpgGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		// Clean up: delete the entire namespace on failure.
+		_ = p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
 		return nil, fmt.Errorf("postgres cluster not ready: %w", err)
 	}
 
+	// 4. Get connection info.
 	result, err := p.getPostgresConnection(ctx, ns, name)
 	if err != nil {
 		return nil, err
 	}
+
+	// 5. Setup PostgREST database roles (connects as superuser).
+	authPassword, roleErr := p.SetupPostgRESTRoles(ctx, ns, name)
+	if roleErr != nil {
+		log.Printf("Warning: failed to setup PostgREST roles for project %s: %v", projectID, roleErr)
+	} else {
+		// 6. Deploy PostgREST (Deployment + Service + Secret + IngressRoute).
+		pgHost := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, ns)
+		jwtSecret, apiKey, pgrestErr := p.CreatePostgRESTResources(ctx, projectID, ns, pgHost, authPassword)
+		if pgrestErr != nil {
+			log.Printf("Warning: failed to deploy PostgREST for project %s: %v", projectID, pgrestErr)
+		} else {
+			result.PostgRESTURL = p.PostgRESTURL(projectID)
+			result.JWTSecret = jwtSecret
+			result.APIKey = apiKey
+		}
+	}
+
+	// 7. External access (Traefik TCP for direct Postgres connections).
 	if p.externalDomain != "" {
 		if routeErr := p.createIngressRouteTCP(ctx, projectID, "postgresql"); routeErr != nil {
 			log.Printf("Warning: failed to create IngressRouteTCP for %s: %v", name, routeErr)

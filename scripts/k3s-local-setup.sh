@@ -79,6 +79,8 @@ if k3d_cluster_exists; then
 else
   info "No k3d cluster named '${CLUSTER_NAME}' (kubectl context may be stale). Creating cluster..."
   k3d cluster create "${CLUSTER_NAME}" \
+    --port "80:80@loadbalancer" \
+    --port "443:443@loadbalancer" \
     --port "5432:5432/tcp@loadbalancer" \
     --port "27017:27017/tcp@loadbalancer" \
     --wait --timeout 5m
