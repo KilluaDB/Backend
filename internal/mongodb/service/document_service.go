@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 
-	
 	"backend/internal/mongodb/infra"
 	"backend/internal/mongodb/model"
 	"backend/internal/mongodb/repository"
-	
+
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -74,10 +74,7 @@ func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID
 		return nil, err
 	}
 
-	objectID, err := parseObjectID(id)
-	if err != nil {
-		return nil, ErrInvalidDocumentID
-	}
+	objectID := parseDocumentID(id)
 
 	db, err := s.conn.GetDatabase(ctx, userID, projectID)
 	if err != nil {
@@ -86,11 +83,14 @@ func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID
 
 	doc, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
 	if err != nil {
+		log.Printf("DEBUG find by string id err: %v", err)
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrDocumentNotFound
 		}
 		return nil, err
 	}
+	log.Printf("DEBUG existing doc: %+v", doc)
+	log.Printf("DEBUG _id type: %T value: %v", doc["_id"], doc["_id"])
 
 	return doc, nil
 }
@@ -223,6 +223,7 @@ func (s *DocumentService) CountDocuments(ctx context.Context, userID, projectID 
 	return &model.CountDocumentsResult{Count: count}, nil
 }
 
+// Bulk
 func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.UpdateDocumentsRequest) (*model.UpdateDocumentsResult, error) {
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
@@ -261,6 +262,7 @@ func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID
 	}, nil
 }
 
+// Bulk
 func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.DeleteDocumentsRequest) (*model.DeleteDocumentsResult, error) {
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
@@ -285,8 +287,111 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 	return &model.DeleteDocumentsResult{Deleted: result.DeletedCount}, nil
 }
 
-func parseObjectID(id string) (bson.ObjectID, error) {
-	return bson.ObjectIDFromHex(id)
+func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string, value interface{}) error {
+	if err := validateCollectionName(collection); err != nil {
+		return err
+	}
+
+	if err := validateFieldName(field); err != nil {
+		return ErrInvalidFieldName
+	}
+
+	objectID := parseDocumentID(id)
+
+	db, err := s.conn.GetDatabase(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("DEBUG db: %s collection: %s", db.Name(), collection)
+
+	filter := bson.D{{Key: "_id", Value: objectID}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: value}}}}
+
+	log.Printf("DEBUG filter: %+v", filter)
+	log.Printf("DEBUG update: %+v", update)
+
+	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("DEBUG matched: %d modified: %d", result.MatchedCount, result.ModifiedCount)
+
+	if result.MatchedCount == 0 {
+		return ErrDocumentNotFound
+	}
+
+	return nil
+}
+
+func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string) error {
+	if err := validateCollectionName(collection); err != nil {
+		return err
+	}
+
+	if err := validateFieldName(field); err != nil {
+		return ErrInvalidFieldName
+	}
+
+	objectID := parseDocumentID(id)
+
+	db, err := s.conn.GetDatabase(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	filter := bson.D{{Key: "_id", Value: objectID}}
+	update := bson.D{{Key: "$unset", Value: bson.D{{Key: field, Value: ""}}}}
+
+	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrDocumentNotFound
+	}
+
+	return nil
+}
+
+func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID uuid.UUID, collection, id string) error {
+	if err := validateCollectionName(collection); err != nil {
+		return err
+	}
+
+	objectID := parseDocumentID(id)
+
+	db, err := s.conn.GetDatabase(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	filter := bson.D{{Key: "_id", Value: objectID}}
+
+	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, true)
+	if err != nil {
+		return err
+	}
+
+	if result.DeletedCount == 0 {
+		return ErrDocumentNotFound
+	}
+
+	return nil
+}
+
+func parseDocumentID(id string) interface{} {
+	if oid, err := bson.ObjectIDFromHex(id); err == nil {
+		log.Printf("parsed as ObjectID: %v", oid)
+		return oid
+	}
+	log.Printf("parsed as string: %v", id)
+	// return id // fall back to string _id
+	// Try ObjectID first only if you know your app inserts with ObjectID
+	// For string _ids, just return as-is
+	return id
 }
 
 // converts a map from the client into a bson.D preserving key order.
