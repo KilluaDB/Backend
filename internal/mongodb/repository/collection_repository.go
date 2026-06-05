@@ -16,7 +16,8 @@ func NewCollectionRepository() *CollectionRepository {
 }
 
 func (r *CollectionRepository) ListCollections(ctx context.Context, db *mongo.Database) ([]string, error) {
-	return db.ListCollectionNames(ctx, bson.D{})
+	filter := bson.D{{Key: "name", Value: bson.D{{Key: "$regex", Value: "^(?!system\\.|system_metrics$)"}}}}
+	return db.ListCollectionNames(ctx, filter)
 }
 
 func (r *CollectionRepository) CreateCollection(ctx context.Context, db *mongo.Database, name string) error {

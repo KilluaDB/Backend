@@ -146,7 +146,11 @@ func NewServer() *http.Server {
 	mongoDocRepo := mongorepo.NewDocumentRepository()
 	mongoDocService := mongosvc.NewDocumentService(mongoConn, mongoDocRepo)
 	mongoDocHandler := mongohandler.NewDocumentHandler(mongoDocService)
-	mongoHandler := mongohandler.NewMongoHandler(mongoColHandler, mongoDocHandler)
+
+	// MongoDB Dashboard metrics
+	mongoDashboardService := mongosvc.NewMongoDashboardMetricsService(mongoConn, mongoColRepo, mongoDocRepo)
+	mongoDashboardHandler := mongohandler.NewMongoDashboardHandler(mongoDashboardService)
+	mongoHandler := mongohandler.NewMongoHandler(mongoColHandler, mongoDocHandler, mongoDashboardHandler)
 	
 	// Backup (export/import) handler — dispatches by project.DBType internally.
 	backupService := backup.NewService(projectRepo, dsnService)

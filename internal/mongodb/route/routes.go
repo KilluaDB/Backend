@@ -28,6 +28,9 @@ func (r *MongoRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	mongodb.Use(middleware.RequireMongoProject(r.projectRepo))
 	h := r.mongo
 	{
+		// Metrics
+		mongodb.GET("/dashboard/metrics", h.Dashboard.GetMetrics)
+
 		// Collections
 		mongodb.GET("/collections", h.Collection.ListCollections)
 		mongodb.POST("/collections", h.Collection.CreateCollection)

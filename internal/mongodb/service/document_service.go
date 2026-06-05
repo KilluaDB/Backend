@@ -63,6 +63,12 @@ func (s *DocumentService) InsertDocuments(ctx context.Context, userID, projectID
 		return nil, err
 	}
 
+	count := int64(len(result.InsertedIDs))
+	
+	if count > 0 {
+		_ = s.repo.IncrementCounter(ctx, db, "insert", count)
+	}
+
 	return &model.InsertDocumentResult{
 		InsertedCount: int64(len(result.InsertedIDs)),
 		InsertedIDs: result.InsertedIDs,
@@ -308,19 +314,16 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 	filter := bson.D{{Key: "_id", Value: objectID}}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: value}}}}
 
-	log.Printf("DEBUG filter: %+v", filter)
-	log.Printf("DEBUG update: %+v", update)
-
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("DEBUG matched: %d modified: %d", result.MatchedCount, result.ModifiedCount)
-
 	if result.MatchedCount == 0 {
 		return ErrDocumentNotFound
 	}
+
+	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
 
 	return nil
 }
@@ -353,6 +356,8 @@ func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, proje
 		return ErrDocumentNotFound
 	}
 
+	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
+
 	return nil
 }
 
@@ -378,6 +383,8 @@ func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID 
 	if result.DeletedCount == 0 {
 		return ErrDocumentNotFound
 	}
+
+	_ = s.repo.IncrementCounter(ctx, db, "delete", result.DeletedCount)
 
 	return nil
 }

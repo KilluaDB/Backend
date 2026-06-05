@@ -44,21 +44,7 @@ func (s *CollectionService) ListCollections(ctx context.Context, userID, project
 		return nil, err
 	}
 
-	rawCollections, err := s.repo.ListCollections(ctx, db);
-	if err != nil {
-		return nil, err
-	}
-
-	filteredCollections := make([]string, 0)
-	for _, col := range rawCollections {
-		trimmed := strings.TrimSpace(col)
-
-		if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
-			continue
-		}
-
-		filteredCollections = append(filteredCollections, col)
-	}
+	filteredCollections, err := s.repo.ListCollections(ctx, db);	
 	return filteredCollections, nil
 }
 
