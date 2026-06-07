@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"reflect"
 	"strings"
+	"time"
 
 	"backend/internal/mongodb/infra"
 	"backend/internal/mongodb/model"
@@ -26,6 +29,9 @@ var (
 	ErrInvalidFilter       = errors.New("invalid filter")
 	ErrInvalidUpdate       = errors.New("invalid update")
 	ErrInvalidDocumentID   = errors.New("invalid document id")
+	ErrInvalidFieldType	  = errors.New("invalid field type")
+	ErrTypeMismatch		  = errors.New("value type does not match existing field type")
+	ErrFieldAlreadyExists  = errors.New("field already exists")
 )
 
 const defaultPageLimit int64 = 20
@@ -95,8 +101,6 @@ func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID
 		}
 		return nil, err
 	}
-	log.Printf("DEBUG existing doc: %+v", doc)
-	log.Printf("DEBUG _id type: %T value: %v", doc["_id"], doc["_id"])
 
 	return doc, nil
 }
@@ -293,7 +297,7 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 	return &model.DeleteDocumentsResult{Deleted: result.DeletedCount}, nil
 }
 
-func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string, value interface{}) error {
+func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string, req model.UpdateFieldRequest) error {
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
@@ -309,10 +313,86 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 		return err
 	}
 
-	log.Printf("DEBUG db: %s collection: %s", db.Name(), collection)
+	existing, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
+    if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return ErrDocumentNotFound
+		}
+		return err
+	}
+
+	var finalValue interface{}
+
+	if req.Type != "" {
+		// client explicitly wants a type change
+		finalValue, err = castToType(req.Value, req.Type)
+		if err != nil {
+			return ErrInvalidFieldType
+		}
+	} else {
+		// no type change requested — validate new value matches existing type
+		if existingValue, exists := existing[field]; exists {
+			if err := validateSameType(existingValue, req.Value); err != nil {
+				return err
+			}
+		}
+		finalValue = req.Value
+	}
 
 	filter := bson.D{{Key: "_id", Value: objectID}}
-	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: value}}}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: finalValue}}}}
+
+	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrDocumentNotFound
+	}
+
+	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
+
+	return nil
+}
+
+func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id string, req model.AddDocumentFieldRequest) error {
+	if err := validateCollectionName(collection); err != nil {
+		return err
+	}
+
+	if err := validateFieldName(req.Field); err != nil {
+		return ErrInvalidFieldName
+	}
+
+	castedValue, err := castToType(req.Value, req.Type)
+	if err != nil {
+		return ErrInvalidFieldType
+	}
+
+	objectID := parseDocumentID(id)
+
+	db, err := s.conn.GetDatabase(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	existing, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
+    if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return ErrDocumentNotFound
+		}
+		return err
+	}
+
+	if !strings.Contains(req.Field, ".") {
+		if _, exists := existing[req.Field]; exists {
+			return ErrFieldAlreadyExists
+		}
+	}
+	
+	filter := bson.D{{Key: "_id", Value: objectID}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: req.Field, Value: castedValue}}}}
 
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
 	if err != nil {
@@ -432,4 +512,67 @@ func validateUpdateOperators(update map[string]interface{}) error {
 		}
 	}
 	return nil
+}
+
+func validateSameType(existing, incoming interface{}) error {
+	if existing == nil || incoming == nil {
+		return nil
+	}
+
+	existingType := reflect.TypeOf(existing).Kind()
+	incomingType := reflect.TypeOf(incoming).Kind()
+
+	// JSON numbers all come in as float64 — treat int-like floats as compatible
+	if (existingType == reflect.Int32 || existingType == reflect.Int64) && incomingType == reflect.Float64 {
+		return nil
+	}
+
+	if existingType != incomingType {
+		return ErrTypeMismatch
+	}
+
+	return nil
+}
+
+func castToType(value interface{}, targetType string) (interface{}, error) {
+	switch strings.ToLower(targetType) {
+		case "string":
+        return fmt.Sprintf("%v", value), nil
+		case "int32":
+			return int32(toInt64(value)), nil
+		case "int64":
+			return toInt64(value), nil
+		case "double":
+			return toFloat64(value), nil
+		case "boolean":
+			b, ok := value.(bool)
+			if !ok {
+				return nil, errors.New("value must be true or false")
+			}
+			return b, nil
+		case "date":
+			s, ok := value.(string)
+			if !ok {
+				return nil, errors.New("date must be an RFC3339 string")
+			}
+			return time.Parse(time.RFC3339, s)
+		case "null":
+			return nil, nil
+		case "object":
+			m, ok := value.(map[string]interface{})
+			if !ok {
+				return nil, errors.New("value must be a JSON object")
+			}
+			return m, nil
+		case "array":
+			a, ok := value.([]interface{})
+			if !ok {
+				return nil, errors.New("value must be a JSON array")
+			}
+			return a, nil
+		case "":
+			return value, nil
+		default:
+			return nil, errors.New("unsupported type: " + targetType)
+	}
 }
