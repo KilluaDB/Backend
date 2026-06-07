@@ -215,12 +215,35 @@ func (h *DocumentHandler) UpdateDocumentField(c *gin.Context) {
 		return
 	}
 
-	if err := h.documentService.UpdateDocumentField(c.Request.Context(), userUUID, projectUUID, collection, id, field, req.Value); err != nil {
+	if err := h.documentService.UpdateDocumentField(c.Request.Context(), userUUID, projectUUID, collection, id, field, req); err != nil {
 		handleDocumentError(c, err)
 		return
 	}
 
 	response.Success(c, http.StatusOK, nil, "Field updated successfully")
+}
+
+func (h *DocumentHandler) AddDocumentField(c *gin.Context) {
+	collection := c.Param("collection")
+	id := c.Param("docId")
+
+	userUUID, projectUUID, ok := requireUserAndProject(c)
+	if !ok {
+		return
+	}
+
+	var req model.AddDocumentFieldRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
+
+	if err := h.documentService.AddDocumentField(c.Request.Context(), userUUID, projectUUID, collection, id, req); err != nil {
+		handleDocumentError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, nil, "Field added successfully")
 }
 
 func (h *DocumentHandler) DeleteDocumentField(c *gin.Context) {
@@ -270,6 +293,12 @@ func handleDocumentError(c *gin.Context, err error) {
 			response.Fail(c, http.StatusBadRequest, err, "Invalid update")
 		case errors.Is(err, mongoservice.ErrInvalidCollectionName):
 			response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
+		case errors.Is(err, mongoservice.ErrTypeMismatch):
+    		response.Fail(c, http.StatusBadRequest, err, "Value type does not match existing field type")
+		case errors.Is(err, mongoservice.ErrInvalidFieldType):
+    		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
+		case errors.As(err, mongoservice.ErrFieldAlreadyExists):
+			response.Fail(c, http.StatusBadRequest, err, "Field alreay exists")
 		case failMongoInstanceError(c, err):
 			return
 		default:
