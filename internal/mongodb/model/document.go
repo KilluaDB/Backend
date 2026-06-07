@@ -70,4 +70,11 @@ type GetDocumentsResult struct {
 
 type UpdateFieldRequest struct {
 	Value interface{} `json:"value"`
+	Type  string      `json:"type,omitempty"` // "string", "int", "double", "boolean", "date", "null"
+}
+
+type AddDocumentFieldRequest struct {
+	Field string      `json:"field" binding:"required"`
+	Value interface{} `json:"value"`
+	Type  string      `json:"type" binding:"required"`
 }
