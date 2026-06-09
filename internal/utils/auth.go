@@ -13,7 +13,7 @@ import (
 
 // Argon2id parameters – tuned for server-side use. You can adjust these if needed.
 const (
-	argonTime    uint32 = 1        // Number of iterations
+	argonTime    uint32 = 1         // Number of iterations
 	argonMemory  uint32 = 64 * 1024 // Memory in KiB (64 MiB)
 	argonThreads uint8  = 4         // Number of threads
 	argonKeyLen  uint32 = 32        // Length of the derived key
@@ -85,6 +85,6 @@ func GenerateStateOauthCookie() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	state := base64.URLEncoding.EncodeToString(b);
+	state := base64.URLEncoding.EncodeToString(b)
 	return state, nil
 }

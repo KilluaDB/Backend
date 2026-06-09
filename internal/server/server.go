@@ -1,10 +1,19 @@
 package server
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
 	"backend/internal/backup"
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/handler"
+	"backend/internal/middleware"
 	mongohandler "backend/internal/mongodb/handler"
 	mongoinfra "backend/internal/mongodb/infra"
 	mongorepo "backend/internal/mongodb/repository"
@@ -16,17 +25,15 @@ import (
 	"backend/internal/repository"
 	"backend/internal/route"
 	"backend/internal/service"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
+
+	"backend/internal/metrics"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Server struct {
@@ -141,7 +148,7 @@ func NewServer() *http.Server {
 	mongoColRepo := mongorepo.NewCollectionRepository()
 	mongoColService := mongosvc.NewCollectionService(mongoConn, mongoColRepo)
 	mongoColHandler := mongohandler.NewCollectionHandler(mongoColService)
-	
+
 	// MongoDB document management
 	mongoDocRepo := mongorepo.NewDocumentRepository()
 	mongoDocService := mongosvc.NewDocumentService(mongoConn, mongoDocRepo)
@@ -151,7 +158,7 @@ func NewServer() *http.Server {
 	mongoDashboardService := mongosvc.NewMongoDashboardMetricsService(mongoConn, mongoColRepo, mongoDocRepo)
 	mongoDashboardHandler := mongohandler.NewMongoDashboardHandler(mongoDashboardService)
 	mongoHandler := mongohandler.NewMongoHandler(mongoColHandler, mongoDocHandler, mongoDashboardHandler)
-	
+
 	// Backup (export/import) handler — dispatches by project.DBType internally.
 	backupService := backup.NewService(projectRepo, dsnService)
 	backupHandler := backup.NewHandler(backupService)
@@ -172,8 +179,23 @@ func NewServer() *http.Server {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	router.Use(middleware.MetricsMiddleware())
+
 	// Register all routes
 	route.RegisterRoutes(router, authHandler, googleAuthHandler, userHandler, userRepo, projectHandler, projectRepo, postgresHandler, mongoHandler, backupHandler)
+
+	// Prometheus metrics endpoint (served on separate port 9090)
+	prometheus.MustRegister(metrics.NewInstanceCollector(pool))
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(":9090", mux); err != nil {
+			log.Fatal("metrics server failed:", err)
+		}
+	}()
+	// Background metrics collector: periodically counts K8s CRDs for instance capacity tracking.
+	go provisioner.PeriodicMetricsCollector(context.Background(), 60*time.Second)
+
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
 		Handler:           router,
@@ -218,6 +240,6 @@ func validateRequiredEnvVars() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-	// K8s provisioner: DB_INSTANCES_NAMESPACE_POSTGRES, DB_INSTANCES_NAMESPACE_MONGO (optional), KUBECONFIG (optional)
+	// K8s provisioner: KUBECONFIG (optional)
 	return nil
 }

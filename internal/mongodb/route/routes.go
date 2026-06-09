@@ -48,7 +48,7 @@ func (r *MongoRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		mongodb.PATCH("/collections/:collection/documents/:docId/fields/:field", h.Document.UpdateDocumentField)
 		mongodb.POST("/collections/:collection/documents/:docId/fields", h.Document.AddDocumentField)
 		mongodb.DELETE("/collections/:collection/documents/:docId/fields/:field", h.Document.DeleteDocumentField)
-		
+
 		mongodb.GET("/collections/:collection/documents", h.Document.GetDocuments)
 		mongodb.POST("/collections/:collection/documents", h.Document.InsertDocuments)
 		mongodb.PATCH("/collections/:collection/documents", h.Document.UpdateDocuments)

@@ -9,6 +9,7 @@ Backend API for a DBaaS platform. Provisions PostgreSQL and MongoDB instances vi
 - **Meta-DB**: PostgreSQL (app database, migrations, project metadata) and Redis. When using `start.sh`, both run **in-cluster** in the `default` namespace ([deploy/postgres.yaml](deploy/postgres.yaml), [deploy/redis.yaml](deploy/redis.yaml)).
 - **Backend API**: Runs in `default` ([deploy/deployment.yaml](deploy/deployment.yaml), [deploy/service.yaml](deploy/service.yaml)). Uses the meta-DB and, via the Kubernetes client, provisions user DB instances in dedicated namespaces.
 - **User DB instances**: PostgreSQL via **CloudNativePG** in `postgres-instances`; MongoDB via **MongoDB Community Operator** in `mongodb-instances`. The backend creates/updates/deletes `Cluster` (postgresql.cnpg.io) and `MongoDBCommunity` resources and reads Secrets for connection strings ([internal/services/operator_provisioner.go](internal/services/operator_provisioner.go)).
+- **pgproxy**: A PostgreSQL SNI routing proxy ([cmd/pgproxy/main.go](cmd/pgproxy/main.go)) that routes incoming connections to the correct project instance. It peeks at the TLS ClientHello to extract SNI or uses the database field in plain connections, ensuring end-to-end TLS without termination.
 
 ```mermaid
 flowchart LR
@@ -17,6 +18,7 @@ flowchart LR
     Backend[Backend API]
     MetaPostgres[Meta Postgres]
     MetaRedis[Meta Redis]
+    Proxy[pgproxy]
   end
   subgraph postgres_operator_ns [postgres-operator]
     CNPG[CloudNativePG]
@@ -31,13 +33,25 @@ flowchart LR
     MongoOp[MongoDB Operator]
   end
   User --> Backend
+  User --> Proxy
   Backend --> MetaPostgres
   Backend --> MetaRedis
   Backend -->|"create/watch"| PGClusters
   Backend -->|"create/watch"| MongoCRs
+  Proxy -->|"route"| PGClusters
   CNPG -->|"watches"| PGClusters
   MongoOp -->|"watches"| MongoCRs
 ```
+
+---
+
+## Key Features
+
+- **Multi-Tenant DB Provisioning**: Automates PostgreSQL and MongoDB instance lifecycle via Kubernetes operators in isolated namespaces.
+- **Transparent PG Routing**: Uses `pgproxy` for SNI-based routing, allowing users to connect to their specific project DBs via a single endpoint.
+- **Streamed Backup & Restore**: Full-database export and import for PostgreSQL and MongoDB, streamed directly via HTTP to avoid local disk usage.
+- **AI-Powered Text-to-SQL**: Natural language interface for generating database schemas and SQL queries.
+- **OpenAPI Specification**: Full API documentation available in [openapi.yaml](openapi.yaml).
 
 ---
 

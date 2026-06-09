@@ -17,6 +17,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var sseClient = &http.Client{
+	Timeout: 0, // streaming
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DisableCompression:    true, // do not buffer/transform SSE
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+}
+
 type SchemaHandler struct {
 	schemaService *pgservice.SchemaService
 }
@@ -43,7 +52,7 @@ func (h *SchemaHandler) VisualizeSchema(c *gin.Context) {
 
 	schema := c.DefaultQuery("schema", "public")
 
-	mermaid, err := h.schemaService.VisualizeSchema(userUUID, projectUUID, schema)
+	mermaid, err := h.schemaService.VisualizeSchema(c.Request.Context(), userUUID, projectUUID, schema)
 	if err != nil {
 		if errors.Is(err, service.ErrProjectNotFound) {
 			pgFail(c, http.StatusNotFound, err, "Project not found or not accessible")
@@ -139,16 +148,7 @@ func (h *SchemaHandler) proxySchemaSSE(c *gin.Context, upstreamPath string) {
 	upReq.Header.Set("Content-Type", "application/json")
 	upReq.Header.Set("Accept", "text/event-stream")
 
-	client := &http.Client{
-		Timeout: 0, // streaming
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DisableCompression:    true, // do not buffer/transform SSE
-			ResponseHeaderTimeout: 15 * time.Second,
-		},
-	}
-
-	upResp, err := client.Do(upReq)
+	upResp, err := sseClient.Do(upReq)
 	if err != nil {
 		pgFail(c, http.StatusBadGateway, err, "Schema generator service is unavailable")
 		return

@@ -51,10 +51,10 @@ type CreateTableRequest struct {
 
 // UpdateTableRequest is the request body for updating a table.
 type UpdateTableRequest struct {
-	Schema      string               `json:"schema"`
-	Table       string               `json:"table"`
-	Columns     []TableColumnDef     `json:"columns"`
-	ForeignKeys *TableForeignKeyDef  `json:"foreign_keys"`
+	Schema      string              `json:"schema"`
+	Table       string              `json:"table"`
+	Columns     []TableColumnDef    `json:"columns"`
+	ForeignKeys *TableForeignKeyDef `json:"foreign_keys"`
 }
 
 // DeleteTableRequest is the request body for deleting a table.

@@ -1,22 +1,9 @@
-# MongoDB operator: permission only in mongodb-instances (watchNamespace=mongodb-instances).
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: mongodb-database
-  namespace: mongodb-instances
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: mongodb-kubernetes-database-pods
-  namespace: mongodb-instances
----
+# MongoDB operator ClusterRole for cluster-wide operation.
+# Required because the operator now watches all namespaces (WATCH_NAMESPACE="").
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: mongodb-operator-mongodb-instances
-  namespace: mongodb-instances
+  name: mongodb-operator-cluster
 rules:
   - apiGroups: [""]
     resources: ["pods", "services", "secrets", "configmaps", "serviceaccounts", "persistentvolumeclaims", "events"]
@@ -30,45 +17,19 @@ rules:
   - apiGroups: ["mongodbcommunity.mongodb.com"]
     resources: ["mongodbcommunity", "mongodbcommunity/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: mongodb-operator-mongodb-instances
-  namespace: mongodb-instances
+  name: mongodb-operator-cluster
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: mongodb-operator-mongodb-instances
+  kind: ClusterRole
+  name: mongodb-operator-cluster
 subjects:
   - kind: ServiceAccount
     name: mongodb-kubernetes-operator
     namespace: mongodb-operator
----
-# Role for pods running as mongodb-database (MongoDB/agent need to read secrets and configmaps)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: mongodb-database-pods
-  namespace: mongodb-instances
-rules:
-  - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "patch", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: mongodb-database-pods
-  namespace: mongodb-instances
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: mongodb-database-pods
-subjects:
-  - kind: ServiceAccount
-    name: mongodb-database
-    namespace: mongodb-instances

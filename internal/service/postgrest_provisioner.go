@@ -368,15 +368,7 @@ func (p *OperatorProvisioner) GetPostgRESTCredentials(ctx context.Context, proje
 
 	secret, err := p.core.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
-		// Fall back to legacy namespace. Log a warning — if provisioning succeeded,
-		// the secret should always be in the per-project namespace. A hit here
-		// indicates a provisioning bug or manual migration that should be investigated.
-		log.Printf("Warning: PostgREST secret %s not found in namespace %s, falling back to legacy namespace %s (project=%s)",
-			secretName, ns, p.postgresNamespace, projectID)
-		secret, err = p.core.CoreV1().Secrets(p.postgresNamespace).Get(ctx, secretName, metav1.GetOptions{})
-		if err != nil {
-			return "", "", fmt.Errorf("get PostgREST secret: %w", err)
-		}
+		return "", "", fmt.Errorf("get PostgREST secret: %w", err)
 	}
 
 	return string(secret.Data["jwt-secret"]), string(secret.Data["api-key"]), nil

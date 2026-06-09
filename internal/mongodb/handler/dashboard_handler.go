@@ -30,6 +30,6 @@ func (h *MongoDashboardHandler) GetMetrics(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, err, "Failed to retrieve metrics")
 		return
 	}
-	
+
 	response.Success(c, http.StatusOK, metrics, "Metrics retrieved successfully")
 }

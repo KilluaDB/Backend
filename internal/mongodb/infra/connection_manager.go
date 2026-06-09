@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"backend/internal/metrics"
+
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -71,6 +73,7 @@ func (s *MongoConnectionManager) acquireCachedClient(ctx context.Context, projec
 		cancel()
 		if pingErr == nil {
 			s.clientMu.Unlock()
+			s.emitClientMetrics()
 			return entry.client, entry.dbName, nil
 		}
 
@@ -97,6 +100,7 @@ func (s *MongoConnectionManager) connectAndCacheClient(ctx context.Context, proj
 	if existing, ok := s.clients[projectID]; ok {
 		if existing.dsn == dsn && existing.client != nil {
 			_ = client.Disconnect(context.Background())
+			s.emitClientMetrics()
 			return existing.client, existing.dbName, nil
 		}
 		if existing.client != nil {
@@ -104,6 +108,7 @@ func (s *MongoConnectionManager) connectAndCacheClient(ctx context.Context, proj
 		}
 	}
 	s.clients[projectID] = cachedMongoClient{dsn: dsn, dbName: name, client: client}
+	s.emitClientMetrics()
 	return client, name, nil
 }
 
@@ -111,15 +116,19 @@ func (s *MongoConnectionManager) connectMongoClient(ctx context.Context, dsn str
 	// mongo-driver v2: Connect does not accept context; use Ping to verify.
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "connect").Inc()
 		return nil, fmt.Errorf("connect instance mongo: %w", err)
 	}
 
+	pingStart := time.Now()
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx, nil); err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "ping").Inc()
 		_ = client.Disconnect(context.Background())
 		return nil, fmt.Errorf("ping instance mongo: %w", err)
 	}
+	metrics.MongoPingLatency.Observe(time.Since(pingStart).Seconds())
 
 	return client, nil
 }
@@ -136,6 +145,7 @@ func (s *MongoConnectionManager) EvictProject(projectID uuid.UUID) {
 	if ok && entry.client != nil {
 		_ = entry.client.Disconnect(context.Background())
 	}
+	s.emitClientMetrics()
 }
 
 // CloseAll closes and clears all cached project clients.
@@ -153,6 +163,14 @@ func (s *MongoConnectionManager) CloseAll() {
 			_ = entry.client.Disconnect(context.Background())
 		}
 	}
+	s.emitClientMetrics()
+}
+
+func (s *MongoConnectionManager) emitClientMetrics() {
+	s.clientMu.Lock()
+	count := len(s.clients)
+	s.clientMu.Unlock()
+	metrics.MongoClientCount.Set(float64(count))
 }
 
 func databaseNameFromDSN(dsn string) string {

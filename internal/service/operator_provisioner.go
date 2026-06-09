@@ -10,8 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/metrics"
+
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,27 +28,19 @@ import (
 
 // TODO(sharding): Namespace sharding for scale
 //
-// Current design puts all clusters in a single namespace (postgres-instances,
-// mongodb-instances). This works up to ~10,000 clusters but degrades beyond
-// that due to Kubernetes API server list/watch cost, CNPG operator reconcile
-// load, and etcd hotspots.
+// Current design uses per-project namespaces (pg-<uuid>, mongo-<uuid>).
+// This works up to ~10,000 clusters but degrades beyond that due to
+// Kubernetes API server list/watch cost, operator reconcile load, and
+// etcd hotspots.
 //
 // When needed, shard by first byte of project UUID:
 //
 //	shard = projectID[0] % numShards
-//	namespace = "postgres-instances-{shard}"
+//	namespace = "pg-{shard}-{projectID[:8]}"
 //
 // This is deterministic — no shard mapping needs to be stored. UUID v4 first
 // byte is uniformly random so shards fill evenly. Start with 16 shards
 // (~6,250 clusters/shard at 100k total), design for 256.
-//
-// Changes required:
-//   - Replace postgresNamespace/mongoNamespace fields with prefix + numShards
-//   - Add postgresNamespaceForProject(projectID) / mongoNamespaceForProject(projectID)
-//   - Pre-create shard namespaces in cluster setup script
-//   - Configure CNPG operator to watch all shard namespaces via label selector
-//   - For migration: check shard namespace first, fall back to legacy namespace
-//     until all existing clusters are recreated
 //
 // Do not decrease numShards after deployment — it reshuffles project→namespace
 // mapping and loses cluster references.
@@ -73,31 +68,19 @@ const (
 
 // OperatorProvisioner creates and deletes DB instances via Kubernetes operators (CloudNativePG, MongoDB).
 type OperatorProvisioner struct {
-	postgresNamespace string
-	mongoNamespace    string
-	dynamic           dynamic.Interface
-	core              kubernetes.Interface
-	cnpgGVR           schema.GroupVersionResource
-	mongoGVR          schema.GroupVersionResource
+	dynamic            dynamic.Interface
+	core               kubernetes.Interface
+	cnpgGVR            schema.GroupVersionResource
+	mongoGVR           schema.GroupVersionResource
 	ingressRouteTCPGVR schema.GroupVersionResource
-	externalDomain    string // EXTERNAL_DB_DOMAIN env; empty = no external access
-	postgresExtPort   int    // POSTGRES_EXTERNAL_PORT (default 5432)
-	mongoExtPort      int    // MONGO_EXTERNAL_PORT (default 27017)
+	externalDomain     string // EXTERNAL_DB_DOMAIN env; empty = no external access
+	postgresExtPort    int    // POSTGRES_EXTERNAL_PORT (default 5432)
+	mongoExtPort       int    // MONGO_EXTERNAL_PORT (default 27017)
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
 // or kubeconfig (KUBECONFIG env or ~/.kube/config) when running locally.
-// Postgres and MongoDB instances use separate namespaces (env: DB_INSTANCES_NAMESPACE_POSTGRES, DB_INSTANCES_NAMESPACE_MONGO).
 func NewOperatorProvisioner() (*OperatorProvisioner, error) {
-	postgresNS := os.Getenv("DB_INSTANCES_NAMESPACE_POSTGRES")
-	if postgresNS == "" {
-		postgresNS = "postgres-instances"
-	}
-	mongoNS := os.Getenv("DB_INSTANCES_NAMESPACE_MONGO")
-	if mongoNS == "" {
-		mongoNS = "mongodb-instances"
-	}
-
 	config, err := rest.InClusterConfig()
 	if err != nil { // not running in-cluster, fall back to local kubeconfig
 		// Not in cluster: use kubeconfig (env or default path)
@@ -144,8 +127,6 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 	}
 
 	return &OperatorProvisioner{
-		postgresNamespace:  postgresNS,
-		mongoNamespace:     mongoNS,
 		dynamic:            dyn,
 		core:               core,
 		cnpgGVR:            schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
@@ -171,9 +152,9 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 	}
 	switch dbKind {
 	case "postgresql":
-		return p.createPostgresCluster(ctx, projectID, name, cpu, memoryMB, storageGB, password)
+		return p.createPostgresCluster(ctx, projectID, name, cpu, memoryMB, storageGB, password, tier)
 	case "mongodb":
-		return p.createMongoDBCluster(ctx, projectID, name, cpu, memoryMB, storageGB, password)
+		return p.createMongoDBCluster(ctx, projectID, name, cpu, memoryMB, storageGB, password, tier)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
@@ -182,62 +163,55 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 // GetConnection returns live connection info for an existing database instance.
 // Credentials are read from the operator-managed secret at call time and never stored.
 // name is derived deterministically from projectID so no resource ref needs to be persisted.
-//
-// For PostgreSQL: tries the per-project namespace (pg-<id>) first, then falls back
-// to the legacy shared namespace (postgres-instances) for pre-migration projects.
 func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.UUID, dbType string) (*ProvisionResult, error) {
 	name := p.ClusterNameForProject(projectID)
 	switch dbType {
 	case "postgres", "postgresql":
-		// Try per-project namespace first.
 		ns := p.NamespaceForProject(projectID)
-		result, err := p.getPostgresConnection(ctx, ns, name)
-		if err != nil {
-			// Fallback: try legacy shared namespace for pre-migration projects.
-			result, err = p.getPostgresConnection(ctx, p.postgresNamespace, name)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return result, nil
+		return p.getPostgresConnection(ctx, ns, name)
 	case "mongodb":
-		return p.getMongoConnection(ctx, p.mongoNamespace, name)
+		ns := p.MongoNamespaceForProject(projectID)
+		return p.getMongoConnection(ctx, ns, name)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
 }
 
-// DeleteInstance deletes the K8s resource (Cluster or MongoDBCommunity) identified by resourceRef (namespace/name).
-//
-// For PostgreSQL: deletes the entire per-project namespace (cascading all resources).
-// Falls back to legacy shared namespace deletion for pre-migration projects.
 func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid.UUID, dbType string) error {
-	name := p.ClusterNameForProject(projectID)
+	start := time.Now()
 	_ = p.deleteIngressRouteTCP(ctx, projectID, dbType)
 	switch dbType {
 	case "postgres", "postgresql":
-		// Try deleting the per-project namespace (cascades all resources: CNPG, PostgREST, secrets, etc.).
 		ns := p.NamespaceForProject(projectID)
 		err := p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
-		if err == nil {
-			log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+		if errors.IsNotFound(err) {
+			metrics.ProvisioningDuration.WithLabelValues("postgres", "delete", "success").Observe(time.Since(start).Seconds())
 			return nil
 		}
-		if !errors.IsNotFound(err) {
+		if err != nil {
+			metrics.ProvisioningDuration.WithLabelValues("postgres", "delete", "error").Observe(time.Since(start).Seconds())
 			return fmt.Errorf("delete project namespace %s: %w", ns, err)
 		}
-		// Fallback: legacy shared namespace.
-		err = p.dynamic.Resource(p.cnpgGVR).Namespace(p.postgresNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("delete postgres cluster: %w", err)
-		}
+		log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+		metrics.InstancesDeletedTotal.WithLabelValues("postgresql").Inc()
+		metrics.InstancesCurrent.WithLabelValues("postgresql").Dec()
+		metrics.ProvisioningDuration.WithLabelValues("postgres", "delete", "success").Observe(time.Since(start).Seconds())
 		return nil
 	case "mongodb":
-		err := p.dynamic.Resource(p.mongoGVR).Namespace(p.mongoNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("delete mongodb: %w", err)
+		ns := p.MongoNamespaceForProject(projectID)
+		err := p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
+		if errors.IsNotFound(err) {
+			metrics.ProvisioningDuration.WithLabelValues("mongodb", "delete", "success").Observe(time.Since(start).Seconds())
+			return nil
 		}
-		_ = p.core.CoreV1().Secrets(p.mongoNamespace).Delete(ctx, name+"-admin-password", metav1.DeleteOptions{})
+		if err != nil {
+			metrics.ProvisioningDuration.WithLabelValues("mongodb", "delete", "error").Observe(time.Since(start).Seconds())
+			return fmt.Errorf("delete project namespace %s: %w", ns, err)
+		}
+		log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+		metrics.InstancesDeletedTotal.WithLabelValues("mongodb").Inc()
+		metrics.InstancesCurrent.WithLabelValues("mongodb").Dec()
+		metrics.ProvisioningDuration.WithLabelValues("mongodb", "delete", "success").Observe(time.Since(start).Seconds())
 		return nil
 	default:
 		return fmt.Errorf("unsupported database type: %s", dbType)
@@ -249,7 +223,32 @@ func (p *OperatorProvisioner) ClusterNameForProject(projectID uuid.UUID) string 
 	return fmt.Sprintf("db-%s", strings.ReplaceAll(projectID.String(), "-", ""))
 }
 
-func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int, password string) (*ProvisionResult, error) {
+// MongoNamespaceForProject returns the per-project K8s namespace name for MongoDB.
+// Format: mongo-<32hex> (deterministic from project UUID).
+func (p *OperatorProvisioner) MongoNamespaceForProject(projectID uuid.UUID) string {
+	return fmt.Sprintf("mongo-%s", strings.ReplaceAll(projectID.String(), "-", ""))
+}
+
+// mongoProjectLabels returns standard labels for MongoDB project-scoped resources.
+func (p *OperatorProvisioner) mongoProjectLabels(projectID uuid.UUID) map[string]string {
+	return map[string]string{
+		"managed-by": "killuadb",
+		"project-id": projectID.String(),
+		"db-type":    "mongodb",
+	}
+}
+
+// mongoProjectLabelsMap returns labels as map[string]interface{} for unstructured MongoDB resources.
+func (p *OperatorProvisioner) mongoProjectLabelsMap(projectID uuid.UUID) map[string]interface{} {
+	return map[string]interface{}{
+		"managed-by": "killuadb",
+		"project-id": projectID.String(),
+		"db-type":    "mongodb",
+	}
+}
+
+func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int, password, tier string) (*ProvisionResult, error) {
+	start := time.Now()
 	ns := p.NamespaceForProject(projectID)
 
 	// 1. Create per-project namespace.
@@ -260,7 +259,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 		},
 	}
 	if _, err := p.core.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("create project namespace %s: %w", ns, err)
+		return p.provisioningError("postgresql", tier, start, fmt.Errorf("create project namespace %s: %w", ns, err))
 	}
 	log.Printf("Created namespace %s for project %s", ns, projectID)
 
@@ -282,7 +281,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 
 	_, err := p.core.CoreV1().Secrets(ns).Create(ctx, appSecret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("create app credential secret: %w", err)
+		return p.provisioningError("postgresql", tier, start, fmt.Errorf("create app credential secret: %w", err))
 	}
 
 	// 3. Create CNPG Cluster in the per-project namespace.
@@ -296,7 +295,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 				"labels":    p.projectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
-				"instances": 1,
+				"instances":             1,
 				"enableSuperuserAccess": true,
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
@@ -333,7 +332,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
-				return nil, fmt.Errorf("existing postgres cluster not ready: %w", err)
+				return p.provisioningError("postgresql", tier, start, fmt.Errorf("existing postgres cluster not ready: %w", err))
 			}
 			return p.getPostgresConnection(ctx, ns, name)
 		}
@@ -343,13 +342,13 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
 		// Clean up: delete the entire namespace on failure.
 		_ = p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
-		return nil, fmt.Errorf("postgres cluster not ready: %w", err)
+		return p.provisioningError("postgresql", tier, start, fmt.Errorf("postgres cluster not ready: %w", err))
 	}
 
 	// 4. Get connection info.
 	result, err := p.getPostgresConnection(ctx, ns, name)
 	if err != nil {
-		return nil, err
+		return p.provisioningError("postgresql", tier, start, err)
 	}
 
 	// 5. Setup PostgREST database roles (connects as superuser).
@@ -380,8 +379,25 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 			}
 		}
 	}
+
+	// Record provisioning success.
+	metrics.InstancesCreatedTotal.WithLabelValues("postgresql", tier).Inc()
+	metrics.InstancesCurrent.WithLabelValues("postgresql").Inc()
+	metrics.ProvisioningDuration.WithLabelValues("postgres", "create", "success").Observe(time.Since(start).Seconds())
+
 	return result, nil
 }
+
+func (p *OperatorProvisioner) provisioningError(dbType, tier string, start time.Time, err error) (*ProvisionResult, error) {
+	metrics.ProvisioningErrorsTotal.WithLabelValues(dbType).Inc()
+	dbLabel := dbType
+	if dbLabel == "postgresql" {
+		dbLabel = "postgres"
+	}
+	metrics.ProvisioningDuration.WithLabelValues(dbLabel, "create", "error").Observe(time.Since(start).Seconds())
+	return nil, err
+}
+
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cluster, err := p.dynamic.Resource(p.cnpgGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -424,25 +440,65 @@ func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespa
 	}, nil
 }
 
-func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int, password string) (*ProvisionResult, error) {
-	ns := p.mongoNamespace
+func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectID uuid.UUID, name string, cpu, memoryMB float64, storageGB int, password, tier string) (*ProvisionResult, error) {
+	start := time.Now()
+	ns := p.MongoNamespaceForProject(projectID)
 
+	// 1. Create per-project namespace.
+	nsObj := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   ns,
+			Labels: p.mongoProjectLabels(projectID),
+		},
+	}
+	if _, err := p.core.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create project namespace %s: %w", ns, err))
+	}
+	log.Printf("Created namespace %s for project %s", ns, projectID)
+
+	// 2. Create service account required by MongoDB operator.
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mongodb-database",
+			Namespace: ns,
+		},
+	}
+	if _, err := p.core.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create mongodb-database serviceaccount: %w", err))
+	}
+
+	// 3. Bind mongodb-database SA to backend-db-manager ClusterRole.
+	roleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mongodb-database",
+			Namespace: ns,
+		},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "mongodb-database", Namespace: ns}},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "backend-db-manager"},
+	}
+	if _, err := p.core.RbacV1().RoleBindings(ns).Create(ctx, roleBinding, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create mongodb-database rolebinding: %w", err))
+	}
+
+	// 4. Create the admin password secret.
 	passSecretName := name + "-admin-password"
 	passSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      passSecretName,
 			Namespace: ns,
+			Labels:    p.mongoProjectLabels(projectID),
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"password": []byte(password),
 		},
 	}
-
 	_, err := p.core.CoreV1().Secrets(ns).Create(ctx, passSecret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("create cluster password secret: %w", err)
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create cluster password secret: %w", err))
 	}
+
+	// 5. Create MongoDBCommunity CR in the per-project namespace.
 	cluster := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "mongodbcommunity.mongodb.com/v1",
@@ -450,11 +506,35 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": ns,
+				"labels":    p.mongoProjectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
 				"members": 1,
 				"type":    "ReplicaSet",
 				"version": "7.0.0",
+				"additionalMongodConfig": map[string]interface{}{
+					"net.port": 27017,
+				},
+				"podSpec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "mongodb-exporter",
+							"image": "percona/mongodb_exporter:0.40",
+							"ports": []interface{}{
+								map[string]interface{}{
+									"name":          "metrics",
+									"containerPort": 9216,
+								},
+							},
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "MONGODB_URI",
+									"value": "mongodb://localhost:27017",
+								},
+							},
+						},
+					},
+				},
 				"security": map[string]interface{}{
 					"authentication": map[string]interface{}{
 						"modes": []interface{}{"SCRAM"},
@@ -516,19 +596,18 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 		if errors.IsAlreadyExists(err) {
 			return p.getMongoConnection(ctx, ns, name)
 		}
-		return nil, fmt.Errorf("create mongodb community: %w", err)
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create mongodb community: %w", err))
 	}
 
 	log.Printf("Created MongoDBCommunity %s/%s, waiting for ready", ns, name)
 	if err := p.waitForMongoReady(ctx, ns, name); err != nil {
-		_ = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
-		_ = p.core.CoreV1().Secrets(ns).Delete(ctx, passSecretName, metav1.DeleteOptions{})
-		return nil, fmt.Errorf("mongodb not ready: %w", err)
+		_ = p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
+		return p.provisioningError("mongodb", tier, start, fmt.Errorf("mongodb not ready: %w", err))
 	}
 
 	result, err := p.getMongoConnection(ctx, ns, name)
 	if err != nil {
-		return nil, err
+		return p.provisioningError("mongodb", tier, start, err)
 	}
 	if p.externalDomain != "" {
 		if routeErr := p.createIngressRouteTCP(ctx, projectID, "mongodb"); routeErr != nil {
@@ -540,12 +619,20 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 			}
 		}
 	}
+
+	metrics.InstancesCreatedTotal.WithLabelValues("mongodb", tier).Inc()
+	metrics.InstancesCurrent.WithLabelValues("mongodb").Inc()
+	metrics.ProvisioningDuration.WithLabelValues("mongodb", "create", "success").Observe(time.Since(start).Seconds())
+
 	return result, nil
 }
 func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
 		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
 			return false, err
 		}
 		status, _, _ := unstructured.NestedMap(obj.Object, "status")
@@ -634,7 +721,7 @@ func (p *OperatorProvisioner) createIngressRouteTCP(ctx context.Context, project
 	var port int64
 	switch dbType {
 	case "mongodb":
-		ns = p.mongoNamespace
+		ns = p.MongoNamespaceForProject(projectID)
 		entryPoint = "mongodb"
 		svcName = name + "-svc"
 		port = 27017
@@ -681,19 +768,97 @@ func (p *OperatorProvisioner) deleteIngressRouteTCP(ctx context.Context, project
 	if p.externalDomain == "" {
 		return nil
 	}
-	name := p.ClusterNameForProject(projectID)
-	var ns string
-	switch dbType {
-	case "postgres", "postgresql":
-		ns = p.postgresNamespace
-	case "mongodb":
-		ns = p.mongoNamespace
-	default:
-		return fmt.Errorf("unsupported db type: %s", dbType)
+	// PostgreSQL uses pgproxy catch-all — no per-project IngressRouteTCP.
+	if dbType == "postgres" || dbType == "postgresql" {
+		return nil
 	}
+	name := p.ClusterNameForProject(projectID)
+	ns := p.MongoNamespaceForProject(projectID)
 	err := p.dynamic.Resource(p.ingressRouteTCPGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("delete IngressRouteTCP: %w", err)
 	}
 	return nil
 }
+
+// PeriodicMetricsCollector runs every interval to refresh K8s-level instance count metrics.
+// Must be called as a goroutine.
+func (p *OperatorProvisioner) PeriodicMetricsCollector(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	p.collectK8sMetrics(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.collectK8sMetrics(ctx)
+		}
+	}
+}
+
+func (p *OperatorProvisioner) collectK8sMetrics(ctx context.Context) {
+	pgList, err := p.dynamic.Resource(p.cnpgGVR).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		perNS := map[string]int{}
+		for _, item := range pgList.Items {
+			ns := item.GetNamespace()
+			perNS[ns]++
+		}
+		for ns, count := range perNS {
+			metrics.K8sInstanceCount.WithLabelValues("postgresql", ns).Set(float64(count))
+		}
+	} else {
+		log.Printf("Warning: failed to list CNPG clusters for metrics: %v", err)
+	}
+
+	mongoList, err := p.dynamic.Resource(p.mongoGVR).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		perNS := map[string]int{}
+		for _, item := range mongoList.Items {
+			ns := item.GetNamespace()
+			perNS[ns]++
+		}
+		for ns, count := range perNS {
+			metrics.K8sInstanceCount.WithLabelValues("mongodb", ns).Set(float64(count))
+		}
+	} else {
+		log.Printf("Warning: failed to list MongoDBCommunity CRDs for metrics: %v", err)
+	}
+
+	p.updateInstanceCountFromK8s(pgList, mongoList)
+}
+
+func (p *OperatorProvisioner) updateInstanceCountFromK8s(pgList, mongoList *unstructured.UnstructuredList) {
+	var pgCount, mongoCount float64
+	if pgList != nil {
+		for _, item := range pgList.Items {
+			status, _, _ := unstructured.NestedMap(item.Object, "status")
+			if status == nil {
+				continue
+			}
+			phase, _ := status["phase"].(string)
+			if phase == "Cluster in healthy state" || phase == "" || phase == "Ready" {
+				pgCount++
+			}
+		}
+	}
+	if mongoList != nil {
+		for _, item := range mongoList.Items {
+			status, _, _ := unstructured.NestedMap(item.Object, "status")
+			if status == nil {
+				continue
+			}
+			phase, _ := status["phase"].(string)
+			if phase == "Running" || phase == "running" || phase == "" {
+				mongoCount++
+			}
+		}
+	}
+	metrics.InstancesCurrent.WithLabelValues("postgresql").Set(pgCount)
+	metrics.InstancesCurrent.WithLabelValues("mongodb").Set(mongoCount)
+}
+
+

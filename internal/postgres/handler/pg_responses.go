@@ -100,4 +100,3 @@ func redactPrivateIPs(s string) string {
 	}
 	return strings.Join(tokens, " ")
 }
-
