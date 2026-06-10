@@ -1087,6 +1087,22 @@ components:
       properties:
         value:
           description: New value for the field (any JSON value)
+        type:
+          type: string
+          description: 'Optional type hint ("string", "int", "double", "boolean", "date", "null")'
+
+    MongoAddDocumentFieldRequest:
+      type: object
+      required: [field, type]
+      properties:
+        field:
+          type: string
+          description: Name of the field to add
+        value:
+          description: Value for the field (any JSON value)
+        type:
+          type: string
+          description: 'Type hint ("string", "int", "double", "boolean", "date", "null")'
 
     MongoDashboardMetrics:
       type: object
@@ -4565,6 +4581,62 @@ paths:
                 $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
         '400':
           description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{id}/mongodb/collections/{collection}/documents/{docId}/fields:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collection
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: docId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: addMongoDocumentField
+      tags: [MongoDB]
+      summary: Add a new field to a specific document
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MongoAddDocumentFieldRequest'
+      responses:
+        '200':
+          description: Field added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
+        '400':
+          description: Invalid request
           content:
             application/json:
               schema:
