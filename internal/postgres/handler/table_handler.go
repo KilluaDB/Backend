@@ -434,14 +434,14 @@ func (h *TableHandler) AddColumn(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Name        string                        `json:"name" binding:"required"`
-		Type        string                        `json:"type" binding:"required"`
-		Default     interface{}                   `json:"default,omitempty"`
-		Primary     bool                          `json:"primary,omitempty"`
-		IsUnique    bool                          `json:"is_unique,omitempty"`
-		IsIdentity  bool                          `json:"is_identity,omitempty"`
-		Nullable    *bool                         `json:"nullable,omitempty"`
-		ForeignKeys []model.AddColumnForeignKey   `json:"foreign_keys,omitempty"`
+		Name        string                      `json:"name" binding:"required"`
+		Type        string                      `json:"type" binding:"required"`
+		Default     interface{}                 `json:"default,omitempty"`
+		Primary     bool                        `json:"primary,omitempty"`
+		IsUnique    bool                        `json:"is_unique,omitempty"`
+		IsIdentity  bool                        `json:"is_identity,omitempty"`
+		Nullable    *bool                       `json:"nullable,omitempty"`
+		ForeignKeys []model.AddColumnForeignKey `json:"foreign_keys,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		pgFail(c, http.StatusBadRequest, err, "Invalid request body")

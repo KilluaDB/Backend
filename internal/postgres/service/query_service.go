@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend/internal/metrics"
 	"backend/internal/model"
 	"backend/internal/postgres/infra"
 	"context"
@@ -193,8 +194,12 @@ func (s *QueryService) executeSQLQuery(ctx context.Context, pool *pgxpool.Pool, 
 }
 
 func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+	start := time.Now()
 	rows, err := pool.Query(ctx, query)
+	duration := time.Since(start).Seconds()
+	metrics.PgQueryDuration.WithLabelValues("select").Observe(duration)
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("postgres", "select").Inc()
 		return &QueryResult{Error: err.Error()}, nil
 	}
 	defer rows.Close()
@@ -253,8 +258,12 @@ func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Poo
 }
 
 func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+	start := time.Now()
 	cmdTag, err := pool.Exec(ctx, query)
+	duration := time.Since(start).Seconds()
+	metrics.PgQueryDuration.WithLabelValues("exec").Observe(duration)
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("postgres", "exec").Inc()
 		return &QueryResult{Error: err.Error()}, nil
 	}
 

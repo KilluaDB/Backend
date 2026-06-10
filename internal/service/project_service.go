@@ -118,7 +118,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 	}
 
 	// Provision asynchronously; project status transitions to "running" or "failed" once done.
-	go s.provisionInstanceAsync(ctx, project.ID, internalDBType, req.ResourceTier, req.Password)
+	go s.provisionInstanceAsync(context.Background(), project.ID, internalDBType, req.ResourceTier, req.Password)
 
 	// Reload to get DB-managed fields (timestamps etc.) for the response.
 	if p, err := s.projectRepo.GetByID(ctx, project.ID); err == nil && p != nil {

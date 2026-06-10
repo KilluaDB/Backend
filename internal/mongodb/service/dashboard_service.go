@@ -12,16 +12,16 @@ import (
 )
 
 type MongoDashboardMetricsService struct {
-	conn 				infra.InstanceConnectionService
-	collectionRepo	*repository.CollectionRepository
-	documentRepo 	*repository.DocumentRepository
+	conn           infra.InstanceConnectionService
+	collectionRepo *repository.CollectionRepository
+	documentRepo   *repository.DocumentRepository
 }
 
-func NewMongoDashboardMetricsService(conn infra.InstanceConnectionService, collectionRepo	*repository.CollectionRepository, documentRepo *repository.DocumentRepository) *MongoDashboardMetricsService {
+func NewMongoDashboardMetricsService(conn infra.InstanceConnectionService, collectionRepo *repository.CollectionRepository, documentRepo *repository.DocumentRepository) *MongoDashboardMetricsService {
 	return &MongoDashboardMetricsService{
-		conn: conn, 
+		conn:           conn,
 		collectionRepo: collectionRepo,
-		documentRepo: documentRepo,
+		documentRepo:   documentRepo,
 	}
 }
 
@@ -41,22 +41,21 @@ func (s *MongoDashboardMetricsService) GetMetrics(ctx context.Context, userID, p
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var totalDocs int64
-	for _, col := range collections {		
+	for _, col := range collections {
 		count, err := s.documentRepo.CountDocuments(ctx, db, col, bson.D{})
 		if err != nil {
 			continue
 		}
 		totalDocs += count
 	}
-	
-	
+
 	operationStats, err := s.documentRepo.GetLast30DaysStats(ctx, db)
-   if err != nil {
+	if err != nil {
 		return nil, err
-   }
-	
+	}
+
 	metrics := &model.MongoDashboardMetrics{}
 	metrics.Database = db.Name()
 	metrics.DBSizeBytes = toInt64(dbStats["dataSize"])
@@ -65,11 +64,11 @@ func (s *MongoDashboardMetricsService) GetMetrics(ctx context.Context, userID, p
 	metrics.Last30Days = *operationStats
 
 	return &model.MongoDashboardMetrics{
-		Database: db.Name(),
-		DBSizeBytes: toInt64(dbStats["dataSize"]),
+		Database:       db.Name(),
+		DBSizeBytes:    toInt64(dbStats["dataSize"]),
 		TotalDocuments: totalDocs,
-		Collections: int64(len(collections)),
-		Last30Days: *operationStats,
+		Collections:    int64(len(collections)),
+		Last30Days:     *operationStats,
 	}, nil
 }
 

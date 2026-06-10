@@ -209,8 +209,8 @@ func sniFromClientHello(record []byte) string {
 		extLen := int(binary.BigEndian.Uint16(data[pos+2:]))
 		pos += 4
 		if extType == 0x0000 && pos+extLen <= len(data) { // SNI extension
-			p := pos + 2                                   // skip list length
-			if p+3 <= pos+extLen && data[p] == 0x00 {     // NameType = host_name
+			p := pos + 2                              // skip list length
+			if p+3 <= pos+extLen && data[p] == 0x00 { // NameType = host_name
 				nameLen := int(binary.BigEndian.Uint16(data[p+1:]))
 				if p+3+nameLen <= len(data) {
 					return string(data[p+3 : p+3+nameLen])

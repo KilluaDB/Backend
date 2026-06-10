@@ -44,7 +44,7 @@ func (s *CollectionService) ListCollections(ctx context.Context, userID, project
 		return nil, err
 	}
 
-	filteredCollections, err := s.repo.ListCollections(ctx, db);	
+	filteredCollections, err := s.repo.ListCollections(ctx, db)
 	return filteredCollections, nil
 }
 
@@ -143,7 +143,7 @@ func validateFieldName(name string) error {
 	}
 	if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
 		return ErrInvalidCollectionName
-   }
+	}
 	return nil
 }
 

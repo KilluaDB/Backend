@@ -24,4 +24,3 @@ func (q *QueryHistory) Prepare() {
 		q.ExecutedAt = time.Now()
 	}
 }
-
