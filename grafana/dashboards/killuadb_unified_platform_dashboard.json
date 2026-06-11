@@ -1,0 +1,341 @@
+{
+  "id": null,
+  "panels": [
+    {
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "title": "Row 1 - High Level Overview",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(killuadb_active_instances{type=\"postgresql\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Postgres Instances",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(killuadb_active_instances{type=\"mongodb\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Active MongoDB Instances",
+      "type": "stat"
+    },
+    {
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 6,
+      "title": "Provisioning & Operations",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 8,
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum by (le, type, operation) (rate(killuadb_provisioning_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{type}} - {{operation}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provisioning Duration (p95)",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 9,
+      "title": "Row 4 - Database Cluster Health (Operator)",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 15
+      },
+      "id": 10,
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "cnpg_collector_up",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNPG Cluster Up",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 15
+      },
+      "id": 11,
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "cnpg_backends_total",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNPG Active Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 15
+      },
+      "id": 12,
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "cnpg_collector_pg_wal",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNPG WAL Records",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 15
+      },
+      "id": 13,
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "mongodb_ss_connections{conn_type=\"current\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MongoDB Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 14,
+      "targets": [
+        {
+          "expr": "sum(increase(backend_instances_created_total[$__rate_interval])) by (type)",
+          "legendFormat": "Created: {{type}}"
+        },
+        {
+          "expr": "sum(increase(backend_instances_deleted_total[$__rate_interval])) by (type)",
+          "legendFormat": "Deleted: {{type}}"
+        }
+      ],
+      "title": "Instances Created / Deleted",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 15,
+      "targets": [
+        {
+          "expr": "sum(increase(backend_provisioning_errors_total[$__rate_interval])) by (type)",
+          "legendFormat": "Errors: {{type}}"
+        }
+      ],
+      "title": "Provisioning Errors",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 16,
+      "title": "Row 3 - Backend Meta-Database Connections",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 17,
+      "targets": [
+        {
+          "expr": "backend_pg_pool_count",
+          "legendFormat": "Postgres Pools"
+        },
+        {
+          "expr": "backend_mongo_client_count",
+          "legendFormat": "Mongo Clients"
+        }
+      ],
+      "title": "Cached Connection Pools",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 18,
+      "targets": [
+        {
+          "expr": "sum(backend_pg_pool_acquired_connections)",
+          "legendFormat": "Acquired"
+        },
+        {
+          "expr": "sum(backend_pg_pool_idle_connections)",
+          "legendFormat": "Idle"
+        }
+      ],
+      "title": "Meta Postgres Connection States",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(backend_pg_query_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "PG: {{operation}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(backend_mongo_query_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "Mongo: {{operation}}"
+        }
+      ],
+      "title": "Meta DB Query Latency (p95)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "KilluaDB Unified Platform Dashboard",
+  "uid": "killuadb-unified",
+  "version": 7
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/metrics"
 	"backend/internal/mongodb/infra"
 	"backend/internal/mongodb/model"
 	"backend/internal/mongodb/repository"
@@ -25,13 +26,13 @@ var allowedUpdateOperators = map[string]bool{
 }
 
 var (
-	ErrDocumentNotFound    = errors.New("document not found")
-	ErrInvalidFilter       = errors.New("invalid filter")
-	ErrInvalidUpdate       = errors.New("invalid update")
-	ErrInvalidDocumentID   = errors.New("invalid document id")
-	ErrInvalidFieldType	  = errors.New("invalid field type")
-	ErrTypeMismatch		  = errors.New("value type does not match existing field type")
-	ErrFieldAlreadyExists  = errors.New("field already exists")
+	ErrDocumentNotFound   = errors.New("document not found")
+	ErrInvalidFilter      = errors.New("invalid filter")
+	ErrInvalidUpdate      = errors.New("invalid update")
+	ErrInvalidDocumentID  = errors.New("invalid document id")
+	ErrInvalidFieldType   = errors.New("invalid field type")
+	ErrTypeMismatch       = errors.New("value type does not match existing field type")
+	ErrFieldAlreadyExists = errors.New("field already exists")
 )
 
 const defaultPageLimit int64 = 20
@@ -50,6 +51,7 @@ func NewDocumentService(conn infra.InstanceConnectionService, repo *repository.D
 }
 
 func (s *DocumentService) InsertDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.InsertDocumentsRequest) (*model.InsertDocumentResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -65,23 +67,26 @@ func (s *DocumentService) InsertDocuments(ctx context.Context, userID, projectID
 	}
 
 	result, err := s.repo.InsertDocuments(ctx, db, collection, docs)
+	metrics.MongoQueryDuration.WithLabelValues("insert").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "insert").Inc()
 		return nil, err
 	}
 
 	count := int64(len(result.InsertedIDs))
-	
+
 	if count > 0 {
 		_ = s.repo.IncrementCounter(ctx, db, "insert", count)
 	}
 
 	return &model.InsertDocumentResult{
 		InsertedCount: int64(len(result.InsertedIDs)),
-		InsertedIDs: result.InsertedIDs,
+		InsertedIDs:   result.InsertedIDs,
 	}, nil
 }
 
 func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID uuid.UUID, collection string, id string) (map[string]interface{}, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -94,11 +99,13 @@ func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID
 	}
 
 	doc, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
+	metrics.MongoQueryDuration.WithLabelValues("find").Observe(time.Since(start).Seconds())
 	if err != nil {
 		log.Printf("DEBUG find by string id err: %v", err)
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrDocumentNotFound
 		}
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "find").Inc()
 		return nil, err
 	}
 
@@ -106,10 +113,11 @@ func (s *DocumentService) GetDocumentByID(ctx context.Context, userID, projectID
 }
 
 func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.GetDocumentsRequest) (*model.GetDocumentsResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
-	
+
 	limit := req.Limit
 	if limit <= 0 {
 		limit = defaultPageLimit
@@ -125,7 +133,7 @@ func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uu
 
 	filter := bson.D{}
 	sort := bson.D{
-    	{Key: "_id", Value: -1},
+		{Key: "_id", Value: -1},
 	}
 
 	db, err := s.conn.GetDatabase(ctx, userID, projectID)
@@ -139,7 +147,9 @@ func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uu
 	}
 
 	docs, err := s.repo.FindDocuments(ctx, db, collection, filter, sort, skip, limit)
+	metrics.MongoQueryDuration.WithLabelValues("find").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "find").Inc()
 		return nil, err
 	}
 
@@ -156,6 +166,7 @@ func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uu
 }
 
 func (s *DocumentService) QueryDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.QueryDocumentsRequest) (*model.QueryDocumentsResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -194,7 +205,9 @@ func (s *DocumentService) QueryDocuments(ctx context.Context, userID, projectID 
 	}
 
 	docs, err := s.repo.FindDocuments(ctx, db, collection, filter, sort, skip, limit)
+	metrics.MongoQueryDuration.WithLabelValues("find").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "find").Inc()
 		return nil, err
 	}
 
@@ -211,6 +224,7 @@ func (s *DocumentService) QueryDocuments(ctx context.Context, userID, projectID 
 }
 
 func (s *DocumentService) CountDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.CountDocumentsRequest) (*model.CountDocumentsResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -226,7 +240,9 @@ func (s *DocumentService) CountDocuments(ctx context.Context, userID, projectID 
 	}
 
 	count, err := s.repo.CountDocuments(ctx, db, collection, filter)
+	metrics.MongoQueryDuration.WithLabelValues("count").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "count").Inc()
 		return nil, err
 	}
 
@@ -235,6 +251,7 @@ func (s *DocumentService) CountDocuments(ctx context.Context, userID, projectID 
 
 // Bulk
 func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.UpdateDocumentsRequest) (*model.UpdateDocumentsResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -261,7 +278,9 @@ func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID
 	}
 
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, upsert, updateOne)
+	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
 		return nil, err
 	}
 
@@ -274,6 +293,7 @@ func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID
 
 // Bulk
 func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.DeleteDocumentsRequest) (*model.DeleteDocumentsResult, error) {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return nil, err
 	}
@@ -290,7 +310,9 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 	}
 
 	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, deleteOne)
+	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()
 		return nil, err
 	}
 
@@ -298,6 +320,7 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 }
 
 func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string, req model.UpdateFieldRequest) error {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
@@ -314,7 +337,7 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 	}
 
 	existing, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
-    if err != nil {
+	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return ErrDocumentNotFound
 		}
@@ -343,7 +366,9 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: finalValue}}}}
 
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
 		return err
 	}
 
@@ -357,6 +382,7 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 }
 
 func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id string, req model.AddDocumentFieldRequest) error {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
@@ -378,7 +404,7 @@ func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectI
 	}
 
 	existing, err := s.repo.FindDocumentByID(ctx, db, collection, objectID)
-    if err != nil {
+	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return ErrDocumentNotFound
 		}
@@ -390,12 +416,14 @@ func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectI
 			return ErrFieldAlreadyExists
 		}
 	}
-	
+
 	filter := bson.D{{Key: "_id", Value: objectID}}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: req.Field, Value: castedValue}}}}
 
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
 		return err
 	}
 
@@ -409,6 +437,7 @@ func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectI
 }
 
 func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string) error {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
@@ -428,7 +457,9 @@ func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, proje
 	update := bson.D{{Key: "$unset", Value: bson.D{{Key: field, Value: ""}}}}
 
 	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
 		return err
 	}
 
@@ -442,6 +473,7 @@ func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, proje
 }
 
 func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID uuid.UUID, collection, id string) error {
+	start := time.Now()
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
@@ -456,7 +488,9 @@ func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID 
 	filter := bson.D{{Key: "_id", Value: objectID}}
 
 	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, true)
+	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()
 		return err
 	}
 
@@ -536,43 +570,43 @@ func validateSameType(existing, incoming interface{}) error {
 
 func castToType(value interface{}, targetType string) (interface{}, error) {
 	switch strings.ToLower(targetType) {
-		case "string":
-        return fmt.Sprintf("%v", value), nil
-		case "int32":
-			return int32(toInt64(value)), nil
-		case "int64":
-			return toInt64(value), nil
-		case "double":
-			return toFloat64(value), nil
-		case "boolean":
-			b, ok := value.(bool)
-			if !ok {
-				return nil, errors.New("value must be true or false")
-			}
-			return b, nil
-		case "date":
-			s, ok := value.(string)
-			if !ok {
-				return nil, errors.New("date must be an RFC3339 string")
-			}
-			return time.Parse(time.RFC3339, s)
-		case "null":
-			return nil, nil
-		case "object":
-			m, ok := value.(map[string]interface{})
-			if !ok {
-				return nil, errors.New("value must be a JSON object")
-			}
-			return m, nil
-		case "array":
-			a, ok := value.([]interface{})
-			if !ok {
-				return nil, errors.New("value must be a JSON array")
-			}
-			return a, nil
-		case "":
-			return value, nil
-		default:
-			return nil, errors.New("unsupported type: " + targetType)
+	case "string":
+		return fmt.Sprintf("%v", value), nil
+	case "int32":
+		return int32(toInt64(value)), nil
+	case "int64":
+		return toInt64(value), nil
+	case "double":
+		return toFloat64(value), nil
+	case "boolean":
+		b, ok := value.(bool)
+		if !ok {
+			return nil, errors.New("value must be true or false")
+		}
+		return b, nil
+	case "date":
+		s, ok := value.(string)
+		if !ok {
+			return nil, errors.New("date must be an RFC3339 string")
+		}
+		return time.Parse(time.RFC3339, s)
+	case "null":
+		return nil, nil
+	case "object":
+		m, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("value must be a JSON object")
+		}
+		return m, nil
+	case "array":
+		a, ok := value.([]interface{})
+		if !ok {
+			return nil, errors.New("value must be a JSON array")
+		}
+		return a, nil
+	case "":
+		return value, nil
+	default:
+		return nil, errors.New("unsupported type: " + targetType)
 	}
 }

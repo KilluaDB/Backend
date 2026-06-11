@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	mongoservice "backend/internal/mongodb/service"
 	"backend/internal/mongodb/model"
+	mongoservice "backend/internal/mongodb/service"
 	"backend/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -69,7 +69,7 @@ func (h *DocumentHandler) GetDocument(c *gin.Context) {
 
 func (h *DocumentHandler) GetDocuments(c *gin.Context) {
 	collection := c.Param("collection")
-	if collection == ""{
+	if collection == "" {
 		response.Fail(c, http.StatusBadRequest, nil, "Collection and document ID are required")
 		return
 	}
@@ -277,11 +277,11 @@ func (h *DocumentHandler) DeleteDocument(c *gin.Context) {
 		handleDocumentError(c, err)
 		return
 	}
-	
+
 	response.Success(c, http.StatusOK, nil, "Document deleted successfully")
 }
 
-func handleDocumentError(c *gin.Context, err error) { 
+func handleDocumentError(c *gin.Context, err error) {
 	switch {
 		case errors.Is(err, mongoservice.ErrDocumentNotFound):
 			response.Fail(c, http.StatusNotFound, err, "Document not found")

@@ -24,9 +24,6 @@ load_env() {
 
 # ─── Namespaces ───────────────────────────────────────────────────────────────
 ensure_namespaces() {
-    for ns in postgres-instances mongodb-instances; do
-        kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-    done
     print_success "Namespaces ready"
 }
 
@@ -110,14 +107,31 @@ deploy_pgproxy() {
 
 # ─── Port-forward ─────────────────────────────────────────────────────────────
 PF_PID=""
+GRAFANA_PF_PID=""
+PROM_PF_PID=""
 
 start_port_forward() {
     local port="${K8S_PORT:-8080}"
     kubectl port-forward svc/backend "${port}:8080" -n default &
     PF_PID=$!
+
+    # Port-forward the Kubernetes Prometheus so local Grafana can reach it
+    if kubectl get svc/monitoring-kube-prometheus-prometheus -n monitoring &>/dev/null; then
+        kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090 -n monitoring &
+        PROM_PF_PID=$!
+        print_success "Kubernetes Prometheus listening on http://localhost:9090"
+    fi
+
     sleep 1
     kill -0 "$PF_PID" 2>/dev/null || { print_error "Port-forward failed"; exit 1; }
     print_success "Listening on http://localhost:$port"
+}
+
+# ─── Observability ────────────────────────────────────────────────────────────
+start_observability() {
+    print_info "Starting Grafana via Docker Compose..."
+    docker-compose up -d grafana
+    print_success "Grafana running at http://localhost:3000 (admin/grafana)"
 }
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
@@ -132,7 +146,9 @@ stream_logs() {
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
 cleanup() {
     echo ""
-    [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null && print_info "Port-forward stopped"
+    [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null && print_info "Backend port-forward stopped"
+    [ -n "${PROM_PF_PID:-}" ] && kill "$PROM_PF_PID" 2>/dev/null && print_info "Prometheus port-forward stopped"
+    docker-compose stop grafana || true
     print_info "Cluster still running. Bye!"
     exit 0
 }
@@ -155,6 +171,7 @@ main() {
     build_image
     deploy_backend
     deploy_pgproxy
+    start_observability
     start_port_forward
     stream_logs
 }

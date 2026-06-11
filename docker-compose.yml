@@ -19,6 +19,22 @@ services:
     networks:
       - dbaas-network
 
+  grafana:
+    image: grafana/grafana:8.5.27
+    container_name: grafana
+    ports:
+      - 3000:3000
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=grafana
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/prometheus.yml
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/killuadb.yml
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - dbaas-network
+
 volumes:
   postgres_data:
     driver: local

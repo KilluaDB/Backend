@@ -14,8 +14,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-
-
 type GoogleAuthService struct {
 	userRepo *repository.UserRepository
 }

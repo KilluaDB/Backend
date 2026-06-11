@@ -28,7 +28,7 @@ func (r *DocumentRepository) FindDocumentByID(ctx context.Context, db *mongo.Dat
 	result := db.Collection(collection).FindOne(ctx, filter)
 	if result.Err() != nil {
 		return nil, result.Err()
-	} 
+	}
 
 	var doc map[string]interface{}
 	if err := result.Decode(&doc); err != nil {
@@ -102,7 +102,7 @@ func (r *DocumentRepository) IncrementCounter(ctx context.Context, db *mongo.Dat
 
 func (r *DocumentRepository) GetLast30DaysStats(ctx context.Context, db *mongo.Database) (*model.OperationStats, error) {
 	since := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
-	
+
 	filter := bson.D{{Key: "_id", Value: bson.D{{Key: "$gte", Value: since}}}}
 	opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})
 

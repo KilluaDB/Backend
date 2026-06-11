@@ -40,8 +40,12 @@ func Fail(c *gin.Context, statusCode int, err error, message string) {
 	if err != nil {
 		log.Printf("Error: %v", err)
 	}
-	c.JSON(statusCode, APIResponse{
+	resp := APIResponse{
 		Status:  "error",
 		Message: message,
-	})
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	c.JSON(statusCode, resp)
 }
