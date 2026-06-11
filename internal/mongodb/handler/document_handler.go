@@ -294,11 +294,11 @@ func handleDocumentError(c *gin.Context, err error) {
 		case errors.Is(err, mongoservice.ErrInvalidCollectionName):
 			response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
 		case errors.Is(err, mongoservice.ErrTypeMismatch):
-    		response.Fail(c, http.StatusBadRequest, err, "Value type does not match existing field type")
+    		response.Fail(c, http.StatusConflict, err, "Value type does not match existing field type")
 		case errors.Is(err, mongoservice.ErrInvalidFieldType):
     		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
-		case errors.As(err, mongoservice.ErrFieldAlreadyExists):
-			response.Fail(c, http.StatusBadRequest, err, "Field alreay exists")
+		case errors.Is(err, mongoservice.ErrFieldAlreadyExists):
+			response.Fail(c, http.StatusConflict, err, "Field already exists")
 		case failMongoInstanceError(c, err):
 			return
 		default:
