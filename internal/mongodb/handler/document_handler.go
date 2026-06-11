@@ -283,25 +283,25 @@ func (h *DocumentHandler) DeleteDocument(c *gin.Context) {
 
 func handleDocumentError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, mongoservice.ErrDocumentNotFound):
-		response.Fail(c, http.StatusNotFound, err, "Document not found")
-	case errors.Is(err, mongoservice.ErrInvalidDocumentID):
-		response.Fail(c, http.StatusBadRequest, err, "Invalid document ID")
-	case errors.Is(err, mongoservice.ErrInvalidFilter):
-		response.Fail(c, http.StatusBadRequest, err, "Invalid filter")
-	case errors.Is(err, mongoservice.ErrInvalidUpdate):
-		response.Fail(c, http.StatusBadRequest, err, "Invalid update")
-	case errors.Is(err, mongoservice.ErrInvalidCollectionName):
-		response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
-	case errors.Is(err, mongoservice.ErrTypeMismatch):
-		response.Fail(c, http.StatusBadRequest, err, "Value type does not match existing field type")
-	case errors.Is(err, mongoservice.ErrInvalidFieldType):
-		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
-	case errors.Is(err, mongoservice.ErrFieldAlreadyExists):
-		response.Fail(c, http.StatusBadRequest, err, "Field alreay exists")
-	case failMongoInstanceError(c, err):
-		return
-	default:
-		response.Fail(c, http.StatusBadRequest, err, "Operation failed")
+		case errors.Is(err, mongoservice.ErrDocumentNotFound):
+			response.Fail(c, http.StatusNotFound, err, "Document not found")
+		case errors.Is(err, mongoservice.ErrInvalidDocumentID):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid document ID")
+		case errors.Is(err, mongoservice.ErrInvalidFilter):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid filter")
+		case errors.Is(err, mongoservice.ErrInvalidUpdate):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid update")
+		case errors.Is(err, mongoservice.ErrInvalidCollectionName):
+			response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
+		case errors.Is(err, mongoservice.ErrTypeMismatch):
+    		response.Fail(c, http.StatusConflict, err, "Value type does not match existing field type")
+		case errors.Is(err, mongoservice.ErrInvalidFieldType):
+    		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
+		case errors.Is(err, mongoservice.ErrFieldAlreadyExists):
+			response.Fail(c, http.StatusConflict, err, "Field already exists")
+		case failMongoInstanceError(c, err):
+			return
+		default:
+			response.Fail(c, http.StatusBadRequest, err, "Operation failed")
 	}
 }
