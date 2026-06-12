@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -73,11 +74,11 @@ func exportPostgres(ctx context.Context, dsn string, format PostgresFormat, dst 
 	reader := bufio.NewReader(stdout)
 	if _, err := reader.Peek(1); err != nil {
 		// Process produced no data — wait for it to exit and report stderr.
-		_ = cmd.Wait()
+		waitErr := cmd.Wait()
 		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
-			return fmt.Errorf("pg_dump produced no output: %s", trimStderr(stderr.String()))
+			return fmt.Errorf("pg_dump produced no output (exit: %v): %s", waitErr, trimStderr(stderr.String()))
 		}
-		return fmt.Errorf("pg_dump read: %w: %s", err, trimStderr(stderr.String()))
+		return fmt.Errorf("pg_dump read: %w (exit: %v): %s", err, waitErr, trimStderr(stderr.String()))
 	}
 
 	var copyErr error
@@ -205,7 +206,13 @@ func importPostgresSQL(ctx context.Context, dsn string, src io.Reader) error {
 		_ = stdin.Close()
 	}()
 
-	<-done
+	select {
+	case <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		_ = stdin.Close()
+		<-done
+	}
 
 	if err := cmd.Wait(); err != nil {
 		if copyErr != nil {
@@ -320,8 +327,16 @@ func writeFilteredTOC(toc []byte) (string, error) {
 
 func trimStderr(s string) string {
 	const max = 1024
-	if len(s) <= max {
-		return s
+	if len(s) > max {
+		s = s[:max] + "...(truncated)"
 	}
-	return s[:max] + "...(truncated)"
+	return redactDSN(s)
+}
+
+var dsnCredentialPattern = regexp.MustCompile(`(mongodb|postgresql|postgres)://[^\s@]*@`)
+
+// redactDSN replaces user:password credentials in connection-string URIs with
+// ***:*** to prevent password leakage in error messages and logs.
+func redactDSN(s string) string {
+	return dsnCredentialPattern.ReplaceAllString(s, "${1}://***:***@")
 }

@@ -1,10 +1,11 @@
 package service
 
 import (
+	"backend/internal/metrics"
 	"backend/internal/utils"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -189,7 +190,7 @@ COMMIT;
 		return "", fmt.Errorf("create PostgREST roles: %w", err)
 	}
 
-	log.Printf("PostgREST roles created/updated in project database (namespace=%s)", namespace)
+	slog.Info("PostgREST roles created/updated in project database", "namespace", namespace)
 	return authenticatorPassword, nil
 }
 
@@ -353,11 +354,12 @@ func (p *OperatorProvisioner) CreatePostgRESTResources(
 	// cert which fails x509 verification on all clients.
 	if p.externalDomain != "" {
 		if err := p.createPostgRESTIngressRoute(ctx, projectID, namespace, svcName); err != nil {
-			log.Printf("Warning: failed to create PostgREST IngressRoute for project %s: %v", projectID, err)
+			slog.Warn("Failed to create PostgREST IngressRoute", "project_id", projectID, "error", err)
+			metrics.SubResourceErrorsTotal.WithLabelValues("postgresql", "postgrest_ingress").Inc()
 		}
 	}
 
-	log.Printf("PostgREST resources created in namespace %s", namespace)
+	slog.Info("PostgREST resources created", "namespace", namespace, "project_id", projectID)
 	return jwtSecret, apiKey, nil
 }
 

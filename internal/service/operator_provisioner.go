@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -156,6 +156,7 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 	case "mongodb":
 		return p.createMongoDBCluster(ctx, projectID, name, cpu, memoryMB, storageGB, password, tier)
 	default:
+		metrics.ProvisioningErrorsTotal.WithLabelValues(dbType).Inc()
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
 }
@@ -164,22 +165,39 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 // Credentials are read from the operator-managed secret at call time and never stored.
 // name is derived deterministically from projectID so no resource ref needs to be persisted.
 func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.UUID, dbType string) (*ProvisionResult, error) {
+	start := time.Now()
 	name := p.ClusterNameForProject(projectID)
+
+	var res *ProvisionResult
+	var err error
+
 	switch dbType {
 	case "postgres", "postgresql":
 		ns := p.NamespaceForProject(projectID)
-		return p.getPostgresConnection(ctx, ns, name)
+		res, err = p.getPostgresConnection(ctx, ns, name)
 	case "mongodb":
 		ns := p.MongoNamespaceForProject(projectID)
-		return p.getMongoConnection(ctx, ns, name)
+		res, err = p.getMongoConnection(ctx, ns, name)
 	default:
-		return nil, fmt.Errorf("unsupported database type: %s", dbType)
+		err = fmt.Errorf("unsupported database type: %s", dbType)
 	}
+
+	if err != nil {
+		metrics.GetConnectionErrorsTotal.WithLabelValues(dbType).Inc()
+		metrics.GetConnectionDuration.WithLabelValues(dbType, "error").Observe(time.Since(start).Seconds())
+		slog.Error("Failed to get connection", "project_id", projectID, "db_type", dbType, "error", err)
+		return nil, err
+	}
+	metrics.GetConnectionDuration.WithLabelValues(dbType, "success").Observe(time.Since(start).Seconds())
+	return res, nil
 }
 
 func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid.UUID, dbType string) error {
 	start := time.Now()
-	_ = p.deleteIngressRouteTCP(ctx, projectID, dbType)
+	if err := p.deleteIngressRouteTCP(ctx, projectID, dbType); err != nil {
+		slog.Error("Failed to delete IngressRouteTCP", "project_id", projectID, "db_type", dbType, "error", err)
+		metrics.SubResourceErrorsTotal.WithLabelValues(dbType, "ingress_route_tcp").Inc()
+	}
 	switch dbType {
 	case "postgres", "postgresql":
 		ns := p.NamespaceForProject(projectID)
@@ -190,9 +208,10 @@ func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid
 		}
 		if err != nil {
 			metrics.ProvisioningDuration.WithLabelValues("postgres", "delete", "error").Observe(time.Since(start).Seconds())
+			slog.Error("Failed to delete project namespace", "namespace", ns, "project_id", projectID, "db_type", dbType, "error", err)
 			return fmt.Errorf("delete project namespace %s: %w", ns, err)
 		}
-		log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+		slog.Info("Deleted namespace (cascade)", "namespace", ns, "project_id", projectID, "db_type", "postgresql")
 		metrics.InstancesDeletedTotal.WithLabelValues("postgresql").Inc()
 		metrics.InstancesCurrent.WithLabelValues("postgresql").Dec()
 		metrics.ProvisioningDuration.WithLabelValues("postgres", "delete", "success").Observe(time.Since(start).Seconds())
@@ -206,9 +225,10 @@ func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid
 		}
 		if err != nil {
 			metrics.ProvisioningDuration.WithLabelValues("mongodb", "delete", "error").Observe(time.Since(start).Seconds())
+			slog.Error("Failed to delete project namespace", "namespace", ns, "project_id", projectID, "db_type", dbType, "error", err)
 			return fmt.Errorf("delete project namespace %s: %w", ns, err)
 		}
-		log.Printf("Deleted namespace %s (cascade) for project %s", ns, projectID)
+		slog.Info("Deleted namespace (cascade)", "namespace", ns, "project_id", projectID, "db_type", "mongodb")
 		metrics.InstancesDeletedTotal.WithLabelValues("mongodb").Inc()
 		metrics.InstancesCurrent.WithLabelValues("mongodb").Dec()
 		metrics.ProvisioningDuration.WithLabelValues("mongodb", "delete", "success").Observe(time.Since(start).Seconds())
@@ -261,7 +281,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	if _, err := p.core.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
 		return p.provisioningError("postgresql", tier, start, fmt.Errorf("create project namespace %s: %w", ns, err))
 	}
-	log.Printf("Created namespace %s for project %s", ns, projectID)
+	slog.Info("Created namespace", "namespace", ns, "project_id", projectID, "db_type", "postgresql")
 
 	// 2. Create the app user secret with the provided password.
 	appSecretName := name + "-app"
@@ -295,6 +315,8 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 				"labels":    p.projectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
+				"imageName":             "ghcr.io/cloudnative-pg/postgresql:16.3",
+				"imagePullPolicy":       "IfNotPresent",
 				"instances":             1,
 				"enableSuperuserAccess": true,
 				"bootstrap": map[string]interface{}{
@@ -334,11 +356,12 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 			if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
 				return p.provisioningError("postgresql", tier, start, fmt.Errorf("existing postgres cluster not ready: %w", err))
 			}
+			metrics.ProvisioningDuration.WithLabelValues("postgres", "create", "success").Observe(time.Since(start).Seconds())
 			return p.getPostgresConnection(ctx, ns, name)
 		}
 	}
 
-	log.Printf("Created PostgreSQL cluster %s/%s, waiting for ready", ns, name)
+	slog.Info("Created PostgreSQL cluster, waiting for ready", "namespace", ns, "name", name, "project_id", projectID, "db_type", "postgresql")
 	if err := p.waitForPostgresReady(ctx, ns, name); err != nil {
 		// Clean up: delete the entire namespace on failure.
 		_ = p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
@@ -354,13 +377,15 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	// 5. Setup PostgREST database roles (connects as superuser).
 	authPassword, roleErr := p.SetupPostgRESTRoles(ctx, ns, name)
 	if roleErr != nil {
-		log.Printf("Warning: failed to setup PostgREST roles for project %s: %v", projectID, roleErr)
+		slog.Warn("Failed to setup PostgREST roles", "project_id", projectID, "error", roleErr)
+		metrics.SubResourceErrorsTotal.WithLabelValues("postgresql", "postgrest_roles").Inc()
 	} else {
 		// 6. Deploy PostgREST (Deployment + Service + Secret + IngressRoute).
 		pgHost := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, ns)
 		jwtSecret, apiKey, pgrestErr := p.CreatePostgRESTResources(ctx, projectID, ns, pgHost, authPassword)
 		if pgrestErr != nil {
-			log.Printf("Warning: failed to deploy PostgREST for project %s: %v", projectID, pgrestErr)
+			slog.Warn("Failed to deploy PostgREST", "project_id", projectID, "error", pgrestErr)
+			metrics.SubResourceErrorsTotal.WithLabelValues("postgresql", "postgrest_deploy").Inc()
 		} else {
 			result.PostgRESTURL = p.PostgRESTURL(projectID)
 			result.JWTSecret = jwtSecret
@@ -371,7 +396,8 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	// 7. External access (Traefik TCP for direct Postgres connections).
 	if p.externalDomain != "" {
 		if routeErr := p.createIngressRouteTCP(ctx, projectID, "postgresql"); routeErr != nil {
-			log.Printf("Warning: failed to create IngressRouteTCP for %s: %v", name, routeErr)
+			slog.Warn("Failed to create IngressRouteTCP", "name", name, "project_id", projectID, "error", routeErr)
+			metrics.SubResourceErrorsTotal.WithLabelValues("postgresql", "ingress_route_tcp").Inc()
 		} else {
 			result.ExternalAccess = &ExternalAccess{
 				Hostname: p.ExternalHostname(projectID, "postgresql"),
@@ -399,7 +425,10 @@ func (p *OperatorProvisioner) provisioningError(dbType, tier string, start time.
 }
 
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
-	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	waitStart := time.Now()
+	iterations := 0
+	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+		iterations++
 		cluster, err := p.dynamic.Resource(p.cnpgGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return false, nil
@@ -411,8 +440,20 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespac
 		instances, _, _ := unstructured.NestedInt64(spec, "instances")
 		status, _, _ := unstructured.NestedMap(cluster.Object, "status")
 		readyInstances, _, _ := unstructured.NestedInt64(status, "readyInstances")
+		
+		if iterations%6 == 0 || readyInstances > 0 {
+			slog.Info("Postgres wait progress", "namespace", namespace, "name", name, "ready_instances", readyInstances, "target", instances)
+		}
+		
 		return readyInstances >= instances && readyInstances > 0, nil
 	})
+
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.WaitReadyDuration.WithLabelValues("postgresql", status).Observe(time.Since(waitStart).Seconds())
+	return err
 }
 func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
 	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
@@ -454,7 +495,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	if _, err := p.core.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
 		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create project namespace %s: %w", ns, err))
 	}
-	log.Printf("Created namespace %s for project %s", ns, projectID)
+	slog.Info("Created namespace", "namespace", ns, "project_id", projectID, "db_type", "mongodb")
 
 	// 2. Create service account required by MongoDB operator.
 	sa := &corev1.ServiceAccount{
@@ -515,26 +556,6 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 				"additionalMongodConfig": map[string]interface{}{
 					"net.port": 27017,
 				},
-				"podSpec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
-							"name":  "mongodb-exporter",
-							"image": "percona/mongodb_exporter:0.40",
-							"ports": []interface{}{
-								map[string]interface{}{
-									"name":          "metrics",
-									"containerPort": 9216,
-								},
-							},
-							"env": []interface{}{
-								map[string]interface{}{
-									"name":  "MONGODB_URI",
-									"value": "mongodb://localhost:27017",
-								},
-							},
-						},
-					},
-				},
 				"security": map[string]interface{}{
 					"authentication": map[string]interface{}{
 						"modes": []interface{}{"SCRAM"},
@@ -563,11 +584,33 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 							"spec": map[string]interface{}{
 								"containers": []interface{}{
 									map[string]interface{}{
-										"name": "mongod",
+										"name":            "mongod",
+										"imagePullPolicy": "IfNotPresent",
 										"resources": map[string]interface{}{
 											"limits": map[string]interface{}{
 												"cpu":    fmt.Sprintf("%.1f", cpu),
 												"memory": fmt.Sprintf("%.0fMi", memoryMB),
+											},
+										},
+									},
+									map[string]interface{}{
+										"name":            "mongodb-agent",
+										"imagePullPolicy": "IfNotPresent",
+									},
+									map[string]interface{}{
+										"name":            "mongodb-exporter",
+										"image":           "percona/mongodb_exporter:0.40",
+										"imagePullPolicy": "IfNotPresent",
+										"ports": []interface{}{
+											map[string]interface{}{
+												"name":          "metrics",
+												"containerPort": 9216,
+											},
+										},
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "MONGODB_URI",
+												"value": "mongodb://localhost:27017",
 											},
 										},
 									},
@@ -594,12 +637,13 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	_, err = p.dynamic.Resource(p.mongoGVR).Namespace(ns).Create(ctx, cluster, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
+			metrics.ProvisioningDuration.WithLabelValues("mongodb", "create", "success").Observe(time.Since(start).Seconds())
 			return p.getMongoConnection(ctx, ns, name)
 		}
 		return p.provisioningError("mongodb", tier, start, fmt.Errorf("create mongodb community: %w", err))
 	}
 
-	log.Printf("Created MongoDBCommunity %s/%s, waiting for ready", ns, name)
+	slog.Info("Created MongoDBCommunity, waiting for ready", "namespace", ns, "name", name, "project_id", projectID, "db_type", "mongodb")
 	if err := p.waitForMongoReady(ctx, ns, name); err != nil {
 		_ = p.core.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
 		return p.provisioningError("mongodb", tier, start, fmt.Errorf("mongodb not ready: %w", err))
@@ -611,7 +655,8 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	}
 	if p.externalDomain != "" {
 		if routeErr := p.createIngressRouteTCP(ctx, projectID, "mongodb"); routeErr != nil {
-			log.Printf("Warning: failed to create IngressRouteTCP for %s: %v", name, routeErr)
+			slog.Warn("Failed to create IngressRouteTCP", "name", name, "project_id", projectID, "error", routeErr)
+			metrics.SubResourceErrorsTotal.WithLabelValues("mongodb", "ingress_route_tcp").Inc()
 		} else {
 			result.ExternalAccess = &ExternalAccess{
 				Hostname: p.ExternalHostname(projectID, "mongodb"),
@@ -627,7 +672,10 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	return result, nil
 }
 func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
-	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	waitStart := time.Now()
+	iterations := 0
+	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+		iterations++
 		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -642,10 +690,19 @@ func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, 
 		phase, _ := status["phase"].(string)
 		msg, _ := status["message"].(string)
 		if phase != "" && phase != "Running" && phase != "running" && msg != "" {
-			log.Printf("[MongoDB %s/%s] phase=%q message=%q", namespace, name, phase, msg)
+			if iterations%6 == 0 {
+				slog.Info("MongoDB wait progress", "namespace", namespace, "name", name, "phase", phase, "message", msg)
+			}
 		}
 		return phase == "Running" || phase == "running", nil
 	})
+
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.WaitReadyDuration.WithLabelValues("mongodb", status).Observe(time.Since(waitStart).Seconds())
+	return err
 }
 func (p *OperatorProvisioner) getMongoConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
 	secretName := name + "-admin-password"
@@ -660,7 +717,7 @@ func (p *OperatorProvisioner) getMongoConnection(ctx context.Context, namespace,
 	host := fmt.Sprintf("%s-svc.%s.svc.cluster.local", name, namespace)
 	userInfo := url.UserPassword("admin", password)
 	return &ProvisionResult{
-		DSN:         fmt.Sprintf("mongodb://%s@%s:27017/admin?authSource=admin", userInfo.String(), host),
+		DSN:         fmt.Sprintf("mongodb://%s@%s:27017/app?authSource=admin", userInfo.String(), host),
 		ResourceRef: namespace + "/" + name,
 	}, nil
 }
@@ -811,7 +868,8 @@ func (p *OperatorProvisioner) collectK8sMetrics(ctx context.Context) {
 			metrics.K8sInstanceCount.WithLabelValues("postgresql", ns).Set(float64(count))
 		}
 	} else {
-		log.Printf("Warning: failed to list CNPG clusters for metrics: %v", err)
+		slog.Error("Failed to list CNPG clusters for metrics", "error", err)
+		metrics.MetricsCollectionErrorsTotal.WithLabelValues("postgresql").Inc()
 	}
 
 	mongoList, err := p.dynamic.Resource(p.mongoGVR).List(ctx, metav1.ListOptions{})
@@ -825,7 +883,8 @@ func (p *OperatorProvisioner) collectK8sMetrics(ctx context.Context) {
 			metrics.K8sInstanceCount.WithLabelValues("mongodb", ns).Set(float64(count))
 		}
 	} else {
-		log.Printf("Warning: failed to list MongoDBCommunity CRDs for metrics: %v", err)
+		slog.Error("Failed to list MongoDBCommunity CRDs for metrics", "error", err)
+		metrics.MetricsCollectionErrorsTotal.WithLabelValues("mongodb").Inc()
 	}
 
 	p.updateInstanceCountFromK8s(pgList, mongoList)

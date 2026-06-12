@@ -83,18 +83,20 @@ type TableMetadata struct {
 
 // TableIndexInfo describes one index on a table (from pg_catalog).
 type TableIndexInfo struct {
-	Name       string `json:"name"`
-	Unique     bool   `json:"unique"`
-	Primary    bool   `json:"primary"`
-	Method     string `json:"method"`
-	Definition string `json:"definition"`
-	Valid      bool   `json:"valid"`
+	Name       string   `json:"name"`
+	Table      string   `json:"table"`
+	Columns    []string `json:"columns"`
+	Unique     bool     `json:"unique"`
+	Primary    bool     `json:"primary"`
+	Method     string   `json:"method"`
+	Definition string   `json:"definition"`
+	Valid      bool     `json:"valid"`
 }
 
 // CreateIndexRequest is the body for POST .../tables/{table}/indexes.
 type CreateIndexRequest struct {
 	Name    string   `json:"name" binding:"required"`
-	Columns []string `json:"columns" binding:"required,min=1"`
+	Columns []string `json:"columns" binding:"required,min=1,max=32"`
 	Unique  bool     `json:"unique"`
 	Method  string   `json:"method"` // btree (default), hash, gin, gist, spgist, brin
 }

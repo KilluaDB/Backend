@@ -83,7 +83,7 @@ else
     --port "443:443@loadbalancer" \
     --port "5432:5432/tcp@loadbalancer" \
     --port "27017:27017/tcp@loadbalancer" \
-    --wait --timeout 5m
+    --wait --timeout 10m
 fi
 
 if ! kubectl config get-contexts "${K3D_CONTEXT}" >/dev/null 2>&1; then
@@ -118,7 +118,7 @@ helm upgrade --install cnpg cnpg/cloudnative-pg \
   --create-namespace \
   --set config.clusterWide=true \
   --set rbac.create=true \
-  --wait --timeout 3m
+  --wait --timeout 10m
 
 ok "CloudNativePG installed in postgres-operator"
 

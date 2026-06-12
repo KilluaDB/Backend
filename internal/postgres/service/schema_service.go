@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -40,13 +39,9 @@ func NewSchemaService(instanceConn infra.InstanceConnectionService, redisClient 
 	}
 }
 
-// isValidSchemaName checks PostgreSQL schema name (similar to identifier rules).
+// isValidSchemaName checks PostgreSQL schema name (reuses pre-compiled identifier pattern).
 func isValidSchemaName(name string) bool {
-	if name == "" || len(name) > 63 {
-		return false
-	}
-	matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_$]*$`, name)
-	return matched
+	return isValidIdentifier(name)
 }
 
 // VisualizeSchema generates a Mermaid ER diagram for a project's database schema

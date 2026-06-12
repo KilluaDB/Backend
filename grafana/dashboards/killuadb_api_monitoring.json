@@ -112,28 +112,44 @@
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "p95",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          }
         },
         {
           "expr": "histogram_quantile(0.90, sum(rate(killuadb_api_request_duration_seconds_bucket{method=~\"$method\",path=~\"$path\"}[5m])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "p90",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          }
         },
         {
           "expr": "histogram_quantile(0.75, sum(rate(killuadb_api_request_duration_seconds_bucket{method=~\"$method\",path=~\"$path\"}[5m])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "p75",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          }
         },
         {
           "expr": "histogram_quantile(0.50, sum(rate(killuadb_api_request_duration_seconds_bucket{method=~\"$method\",path=~\"$path\"}[5m])) by (le))",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "p50",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          }
         }
       ],
       "title": "Request latency",
@@ -311,7 +327,11 @@
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "Throughput",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          }
         }
       ],
       "title": "Throughput",

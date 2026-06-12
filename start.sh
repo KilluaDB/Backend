@@ -105,6 +105,55 @@ deploy_pgproxy() {
     print_success "pgproxy deployed (external DB access via Traefik :5432)"
 }
 
+# ─── Push Dashboards ──────────────────────────────────────────────────────────
+push_dashboards() {
+    print_info "Pushing Grafana dashboards..."
+    local GRAFANA_POD
+    GRAFANA_POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -n "$GRAFANA_POD" ]; then
+      print_info "Configuring Prometheus datasource..."
+      kubectl exec -n monitoring "$GRAFANA_POD" -- sh -c "
+        curl -s -X POST http://admin:${GRAFANA_PASSWORD:-admin123}@localhost:3000/api/datasources \
+          -H 'Content-Type: application/json' \
+          -d '{
+            \"name\": \"Prometheus\",
+            \"type\": \"prometheus\",
+            \"url\": \"http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090\",
+            \"access\": \"proxy\",
+            \"isDefault\": true,
+            \"uid\": \"dfooax2k8gjr4b\"
+          }' >/dev/null 2>&1
+      " || true
+
+      for dashboard_file in grafana/dashboards/*.json; do
+        [ ! -f "$dashboard_file" ] && continue
+        local name
+        name=$(basename "$dashboard_file" .json)
+        local tmp_json="/tmp/$name.json"
+        local tmp_payload="/tmp/payload-$name.json"
+        kubectl cp "$dashboard_file" "monitoring/$GRAFANA_POD:$tmp_json" >/dev/null 2>&1 || continue
+        local http_code
+        http_code=$(kubectl exec -n monitoring "$GRAFANA_POD" -- sh -c "
+          printf '{\"dashboard\": ' > $tmp_payload && \
+          cat $tmp_json >> $tmp_payload && \
+          printf ', \"overwrite\": true}' >> $tmp_payload && \
+          curl -s -w '%{http_code}' -o /tmp/response-$name.json \
+            -X POST http://admin:${GRAFANA_PASSWORD:-admin123}@localhost:3000/api/dashboards/db \
+            -H 'Content-Type: application/json' \
+            -d @$tmp_payload
+        " 2>/dev/null || echo "000")
+        http_code="${http_code: -3}"
+        if [ "$http_code" = "200" ]; then
+          print_success "  $name imported"
+        else
+          print_warning "  Failed to import $name (HTTP $http_code)"
+        fi
+      done
+    else
+      print_warning "Grafana pod not found, skipping dashboard push"
+    fi
+}
+
 # ─── Port-forward ─────────────────────────────────────────────────────────────
 PF_PID=""
 GRAFANA_PF_PID=""
@@ -115,23 +164,23 @@ start_port_forward() {
     kubectl port-forward svc/backend "${port}:8080" -n default &
     PF_PID=$!
 
-    # Port-forward the Kubernetes Prometheus so local Grafana can reach it
+    # Try to port-forward Grafana if available
+    if kubectl get svc/grafana -n monitoring &>/dev/null; then
+        kubectl port-forward svc/grafana 3000:80 -n monitoring &
+        GRAFANA_PF_PID=$!
+        print_success "Grafana listening on http://localhost:3000"
+    fi
+
+    # Try to port-forward Prometheus if available
     if kubectl get svc/monitoring-kube-prometheus-prometheus -n monitoring &>/dev/null; then
         kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090 -n monitoring &
         PROM_PF_PID=$!
-        print_success "Kubernetes Prometheus listening on http://localhost:9090"
+        print_success "Prometheus listening on http://localhost:9090"
     fi
 
     sleep 1
     kill -0 "$PF_PID" 2>/dev/null || { print_error "Port-forward failed"; exit 1; }
     print_success "Listening on http://localhost:$port"
-}
-
-# ─── Observability ────────────────────────────────────────────────────────────
-start_observability() {
-    print_info "Starting Grafana via Docker Compose..."
-    docker-compose up -d grafana
-    print_success "Grafana running at http://localhost:3000 (admin/grafana)"
 }
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
@@ -147,8 +196,8 @@ stream_logs() {
 cleanup() {
     echo ""
     [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null && print_info "Backend port-forward stopped"
+    [ -n "${GRAFANA_PF_PID:-}" ] && kill "$GRAFANA_PF_PID" 2>/dev/null && print_info "Grafana port-forward stopped"
     [ -n "${PROM_PF_PID:-}" ] && kill "$PROM_PF_PID" 2>/dev/null && print_info "Prometheus port-forward stopped"
-    docker-compose stop grafana || true
     print_info "Cluster still running. Bye!"
     exit 0
 }
@@ -171,7 +220,7 @@ main() {
     build_image
     deploy_backend
     deploy_pgproxy
-    start_observability
+    push_dashboards
     start_port_forward
     stream_logs
 }

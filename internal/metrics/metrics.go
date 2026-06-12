@@ -18,8 +18,6 @@ var (
 		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 	}, []string{"method", "path"})
 
-
-
 	// ── DB pool / client count ──
 	PgPoolCount = promauto.NewGauge(
 		prometheus.GaugeOpts{
@@ -132,6 +130,51 @@ var (
 		prometheus.CounterOpts{
 			Name: "backend_provisioning_errors_total",
 			Help: "Total provisioning failures",
+		},
+		[]string{"type"},
+	)
+
+	// ── Connection lookup ──
+	GetConnectionDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "killuadb_get_connection_duration_seconds",
+			Help:    "Time taken to retrieve connection info from K8s secrets.",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+		},
+		[]string{"type", "status"},
+	)
+	GetConnectionErrorsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "killuadb_get_connection_errors_total",
+			Help: "Total GetConnection failures by DB type.",
+		},
+		[]string{"type"},
+	)
+
+	// ── Sub-resource failures (non-fatal) ──
+	SubResourceErrorsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "killuadb_provisioning_sub_errors_total",
+			Help: "Non-fatal sub-resource failures during provisioning (PostgREST roles, deployments, ingress routes).",
+		},
+		[]string{"type", "sub_operation"},
+	)
+
+	// ── Wait-loop duration ──
+	WaitReadyDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "killuadb_wait_ready_duration_seconds",
+			Help:    "Time spent waiting for DB instance to become ready.",
+			Buckets: []float64{5, 15, 30, 60, 120, 300, 600},
+		},
+		[]string{"type", "status"},
+	)
+
+	// ── Metrics collection health ──
+	MetricsCollectionErrorsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "killuadb_metrics_collection_errors_total",
+			Help: "Errors encountered during periodic K8s metrics collection.",
 		},
 		[]string{"type"},
 	)

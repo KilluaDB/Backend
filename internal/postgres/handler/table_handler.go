@@ -526,13 +526,17 @@ func (h *TableHandler) ListIndexes(c *gin.Context) {
 	}
 	list, err := h.tableService.ListTableIndexes(c.Request.Context(), projectUUID, userUUID, schema, table)
 	if err != nil {
+		if errors.Is(err, pgservice.ErrTableNotFound) {
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
+		}
 		if failTableInstanceError(c, err) {
 			return
 		}
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	response.Success(c, http.StatusOK, gin.H{"indexes": list}, "Indexes listed successfully")
+	response.Success(c, http.StatusOK, list, "Indexes listed successfully")
 }
 
 // CreateIndex POST /postgres/tables/:table/indexes
@@ -563,6 +567,9 @@ func (h *TableHandler) CreateIndex(c *gin.Context) {
 		case errors.Is(err, pgservice.ErrIndexAlreadyExists):
 			pgFail(c, http.StatusConflict, err, "Index already exists")
 			return
+		case errors.Is(err, pgservice.ErrTableNotFound):
+			pgFail(c, http.StatusNotFound, err, "Table does not exist")
+			return
 		}
 		if failTableInstanceError(c, err) {
 			return
@@ -570,7 +577,17 @@ func (h *TableHandler) CreateIndex(c *gin.Context) {
 		pgFail(c, http.StatusBadRequest, err, err.Error())
 		return
 	}
-	response.Success(c, http.StatusCreated, nil, "Index created successfully")
+	method := req.Method
+	if method == "" {
+		method = "btree"
+	}
+	response.Success(c, http.StatusCreated, gin.H{
+		"name":    req.Name,
+		"table":   table,
+		"columns": req.Columns,
+		"unique":  req.Unique,
+		"method":  method,
+	}, "Index created successfully")
 }
 
 // DropIndex DELETE /postgres/tables/:table/indexes/:index

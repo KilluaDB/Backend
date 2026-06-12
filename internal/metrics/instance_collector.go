@@ -31,8 +31,10 @@ func (c *InstanceCollector) Collect(ch chan<- prometheus.Metric) {
 	rows, err := c.db.Query(context.Background(),
 		`SELECT db_type, COUNT(*) FROM projects WHERE status = 'running' GROUP BY db_type`)
 	if err != nil {
+		ch <- prometheus.NewInvalidMetric(c.activeDesc, err)
 		return
 	}
+
 	defer rows.Close()
 	counts := map[string]int64{
 		"postgresql": 0,

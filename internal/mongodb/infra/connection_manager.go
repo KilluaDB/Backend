@@ -58,28 +58,38 @@ func (s *MongoConnectionManager) GetDatabase(ctx context.Context, userID, projec
 
 func (s *MongoConnectionManager) acquireCachedClient(ctx context.Context, projectID uuid.UUID, dsn string) (*mongo.Client, string, error) {
 	s.clientMu.Lock()
-	if entry, ok := s.clients[projectID]; ok {
-		if entry.dsn != dsn || entry.client == nil {
-			delete(s.clients, projectID)
-			s.clientMu.Unlock()
-			if entry.client != nil {
-				_ = entry.client.Disconnect(context.Background())
-			}
-			return s.connectAndCacheClient(ctx, projectID, dsn)
-		}
-
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		pingErr := entry.client.Ping(pingCtx, nil)
-		cancel()
-		if pingErr == nil {
-			s.clientMu.Unlock()
-			s.emitClientMetrics()
-			return entry.client, entry.dbName, nil
-		}
-
+	entry, ok := s.clients[projectID]
+	if ok && (entry.dsn != dsn || entry.client == nil) {
+		// DSN changed or client is nil — evict and reconnect.
 		delete(s.clients, projectID)
 		s.clientMu.Unlock()
-		_ = entry.client.Disconnect(context.Background())
+		if entry.client != nil {
+			_ = entry.client.Disconnect(context.Background())
+		}
+		return s.connectAndCacheClient(ctx, projectID, dsn)
+	}
+	if ok {
+		// Copy the entry and release the lock BEFORE doing network I/O.
+		cachedClient := entry.client
+		cachedDBName := entry.dbName
+		s.clientMu.Unlock()
+
+		// Ping outside the critical section to avoid blocking all goroutines.
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		pingErr := cachedClient.Ping(pingCtx, nil)
+		cancel()
+		if pingErr == nil {
+			s.emitClientMetrics()
+			return cachedClient, cachedDBName, nil
+		}
+
+		// Ping failed — evict the stale entry and reconnect.
+		s.clientMu.Lock()
+		if current, exists := s.clients[projectID]; exists && current.client == cachedClient {
+			delete(s.clients, projectID)
+		}
+		s.clientMu.Unlock()
+		_ = cachedClient.Disconnect(context.Background())
 		return s.connectAndCacheClient(ctx, projectID, dsn)
 	}
 	s.clientMu.Unlock()
@@ -94,22 +104,38 @@ func (s *MongoConnectionManager) connectAndCacheClient(ctx context.Context, proj
 	}
 	name := databaseNameFromDSN(dsn)
 
+	var retClient *mongo.Client
+	var retName string
+	var discardClient *mongo.Client
+
 	s.clientMu.Lock()
-	defer s.clientMu.Unlock()
 	// Another goroutine may have connected while we were dialing.
 	if existing, ok := s.clients[projectID]; ok {
 		if existing.dsn == dsn && existing.client != nil {
-			_ = client.Disconnect(context.Background())
-			s.emitClientMetrics()
-			return existing.client, existing.dbName, nil
+			// Use the winner; discard our connection after releasing the lock.
+			discardClient = client
+			retClient = existing.client
+			retName = existing.dbName
+		} else {
+			if existing.client != nil {
+				discardClient = existing.client
+			}
+			s.clients[projectID] = cachedMongoClient{dsn: dsn, dbName: name, client: client}
+			retClient = client
+			retName = name
 		}
-		if existing.client != nil {
-			_ = existing.client.Disconnect(context.Background())
-		}
+	} else {
+		s.clients[projectID] = cachedMongoClient{dsn: dsn, dbName: name, client: client}
+		retClient = client
+		retName = name
 	}
-	s.clients[projectID] = cachedMongoClient{dsn: dsn, dbName: name, client: client}
+	s.clientMu.Unlock()
+
+	if discardClient != nil {
+		_ = discardClient.Disconnect(context.Background())
+	}
 	s.emitClientMetrics()
-	return client, name, nil
+	return retClient, retName, nil
 }
 
 func (s *MongoConnectionManager) connectMongoClient(ctx context.Context, dsn string) (*mongo.Client, error) {

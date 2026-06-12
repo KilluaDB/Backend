@@ -7,19 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
+	"strings"
 )
 
 // exportMongo runs mongodump --archive --gzip and streams the resulting archive to dst.
-// The archive contains all databases the user can read, packaged as a single gzipped stream
-// suitable for `mongorestore --archive --gzip`.
+// The archive contains all collections in the project's database, packaged as a single
+// gzipped stream suitable for `mongorestore --archive --gzip`.
 func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
 	cmd := exec.CommandContext(ctx,
 		"mongodump",
 		"--uri="+dsn,
 		"--archive",
 		"--gzip",
-		"--quiet",
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -35,11 +36,11 @@ func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
 
 	reader := bufio.NewReader(stdout)
 	if _, err := reader.Peek(1); err != nil {
-		_ = cmd.Wait()
+		waitErr := cmd.Wait()
 		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
-			return fmt.Errorf("mongodump produced no output: %s", trimStderr(stderr.String()))
+			return fmt.Errorf("mongodump produced no output (exit: %v): %s", waitErr, trimStderr(stderr.String()))
 		}
-		return fmt.Errorf("mongodump read: %w: %s", err, trimStderr(stderr.String()))
+		return fmt.Errorf("mongodump read: %w (exit: %v): %s", err, waitErr, trimStderr(stderr.String()))
 	}
 
 	if _, copyErr := io.Copy(dst, reader); copyErr != nil {
@@ -54,17 +55,29 @@ func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
 	return nil
 }
 
+// stripMongoDatabase removes the database component from a MongoDB connection string.
+// mongorestore with --archive treats a database in the URI as an implicit --db flag,
+// which causes a fatal deprecation error.
+func stripMongoDatabase(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	u.Path = "/"
+	return u.String()
+}
+
 // importMongo streams src into mongorestore --archive --gzip --drop.
 // The archive is assumed to be a gzipped mongodump --archive stream; mongorestore
 // detects the format automatically from --archive + --gzip flags.
 func importMongo(ctx context.Context, dsn string, src io.Reader) error {
+	restoreURI := stripMongoDatabase(dsn)
 	cmd := exec.CommandContext(ctx,
 		"mongorestore",
-		"--uri="+dsn,
+		"--uri="+restoreURI,
 		"--archive",
 		"--gzip",
 		"--drop",
-		"--quiet",
 	)
 
 	stdin, err := cmd.StdinPipe()
@@ -73,6 +86,10 @@ func importMongo(ctx context.Context, dsn string, src io.Reader) error {
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	// mongorestore writes progress/diagnostics to stdout as well; capture it
+	// so failures are diagnosable when stderr alone is empty.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start mongorestore: %w", err)
@@ -86,13 +103,30 @@ func importMongo(ctx context.Context, dsn string, src io.Reader) error {
 		_ = stdin.Close()
 	}()
 
-	<-done
+	// Wait for the copy goroutine, but bail out early if the context is
+	// cancelled (e.g. client disconnect). Closing stdin unblocks a pending
+	// write; the process kill unblocks a stuck read from the HTTP body.
+	select {
+	case <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		_ = stdin.Close()
+		<-done
+	}
 
 	if err := cmd.Wait(); err != nil {
-		if copyErr != nil {
-			return fmt.Errorf("mongorestore failed: %w (copy: %v): %s", err, copyErr, trimStderr(stderr.String()))
+		combined := trimStderr(stderr.String() + stdout.String())
+		
+		// mongorestore fails with EOF if the archive contains no collections/documents.
+		// We treat restoring an empty database as a success rather than a 500 error.
+		if strings.Contains(combined, "Failed: EOF") && strings.Contains(combined, "0 document(s) restored successfully") {
+			return nil
 		}
-		return fmt.Errorf("mongorestore failed: %w: %s", err, trimStderr(stderr.String()))
+		
+		if copyErr != nil {
+			return fmt.Errorf("mongorestore failed: %w (copy: %v): %s", err, copyErr, combined)
+		}
+		return fmt.Errorf("mongorestore failed: %w: %s", err, combined)
 	}
 	if copyErr != nil {
 		return fmt.Errorf("copy import data: %w: %s", copyErr, trimStderr(stderr.String()))

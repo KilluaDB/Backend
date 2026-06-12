@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -135,7 +135,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 // provisionInstanceAsync provisions the database instance and updates its status.
 // Credentials are never stored — GetConnection derives them from K8s on demand.
 func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID uuid.UUID, dbType, resourceTier, password string) {
-	log.Printf("Provisioning DB instance for project %s (type=%s tier=%s)", projectID, dbType, resourceTier)
+	slog.Info("Provisioning DB instance for project", "project_id", projectID, "db_type", dbType, "tier", resourceTier)
 
 	// Timeout must exceed the operator wait loops (10 min each) with margin.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -143,9 +143,9 @@ func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID u
 
 	_, err := s.provisioner.CreateInstance(ctx, projectID, dbType, resourceTier, password)
 	if err != nil {
-		log.Printf("ERROR: provision failed for project %s: %v", projectID, err)
+		slog.Error("Provision failed for project", "project_id", projectID, "error", err)
 		if statusErr := s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "failed"); statusErr != nil {
-			log.Printf("ERROR: failed to mark project %s as failed: %v", projectID, statusErr)
+			slog.Error("Failed to mark project as failed", "project_id", projectID, "error", statusErr)
 		}
 
 		return
@@ -153,10 +153,10 @@ func (s *ProjectService) provisionInstanceAsync(ctx context.Context, projectID u
 
 	// Only store status — not the DSN. Credentials are read from K8s at connection time.
 	if err := s.projectRepo.UpdateRuntimeStatus(ctx, projectID, "running"); err != nil {
-		log.Printf("ERROR: failed to mark project %s as running: %v", projectID, err)
+		slog.Error("Failed to mark project as running", "project_id", projectID, "error", err)
 	}
 
-	log.Printf("DB instance provisioned for project %s", projectID)
+	slog.Info("DB instance provisioned for project", "project_id", projectID)
 }
 
 func (s *ProjectService) GetProjectByID(ctx context.Context, projectID string) (*model.Project, error) {
@@ -233,7 +233,7 @@ func (s *ProjectService) DeleteProjectByIDAndUserID(ctx context.Context, project
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := s.provisioner.DeleteInstance(ctx, projectUUID, project.DBType); err != nil {
-		log.Printf("Warning: failed to delete K8s resource for project %s: %v", projectID, err)
+		slog.Warn("Failed to delete K8s resource for project", "project_id", projectID, "error", err)
 	}
 	if s.poolEvicter != nil {
 		s.poolEvicter.EvictProject(projectUUID)

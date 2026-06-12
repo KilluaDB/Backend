@@ -72,6 +72,7 @@ spec:
           annotations:
             summary: "Backend metrics endpoint unreachable"
             description: "Prometheus cannot scrape the backend /metrics endpoint. The application may be down."
+---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -88,12 +89,13 @@ spec:
     matchNames:
       - default
   podMetricsEndpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s
+---
 apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+kind: PodMonitor
 metadata:
   name: cnpg-clusters
   namespace: monitoring
@@ -102,11 +104,12 @@ metadata:
     release: monitoring
 spec:
   selector:
-    matchLabels:
-      cnpg.io/cluster: "true"
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
   namespaceSelector:
     any: true
-  endpoints:
+  podMetricsEndpoints:
     - port: metrics
       interval: 30s
       scrapeTimeout: 10s
@@ -115,3 +118,23 @@ spec:
         - sourceLabels: [__meta_kubernetes_namespace]
           targetLabel: namespace
           action: replace
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mongodb-clusters
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchExpressions:
+      - key: statefulset.kubernetes.io/pod-name
+        operator: Exists
+  namespaceSelector:
+    any: true
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
