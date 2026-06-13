@@ -213,13 +213,9 @@ components:
           description: false if the index is invalid (e.g. after a failed concurrent build)
 
     PostgresIndexesListData:
-      type: object
-      required: [indexes]
-      properties:
-        indexes:
-          type: array
-          items:
-            $ref: '#/components/schemas/PostgresTableIndexInfo'
+      type: array
+      items:
+        $ref: '#/components/schemas/PostgresTableIndexInfo'
 
     PostgresCreateIndexRequest:
       type: object
@@ -3246,19 +3242,24 @@ paths:
                 status: success
                 message: Indexes listed successfully
                 data:
-                  indexes:
-                    - name: customers_pkey
-                      unique: true
-                      primary: true
-                      method: btree
-                      definition: CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
-                      valid: true
-                    - name: idx_customers_email
-                      unique: true
-                      primary: false
-                      method: btree
-                      definition: CREATE UNIQUE INDEX idx_customers_email ON public.customers USING btree (email)
-                      valid: true
+                  - name: customers_pkey
+                    table: customers
+                    columns:
+                      - id
+                    unique: true
+                    primary: true
+                    method: btree
+                    definition: CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
+                    valid: true
+                  - name: idx_customers_email
+                    table: customers
+                    columns:
+                      - email
+                    unique: true
+                    primary: false
+                    method: btree
+                    definition: CREATE UNIQUE INDEX idx_customers_email ON public.customers USING btree (email)
+                    valid: true
         '400':
           description: Invalid parameters
           content:
