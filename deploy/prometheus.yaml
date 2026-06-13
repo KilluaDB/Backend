@@ -1,0 +1,140 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dbaas-alerts
+  namespace: monitoring
+  labels:
+    app: dbaas
+    release: monitoring
+spec:
+  groups:
+    - name: dbaas
+      rules:
+        - alert: DBInstancesApproachingLimit
+          expr: backend_pg_pool_count + backend_mongo_client_count > 8000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DB instances approaching namespace capacity limit"
+            description: "Current instance count {{ $value }} is approaching the ~10k namespace limit. Consider sharding (see operator_provisioner.go:26-51)."
+
+        - alert: HighProvisioningFailureRate
+          expr: rate(backend_provisioning_errors_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High provisioning failure rate"
+            description: "Provisioning errors are occurring at {{ $value | humanize }} per second over the last 5 minutes."
+
+        - alert: HighQueryLatency
+          expr: histogram_quantile(0.99, rate(backend_pg_query_duration_seconds_bucket[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High PG query latency (99th percentile > 5s)"
+            description: "99th percentile query latency is {{ $value }}s. Check for slow queries or resource contention."
+
+        - alert: HighHttpErrorRate
+          expr: rate(backend_http_requests_total{status=~"5.."}[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High HTTP 5xx error rate"
+            description: "HTTP 5xx errors at {{ $value | humanize }} per second. Check backend logs."
+
+        - alert: ProvisioningTooSlow
+          expr: histogram_quantile(0.95, rate(backend_provisioning_duration_seconds_bucket[5m])) > 300
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Provisioning taking too long (p95 > 5 min)"
+            description: "95th percentile provisioning time is {{ $value }}s. Check K8s resource availability and operator health."
+
+        - alert: PostgresPoolErrors
+          expr: rate(backend_pg_pool_errors_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres connection pool errors detected"
+            description: "Pool errors occurring at {{ $value | humanize }} per second. Check connectivity to Postgres instances."
+
+        - alert: NoBackendMetrics
+          expr: up{job=~".*backend.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend metrics endpoint unreachable"
+            description: "Prometheus cannot scrape the backend /metrics endpoint. The application may be down."
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: backend
+  namespace: monitoring
+  labels:
+    app: backend
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: backend
+  namespaceSelector:
+    matchNames:
+      - default
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cnpg-clusters
+  namespace: monitoring
+  labels:
+    app: cnpg
+    release: monitoring
+spec:
+  selector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  namespaceSelector:
+    any: true
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      path: /metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+          action: replace
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mongodb-clusters
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchExpressions:
+      - key: statefulset.kubernetes.io/pod-name
+        operator: Exists
+  namespaceSelector:
+    any: true
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

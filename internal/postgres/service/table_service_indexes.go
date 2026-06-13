@@ -15,6 +15,9 @@ var allowedIndexMethods = map[string]struct{}{
 	"btree": {}, "hash": {}, "gin": {}, "gist": {}, "spgist": {}, "brin": {},
 }
 
+// maxIndexColumns is the upper bound on how many columns a single index can reference.
+const maxIndexColumns = 32
+
 func normalizeIndexMethod(m string) string {
 	m = strings.ToLower(strings.TrimSpace(m))
 	if m == "" {
@@ -34,6 +37,13 @@ func (s *TableService) ListTableIndexes(ctx context.Context, projectID, userID u
 	}
 
 	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) ([]model.TableIndexInfo, error) {
+		exists, err := s.tableRepo.TableExists(ctx, pool, schema, table)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrTableNotFound
+		}
 		return s.tableRepo.ListIndexes(ctx, pool, schema, table)
 	})
 }
@@ -56,6 +66,9 @@ func (s *TableService) CreateTableIndex(ctx context.Context, projectID, userID u
 	if len(req.Columns) == 0 {
 		return fmt.Errorf("%w: at least one column is required", ErrInvalidTableRequest)
 	}
+	if len(req.Columns) > maxIndexColumns {
+		return fmt.Errorf("%w: too many columns (max %d)", ErrInvalidTableRequest, maxIndexColumns)
+	}
 	for _, col := range req.Columns {
 		if err := validateRowColumnIdentifier(col); err != nil {
 			return fmt.Errorf("invalid column name %q: %w", col, err)
@@ -74,6 +87,8 @@ func (s *TableService) CreateTableIndex(ctx context.Context, projectID, userID u
 				switch pgErr.Code {
 				case "42710", "42P07":
 					return fmt.Errorf("%w: %v", ErrIndexAlreadyExists, err)
+				case "42P01":
+					return fmt.Errorf("%w: %v", ErrTableNotFound, err)
 				}
 			}
 			return err

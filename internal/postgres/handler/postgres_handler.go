@@ -5,9 +5,9 @@ package handler
 
 // PostgresHandler groups HTTP handlers for all Postgres project APIs (tables/rows/columns, schema, query).
 type PostgresHandler struct {
-	Table  *TableHandler
-	Schema *SchemaHandler
-	Query  *QueryHandler
+	Table     *TableHandler
+	Schema    *SchemaHandler
+	Query     *QueryHandler
 	Dashboard *DashboardHandler
 	TextToSQL *TextToSQLHandler
 }

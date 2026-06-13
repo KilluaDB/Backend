@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -85,17 +84,13 @@ func NewSchemaService(instanceConn infra.InstanceConnectionService, redisClient 
 	}
 }
 
-// isValidSchemaName checks PostgreSQL schema name (similar to identifier rules).
+// isValidSchemaName checks PostgreSQL schema name (reuses pre-compiled identifier pattern).
 func isValidSchemaName(name string) bool {
-	if name == "" || len(name) > 63 {
-		return false
-	}
-	matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_$]*$`, name)
-	return matched
+	return isValidIdentifier(name)
 }
 
 // VisualizeSchema generates a Mermaid ER diagram for a project's database schema
-func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, schema string) (string, error) {
+func (s *SchemaService) VisualizeSchema(ctx context.Context, userID uuid.UUID, projectID uuid.UUID, schema string) (string, error) {
 	schema = strings.TrimSpace(schema)
 	if schema == "" {
 		schema = "public"
@@ -103,16 +98,14 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 	if !isValidSchemaName(schema) {
 		return "", ErrInvalidSchema
 	}
-
-	ctx := context.Background()
-	pool, err := s.schemaPool(ctx, userID, projectID)
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
 	if err != nil {
 		return "", err
 	}
 
 	schemaRepo := repository.NewSchemaRepository(pool)
 
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel2()
 
 	mermaidDiagram, err := GenerateSchemaVisualization(ctx2, schemaRepo, schema)

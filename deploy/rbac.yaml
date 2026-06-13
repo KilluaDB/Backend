@@ -5,64 +5,62 @@ metadata:
   name: backend
   namespace: default
 ---
-# Postgres instances namespace: backend can create/manage Cluster and secrets.
+# Postgres: ClusterRole for namespace-per-project (backend creates/deletes namespaces dynamically).
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: backend-db-instances
-  namespace: postgres-instances
+  name: backend-db-manager
 rules:
+  # Namespace lifecycle (create/delete per-project namespaces)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "delete"]
+  # CNPG Cluster CRs
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Secrets (DB credentials, PostgREST config)
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-  - apiGroups: ["traefik.containo.us"]
-    resources: ["ingressroutetcps"]
+  # ServiceAccounts (MongoDB operator requires mongodb-database SA per namespace)
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "get", "list", "delete"]
+  # PostgREST Deployments
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # PostgREST Services
+  - apiGroups: [""]
+    resources: ["services"]
     verbs: ["create", "get", "list", "watch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: backend-db-instances
-  namespace: postgres-instances
-subjects:
-  - kind: ServiceAccount
-    name: backend
-    namespace: default
-roleRef:
-  kind: Role
-  name: backend-db-instances
-  apiGroup: rbac.authorization.k8s.io
----
-# MongoDB instances namespace: backend can create/manage MongoDBCommunity and secrets.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: backend-db-instances
-  namespace: mongodb-instances
-rules:
+  # Traefik routes (TCP for Postgres direct access + HTTP for PostgREST)
+  - apiGroups: ["traefik.containo.us"]
+    resources: ["ingressroutetcps", "ingressroutes"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # RoleBindings (for MongoDB per-namespace RBAC)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "delete"]
+  # MongoDB CRs in per-project namespaces
   - apiGroups: ["mongodbcommunity.mongodb.com"]
     resources: ["mongodbcommunity"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Permissions delegated to mongodb-database SA via per-namespace RoleBinding
   - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-  - apiGroups: ["traefik.containo.us"] 
-    resources: ["ingressroutetcps"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    resources: ["configmaps", "pods", "events"]
+    verbs: ["get", "list", "watch", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: backend-db-instances
-  namespace: mongodb-instances
+  name: backend-db-manager
 subjects:
   - kind: ServiceAccount
     name: backend
     namespace: default
 roleRef:
-  kind: Role
-  name: backend-db-instances
+  kind: ClusterRole
+  name: backend-db-manager
   apiGroup: rbac.authorization.k8s.io

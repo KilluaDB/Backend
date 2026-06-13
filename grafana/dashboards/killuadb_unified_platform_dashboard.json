@@ -1,0 +1,703 @@
+{
+  "id": null,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Active Database Instances",
+      "gridPos": {
+        "w": 24,
+        "h": 1,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active Postgres Instances",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "max(backend_instances_current{type=\"postgresql\"})",
+          "legendFormat": "Postgres",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active MongoDB Instances",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "max(backend_instances_current{type=\"mongodb\"})",
+          "legendFormat": "MongoDB",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total Instances Created",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(backend_instances_created_total) or vector(0)",
+          "legendFormat": "Created",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total Instances Deleted",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(backend_instances_deleted_total) or vector(0)",
+          "legendFormat": "Deleted",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Provisioning & System Health",
+      "gridPos": {
+        "w": 24,
+        "h": 1,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Provisioning Duration (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, type, operation) (rate(killuadb_provisioning_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{type}} - {{operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Wait Ready Duration (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(killuadb_wait_ready_duration_seconds_bucket[$__rate_interval])) by (le, type))",
+          "legendFormat": "Wait {{type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Provisioning Errors & Sub-Resource Failures",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(increase(backend_provisioning_errors_total[$__rate_interval])) by (type)",
+          "legendFormat": "Errors: {{type}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "rate(killuadb_provisioning_sub_errors_total[$__rate_interval])",
+          "legendFormat": "Sub-error: {{sub_operation}} ({{type}})",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "GetConnection Latency (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(killuadb_get_connection_duration_seconds_bucket[$__rate_interval])) by (le, type)) or vector(0)",
+          "legendFormat": "{{type}} GetConnection",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "barchart",
+      "title": "Instances Lifecycle Rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 6,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(increase(backend_instances_created_total[$__rate_interval])) by (type)",
+          "legendFormat": "Created: {{type}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(increase(backend_instances_deleted_total[$__rate_interval])) by (type)",
+          "legendFormat": "Deleted: {{type}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "stacking": "normal",
+        "barWidth": 0.8
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Internal Meta-Database Connection Metrics",
+      "gridPos": {
+        "w": 24,
+        "h": 1,
+        "x": 0,
+        "y": 28
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Cached Connection Pools",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 0,
+        "y": 29
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "backend_pg_pool_count",
+          "legendFormat": "Postgres Pools",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "backend_mongo_client_count",
+          "legendFormat": "Mongo Clients",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Meta Postgres Connection States",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 8,
+        "y": 29
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(backend_pg_pool_acquired_connections) or vector(0)",
+          "legendFormat": "Acquired",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(backend_pg_pool_idle_connections) or vector(0)",
+          "legendFormat": "Idle",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Meta DB Query Latency (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 16,
+        "y": 29
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(backend_pg_query_duration_seconds_bucket[$__rate_interval]))) or vector(0)",
+          "legendFormat": "PG: {{operation}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(backend_mongo_query_duration_seconds_bucket[$__rate_interval]))) or vector(0)",
+          "legendFormat": "Mongo: {{operation}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Tenant Database Cluster Health",
+      "gridPos": {
+        "w": 24,
+        "h": 1,
+        "x": 0,
+        "y": 37
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "CNPG Cluster Up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 8,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "cnpg_collector_up or vector(0)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "CNPG Active Connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 8,
+        "x": 6,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(cnpg_backends_total) by (pod) or vector(0)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "CNPG WAL Records",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 8,
+        "x": 12,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "sum(cnpg_collector_pg_wal) by (pod) or vector(0)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "MongoDB Connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 8,
+        "x": 18,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "mongodb_ss_connections{conn_type=\"current\"} or vector(0)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "KilluaDB Unified Platform Dashboard",
+  "uid": "killuadb-unified",
+  "version": 7
+}

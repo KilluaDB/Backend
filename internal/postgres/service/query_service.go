@@ -1,13 +1,13 @@
 package service
 
 import (
+	"backend/internal/metrics"
 	"backend/internal/model"
 	"backend/internal/postgres/infra"
 	"context"
 	"errors"
 	"fmt"
 	"regexp"
-	_ "strconv"
 	"strings"
 	"time"
 
@@ -229,8 +229,12 @@ func (s *QueryService) executeSQLQuery(ctx context.Context, runner pgQueryRunner
 }
 
 func (s *QueryService) executeSelectQuery(ctx context.Context, runner pgQueryRunner, query string) (*QueryResult, error) {
+	start := time.Now()
 	rows, err := runner.Query(ctx, query)
+	duration := time.Since(start).Seconds()
+	metrics.PgQueryDuration.WithLabelValues("select").Observe(duration)
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("postgres", "select").Inc()
 		return &QueryResult{Error: err.Error()}, nil
 	}
 	defer rows.Close()
@@ -289,8 +293,13 @@ func (s *QueryService) executeSelectQuery(ctx context.Context, runner pgQueryRun
 }
 
 func (s *QueryService) executeNonSelectQuery(ctx context.Context, runner pgQueryRunner, query string) (*QueryResult, error) {
+	start := time.Now()
 	cmdTag, err := runner.Exec(ctx, query)
+	duration := time.Since(start).Seconds()
+	metrics.PgQueryDuration.WithLabelValues("select").Observe(duration)
+
 	if err != nil {
+		metrics.DbErrorsTotal.WithLabelValues("postgres", "exec").Inc()
 		return &QueryResult{Error: err.Error()}, nil
 	}
 

@@ -19,6 +19,8 @@ services:
     networks:
       - dbaas-network
 
+
+
 volumes:
   postgres_data:
     driver: local

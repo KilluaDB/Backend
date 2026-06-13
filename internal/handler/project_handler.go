@@ -3,8 +3,8 @@ package handler
 import (
 	"backend/internal/model"
 	"backend/internal/response"
-	"backend/internal/utils"
 	"backend/internal/service"
+	"backend/internal/utils"
 	"errors"
 	"net/http"
 
@@ -111,8 +111,12 @@ func (h *ProjectHandler) GetProject(ctx *gin.Context) {
 
 	project, err := h.projectService.GetProjectByIDAndUserID(ctx, projectID, userIDStr)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrInvalidProjectID) || errors.Is(err, service.ErrInvalidUserID) {
+		if errors.Is(err, service.ErrProjectNotFound) {
 			response.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidProjectID) || errors.Is(err, service.ErrInvalidUserID) {
+			response.Fail(ctx, http.StatusBadRequest, err, "Invalid project ID or user ID")
 			return
 		}
 		response.Fail(ctx, http.StatusInternalServerError, err, "Failed to retrieve project")
@@ -162,10 +166,11 @@ func (h *ProjectHandler) GetProjectAccess(ctx *gin.Context) {
 		case errors.Is(err, service.ErrExternalAccessNotConfigured):
 			response.Fail(ctx, http.StatusServiceUnavailable, err, "External database access is not configured on this server")
 		case errors.Is(err, service.ErrProjectNotAccessible),
-			errors.Is(err, service.ErrProjectNotFound),
-			errors.Is(err, service.ErrInvalidProjectID),
-			errors.Is(err, service.ErrInvalidUserID):
+			errors.Is(err, service.ErrProjectNotFound):
 			response.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
+		case errors.Is(err, service.ErrInvalidProjectID),
+			errors.Is(err, service.ErrInvalidUserID):
+			response.Fail(ctx, http.StatusBadRequest, err, "Invalid project ID or user ID")
 		case errors.Is(err, service.ErrNoRunningInstance):
 			response.Fail(ctx, http.StatusConflict, err, "Database is not running yet")
 		default:
@@ -174,14 +179,20 @@ func (h *ProjectHandler) GetProjectAccess(ctx *gin.Context) {
 		return
 	}
 
-	response.Success(ctx, http.StatusOK, gin.H{
+	data := gin.H{
 		"connection_string": info.ConnectionString,
 		"host":              info.Host,
 		"port":              info.Port,
 		"database":          info.Database,
 		"username":          info.Username,
 		"password":          info.Password,
-	}, "Connection info retrieved successfully")
+	}
+	if info.PostgRESTURL != "" {
+		data["postgrest_url"] = info.PostgRESTURL
+		data["api_key"] = info.APIKey
+		data["jwt_secret"] = info.JWTSecret
+	}
+	response.Success(ctx, http.StatusOK, data, "Connection info retrieved successfully")
 }
 
 // DeleteProject handles DELETE /api/v1/projects/:id
@@ -199,8 +210,11 @@ func (h *ProjectHandler) DeleteProject(ctx *gin.Context) {
 	err := h.projectService.DeleteProjectByIDAndUserID(ctx, projectID, userIDStr)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrProjectNotFound), errors.Is(err, service.ErrInvalidProjectID), errors.Is(err, service.ErrInvalidUserID):
+		case errors.Is(err, service.ErrProjectNotFound):
 			response.Fail(ctx, http.StatusNotFound, err, "Project not found or access denied")
+			return
+		case errors.Is(err, service.ErrInvalidProjectID), errors.Is(err, service.ErrInvalidUserID):
+			response.Fail(ctx, http.StatusBadRequest, err, "Invalid project ID or user ID")
 			return
 		default:
 			response.Fail(ctx, http.StatusInternalServerError, err, "Failed to delete project")

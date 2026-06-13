@@ -113,9 +113,9 @@ func (h *Handler) Import(c *gin.Context) {
 // importBodyReader returns a streaming reader for the import body, supporting
 // both multipart/form-data (field "file") and raw bodies.
 func importBodyReader(r *http.Request) (io.Reader, func(), error) {
-	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	mediaType, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 
-	if strings.HasPrefix(mediaType, "multipart/") {
+	if strings.HasPrefix(mediaType, "multipart/") && params["boundary"] != "" {
 		// Use a streaming MultipartReader rather than ParseMultipartForm so we
 		// don't buffer the whole upload to memory or a temp file.
 		mr, err := r.MultipartReader()

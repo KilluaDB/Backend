@@ -43,7 +43,9 @@ func (s *CollectionService) ListCollections(ctx context.Context, userID, project
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.ListCollections(ctx, db)
+
+	filteredCollections, err := s.repo.ListCollections(ctx, db)
+	return filteredCollections, nil
 }
 
 func (s *CollectionService) CreateCollection(ctx context.Context, userID, projectID uuid.UUID, name string) error {
@@ -138,6 +140,9 @@ func validateFieldName(name string) error {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" || strings.HasPrefix(trimmed, "$") || strings.ContainsRune(trimmed, '\x00') {
 		return ErrInvalidFieldName
+	}
+	if strings.HasPrefix(trimmed, "system.") || strings.Contains(trimmed, "$") {
+		return ErrInvalidCollectionName
 	}
 	return nil
 }

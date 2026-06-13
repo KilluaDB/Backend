@@ -79,9 +79,11 @@ if k3d_cluster_exists; then
 else
   info "No k3d cluster named '${CLUSTER_NAME}' (kubectl context may be stale). Creating cluster..."
   k3d cluster create "${CLUSTER_NAME}" \
+    --port "80:80@loadbalancer" \
+    --port "443:443@loadbalancer" \
     --port "5432:5432/tcp@loadbalancer" \
     --port "27017:27017/tcp@loadbalancer" \
-    --wait --timeout 5m
+    --wait --timeout 10m
 fi
 
 if ! kubectl config get-contexts "${K3D_CONTEXT}" >/dev/null 2>&1; then
@@ -99,14 +101,12 @@ if ! kubectl cluster-info &>/dev/null; then
 fi
 ok "k3d cluster '${CLUSTER_NAME}' is reachable"
 
-# Namespaces: DB instances in dedicated namespaces; operators in their own namespaces
+# CloudNativePG operator namespace
 info "Creating namespaces..."
 kubectl create namespace postgres-operator 2>/dev/null || true
-kubectl create namespace postgres-instances 2>/dev/null || true
-kubectl create namespace mongodb-instances 2>/dev/null || true
-ok "Namespaces postgres-operator, postgres-instances, mongodb-instances ready"
+ok "Namespaces postgres-operator ready"
 
-# CloudNativePG: operator in postgres-operator, watches all namespaces (instances go in postgres-instances)
+# CloudNativePG: operator in postgres-operator, watches all namespaces (instances go in per-project pg-* namespaces)
 info "Adding CloudNativePG Helm repo..."
 helm repo add cnpg https://cloudnative-pg.github.io/charts 2>/dev/null || true
 helm repo update cnpg
@@ -118,7 +118,7 @@ helm upgrade --install cnpg cnpg/cloudnative-pg \
   --create-namespace \
   --set config.clusterWide=true \
   --set rbac.create=true \
-  --wait --timeout 3m
+  --wait --timeout 10m
 
 ok "CloudNativePG installed in postgres-operator"
 
@@ -134,19 +134,24 @@ else
   ok "cert-manager already present"
 fi
 
-# MongoDB Community Operator (watches only mongodb-instances namespace)
+# MongoDB Community Operator (cluster-wide watch — instances go in per-project mongo-* namespaces)
 info "Adding MongoDB Helm repo..."
 helm repo add mongodb https://mongodb.github.io/helm-charts 2>/dev/null || true
 helm repo update mongodb
 
-info "Installing MongoDB Community Operator in mongodb-operator (watches mongodb-instances only)..."
+info "Installing MongoDB Community Operator in mongodb-operator (cluster-wide watch)..."
 if ! helm upgrade --install community-operator mongodb/community-operator \
   --namespace mongodb-operator \
   --create-namespace \
-  --set operator.watchNamespace="mongodb-instances" \
   --timeout 5m; then
   warn "Helm install/upgrade failed. Run with --debug to see the error."
 else
+  # Force cluster-wide watch: Helm chart defaults WATCH_NAMESPACE to the operator's
+  # namespace via downward API. Override it to empty string so the operator watches
+  # all namespaces.
+  kubectl set env deployment/mongodb-kubernetes-operator -n mongodb-operator \
+    WATCH_NAMESPACE="" 2>/dev/null || true
+  kubectl rollout status deployment/mongodb-kubernetes-operator -n mongodb-operator --timeout=120s 2>/dev/null || true
   if ! kubectl wait --for=condition=Available deployment/mongodb-kubernetes-operator -n mongodb-operator --timeout=180s 2>/dev/null; then
     warn "MongoDB operator deployment not ready."
     kubectl get pods -n mongodb-operator -l name=mongodb-kubernetes-operator -o wide 2>/dev/null || true
@@ -156,9 +161,9 @@ else
   fi
 fi
 
-# Backend RBAC; MongoDB operator RBAC (only in mongodb-instances)
+# Backend RBAC (ClusterRole for per-project namespaces)
 if [ -f deploy/rbac.yaml ]; then
-  info "Applying backend RBAC (postgres-instances, mongodb-instances)..."
+  info "Applying backend RBAC..."
   kubectl apply -f deploy/rbac.yaml || warn "Backend RBAC apply failed"
 fi
 
@@ -167,9 +172,11 @@ if [ -f deploy/traefik-tcp-config.yaml ]; then
   info "Applying Traefik TCP entrypoints config..."
   kubectl apply -f deploy/traefik-tcp-config.yaml || warn "Traefik TCP config apply failed"
 fi
+
+# MongoDB operator ClusterRole for cluster-wide watch (WATCH_NAMESPACE="")
 if [ -f deploy/mongodb-operator-mongodb-instances-rbac.yaml ]; then
-  info "Applying MongoDB operator RBAC (mongodb-instances only)..."
-  kubectl apply -f deploy/mongodb-operator-mongodb-instances-rbac.yaml || warn "MongoDB operator RBAC apply failed"
+  info "Applying MongoDB operator ClusterRole..."
+  kubectl apply -f deploy/mongodb-operator-mongodb-instances-rbac.yaml || warn "MongoDB operator ClusterRole apply failed"
 fi
 
 echo ""
