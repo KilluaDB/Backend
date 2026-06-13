@@ -94,11 +94,11 @@ func TestPostgresConnectionManager(t *testing.T) {
 		gotPool, err := mgr.GetPool(ctx, userID, projectID)
 		assert.NoError(t, err)
 		assert.NotNil(t, gotPool)
-		
+
 		mgr.pgPoolMu.Lock()
 		entry, ok := mgr.pgPools[projectID]
 		mgr.pgPoolMu.Unlock()
-		
+
 		assert.True(t, ok)
 		assert.Equal(t, dsn, entry.dsn)
 	})
@@ -137,7 +137,7 @@ func TestPostgresConnectionManager(t *testing.T) {
 		entry := mgr.pgPools[projectID]
 		mgr.pgPoolMu.Unlock()
 		assert.Equal(t, newDSN, entry.dsn)
-		
+
 		// Reset DSN
 		provider.dsn = dsn
 		mgr.GetPool(ctx, userID, projectID)
@@ -146,21 +146,21 @@ func TestPostgresConnectionManager(t *testing.T) {
 	t.Run("GetPool - provider error", func(t *testing.T) {
 		expectedErr := errors.New("provider error")
 		provider.err = expectedErr
-		
+
 		_, err := mgr.GetPool(ctx, userID, projectID)
 		assert.ErrorIs(t, err, expectedErr)
-		
+
 		provider.err = nil // reset
 	})
-	
+
 	t.Run("connectAndCachePool - connect error", func(t *testing.T) {
 		expectedErr := errors.New("connect error")
 		connector.err = expectedErr
-		
+
 		newProjectID := uuid.New()
 		_, err := mgr.GetPool(ctx, userID, newProjectID)
 		assert.ErrorIs(t, err, expectedErr)
-		
+
 		connector.err = nil // reset
 	})
 
@@ -169,7 +169,7 @@ func TestPostgresConnectionManager(t *testing.T) {
 		mgr.pgPoolMu.Lock()
 		pool.Close()
 		mgr.pgPoolMu.Unlock()
-		
+
 		// Ping will fail, should reconnect
 		_, err := mgr.GetPool(ctx, userID, projectID)
 		// We expect it to reconnect successfully because connector.err is nil and pool is reused in fake
@@ -196,7 +196,7 @@ func TestPostgresConnectionManager(t *testing.T) {
 			pool: nil,
 		}
 		mgr.pgPoolMu.Unlock()
-		
+
 		gotPool, err := mgr.GetPool(ctx, userID, projectID)
 		assert.NoError(t, err)
 		assert.NotNil(t, gotPool)
@@ -206,7 +206,7 @@ func TestPostgresConnectionManager(t *testing.T) {
 		// We can directly invoke connectAndCachePool to simulate race condition where pool was updated
 		oldPool, cleanupOld := setupTestPostgres(t)
 		defer cleanupOld()
-		
+
 		mgr.pgPoolMu.Lock()
 		mgr.pgPools[projectID] = cachedPgPool{
 			dsn:  "old-dsn",
@@ -246,24 +246,24 @@ func TestEvictIdlePools(t *testing.T) {
 	defer cleanup()
 
 	projectID := uuid.New()
-	
+
 	mgr := &PostgresConnectionManager{
 		pgPools: make(map[uuid.UUID]cachedPgPool),
 	}
-	
+
 	// Add idle pool
 	mgr.pgPools[projectID] = cachedPgPool{
 		dsn:  "test-dsn",
 		pool: pool,
 	}
-	
+
 	// Call evict
 	mgr.evictIdlePools()
-	
+
 	mgr.pgPoolMu.Lock()
 	_, ok := mgr.pgPools[projectID]
 	mgr.pgPoolMu.Unlock()
-	
+
 	assert.False(t, ok, "pool should be evicted when total conns is 0")
 }
 
@@ -289,7 +289,7 @@ func TestEvictProjectAndCloseAll(t *testing.T) {
 	_, ok1 := mgr.pgPools[projectID1]
 	_, ok2 := mgr.pgPools[projectID2]
 	mgr.pgPoolMu.Unlock()
-	
+
 	assert.False(t, ok1)
 	assert.True(t, ok2)
 
@@ -308,7 +308,7 @@ func TestEmitPoolMetrics(t *testing.T) {
 	mgr := &PostgresConnectionManager{
 		pgPools: make(map[uuid.UUID]cachedPgPool),
 	}
-	
+
 	mgr.pgPools[projectID] = cachedPgPool{dsn: "dsn", pool: pool}
 
 	// Acquire a connection to change stats
@@ -322,7 +322,7 @@ func TestEmitPoolMetrics(t *testing.T) {
 func TestDefaultPoolConnector(t *testing.T) {
 	ctx := context.Background()
 	connector := &defaultPoolConnector{}
-	
+
 	// invalid DSN
 	_, err := connector.Connect(ctx, "invalid-dsn")
 	assert.Error(t, err)
@@ -334,7 +334,7 @@ func TestDefaultPoolConnector(t *testing.T) {
 	// get the conn string
 	config := pool.Config()
 	connStr := config.ConnString()
-	
+
 	newPool, err := connector.Connect(ctx, connStr)
 	assert.NoError(t, err)
 	if newPool != nil {
@@ -352,7 +352,7 @@ func TestNewPostgresConnectionManager(t *testing.T) {
 func TestPostgresConnectionManager_GetPoolWithMeta(t *testing.T) {
 	mgr := NewPostgresConnectionManager(&mockDSNProvider{dsn: "test-dsn"})
 	pID := uuid.New()
-	
+
 	pool, cleanup := setupTestPostgres(t)
 	defer cleanup()
 	mgr.pgPools[pID] = cachedPgPool{dsn: "test-dsn", pool: pool}
@@ -366,13 +366,13 @@ func TestPostgresConnectionManager_GetPoolWithMeta(t *testing.T) {
 func TestPostgresConnectionManager_EvictProject(t *testing.T) {
 	mgr := NewPostgresConnectionManager(&mockDSNProvider{})
 	pID := uuid.New()
-	
+
 	pool, cleanup := setupTestPostgres(t)
 	defer cleanup()
 	mgr.pgPools[pID] = cachedPgPool{dsn: "test-dsn", pool: pool}
 
 	mgr.EvictProject(pID)
-	
+
 	mgr.pgPoolMu.Lock()
 	_, ok := mgr.pgPools[pID]
 	mgr.pgPoolMu.Unlock()

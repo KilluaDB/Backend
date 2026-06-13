@@ -16,7 +16,7 @@ func TestNewMongoDashboardMetricsService(t *testing.T) {
 	conn := &mockInstanceConn{}
 	colRepo := repository.NewCollectionRepository()
 	docRepo := repository.NewDocumentRepository()
-	
+
 	svc := NewMongoDashboardMetricsService(conn, colRepo, docRepo)
 	assert.NotNil(t, svc)
 }
@@ -47,7 +47,7 @@ func TestBsonGet(t *testing.T) {
 func TestMongoDashboardMetricsService_GetMetrics_ConnError(t *testing.T) {
 	conn := &mockInstanceConn{err: errors.New("conn error")}
 	svc := NewMongoDashboardMetricsService(conn, nil, nil)
-	
+
 	_, err := svc.GetMetrics(context.Background(), uuid.New(), uuid.New())
 	assert.ErrorContains(t, err, "conn error")
 }

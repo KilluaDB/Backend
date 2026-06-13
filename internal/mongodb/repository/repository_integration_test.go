@@ -147,7 +147,7 @@ func TestCollectionRepository_Integration(t *testing.T) {
 	// DropCollection
 	err = repo.DropCollection(ctx, db, "test_coll")
 	assert.NoError(t, err)
-	
+
 	collections, err = repo.ListCollections(ctx, db)
 	assert.NoError(t, err)
 	assert.NotContains(t, collections, "test_coll")

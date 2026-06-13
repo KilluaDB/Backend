@@ -225,7 +225,7 @@ func TestDocumentHandler_OtherMethods(t *testing.T) {
 		h.DeleteDocument(c)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
-	
+
 	t.Run("GetDocuments", func(t *testing.T) {
 		c, w := mongoCollectionContext(http.MethodGet, "/mongodb", userID, projectID, nil,
 			gin.Params{{Key: "id", Value: projectID}, {Key: "collection", Value: "c"}})

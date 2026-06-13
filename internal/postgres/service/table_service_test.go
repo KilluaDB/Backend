@@ -91,10 +91,10 @@ func (m *mockTablePoolSourceTest) TablePool(ctx context.Context, userID, project
 func TestSetPoolSourceForTest(t *testing.T) {
 	svc := newTableService()
 	src := &mockTablePoolSourceTest{}
-	
+
 	svc.SetPoolSourceForTest(src)
 	assert.NotNil(t, svc.poolSource)
-	
+
 	pool, err := svc.projectPool(context.Background(), uuid.New(), uuid.New())
 	assert.Nil(t, pool)
 	assert.NoError(t, err)

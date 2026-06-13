@@ -169,7 +169,7 @@ func TestMapToBsonD(t *testing.T) {
 		}
 		doc, err := mapToBsonD(m)
 		assert.NoError(t, err)
-		
+
 		// The unmarshaled result will have the correct elements, though order is preserved from BSON serialization
 		// Verify that both keys exist
 		foundA, foundB := false, false
@@ -276,7 +276,7 @@ func TestDocumentService_FieldOperations(t *testing.T) {
 		err := svc.DeleteDocumentField(ctx, uid, pid, "", "123", "valid")
 		assert.ErrorIs(t, err, ErrInvalidCollectionName)
 	})
-	
+
 	t.Run("DeleteDocument invalid collection", func(t *testing.T) {
 		err := svc.DeleteDocument(ctx, uid, pid, "", "123")
 		assert.ErrorIs(t, err, ErrInvalidCollectionName)

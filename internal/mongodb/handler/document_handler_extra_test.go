@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
-	coreService "backend/internal/service"
 	mongoservice "backend/internal/mongodb/service"
+	coreService "backend/internal/service"
 )
 
 func TestDocumentHandler_GetDocument(t *testing.T) {
@@ -275,7 +275,7 @@ func TestHandleDocumentError(t *testing.T) {
 		t.Run(tt.err.Error(), func(t *testing.T) {
 			userID := uuid.New()
 			projectID := uuid.New().String()
-			
+
 			// Use GetDocument to test the error handler
 			svc := &mockDocumentService{
 				getDocumentErr: tt.err,
@@ -284,7 +284,7 @@ func TestHandleDocumentError(t *testing.T) {
 
 			c, w := mongoCollectionContext(http.MethodGet, "/mongodb/collections/users/documents/123", userID, projectID, nil,
 				gin.Params{{Key: "id", Value: projectID}, {Key: "collection", Value: "users"}, {Key: "docId", Value: "123"}})
-			
+
 			h.GetDocument(c)
 			assert.Equal(t, tt.wantStatus, w.Code)
 		})

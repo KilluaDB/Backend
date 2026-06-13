@@ -335,7 +335,7 @@ func TestProjectService_ProvisionInstanceAsync(t *testing.T) {
 			},
 		}
 		svc := NewProjectService(projects, prov, nil, nil)
-		
+
 		// The original method runs asynchronously inside a goroutine, but we can call it synchronously for the test
 		svc.provisionInstanceAsync(ctx, p.ID, p.DBType, p.ResourceTier, "pass")
 
@@ -354,7 +354,7 @@ func TestProjectService_ProvisionInstanceAsync(t *testing.T) {
 			},
 		}
 		svc := NewProjectService(projects, prov, nil, nil)
-		
+
 		svc.provisionInstanceAsync(ctx, p.ID, p.DBType, p.ResourceTier, "pass")
 
 		updated, err := projects.GetByID(ctx, p.ID)

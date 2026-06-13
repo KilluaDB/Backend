@@ -87,7 +87,7 @@ func TestEnsureDatabaseExists_Integration(t *testing.T) {
 	os.Setenv("DB_PORT", "invalid")
 	err = EnsureDatabaseExists()
 	assert.Error(t, err)
-	
+
 	// 4. Missing Env
 	os.Unsetenv("DB_HOST")
 	err = EnsureDatabaseExists()
@@ -136,7 +136,7 @@ func TestConnect_Integration(t *testing.T) {
 	os.Setenv("DB_PASSWORD", "wrongpass")
 	_, err = Connect()
 	assert.Error(t, err)
-	
+
 	// 4. Missing Env
 	os.Unsetenv("DB_HOST")
 	_, err = Connect()

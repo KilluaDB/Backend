@@ -18,8 +18,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-
-
 func setupTestMongoDBService(t *testing.T) (*mongo.Database, func()) {
 	ctx := context.Background()
 
@@ -109,7 +107,7 @@ func TestDocumentService_Integration(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), res.Deleted)
 	})
-	
+
 	// QueryDocuments
 	t.Run("QueryDocuments", func(t *testing.T) {
 		req := model.QueryDocumentsRequest{
@@ -145,7 +143,7 @@ func TestDocumentService_Integration(t *testing.T) {
 	t.Run("AddDocumentField", func(t *testing.T) {
 		docs, _ := svc.GetDocuments(ctx, userID, projectID, collection, model.GetDocumentsRequest{Limit: 1})
 		id := docs.Documents[0]["_id"].(bson.ObjectID).Hex()
-		
+
 		req := model.AddDocumentFieldRequest{
 			Field: "new_field",
 			Value: "value",
@@ -159,7 +157,7 @@ func TestDocumentService_Integration(t *testing.T) {
 	t.Run("UpdateDocumentField", func(t *testing.T) {
 		docs, _ := svc.GetDocuments(ctx, userID, projectID, collection, model.GetDocumentsRequest{Limit: 1})
 		id := docs.Documents[0]["_id"].(bson.ObjectID).Hex()
-		
+
 		req := model.UpdateFieldRequest{
 			Value: "new_value",
 		}
@@ -197,7 +195,7 @@ func TestDocumentService_Integration(t *testing.T) {
 	t.Run("AddDocumentField", func(t *testing.T) {
 		docs, _ := svc.GetDocuments(ctx, userID, projectID, collection, model.GetDocumentsRequest{Limit: 1})
 		id := docs.Documents[0]["_id"].(bson.ObjectID).Hex()
-		
+
 		req := model.AddDocumentFieldRequest{
 			Field: "added_field",
 			Value: "added_val",
@@ -217,7 +215,7 @@ func TestDocumentService_Integration(t *testing.T) {
 	t.Run("DeleteDocumentField", func(t *testing.T) {
 		docs, _ := svc.GetDocuments(ctx, userID, projectID, collection, model.GetDocumentsRequest{Limit: 1})
 		id := docs.Documents[0]["_id"].(bson.ObjectID).Hex()
-		
+
 		err := svc.DeleteDocumentField(ctx, userID, projectID, collection, id, "new_field")
 		assert.NoError(t, err)
 
@@ -229,7 +227,7 @@ func TestDocumentService_Integration(t *testing.T) {
 	t.Run("DeleteDocument", func(t *testing.T) {
 		docs, _ := svc.GetDocuments(ctx, userID, projectID, collection, model.GetDocumentsRequest{Limit: 1})
 		id := docs.Documents[0]["_id"].(bson.ObjectID).Hex()
-		
+
 		err := svc.DeleteDocument(ctx, userID, projectID, collection, id)
 		assert.NoError(t, err)
 

@@ -32,9 +32,9 @@ func TestCollectK8sMetrics(t *testing.T) {
 	scheme := runtime.NewScheme()
 	pgGVR := schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"}
 	mongoGVR := schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"}
-	
+
 	gvrToListKind := map[schema.GroupVersionResource]string{
-		pgGVR: "ClusterList",
+		pgGVR:    "ClusterList",
 		mongoGVR: "MongoDBCommunityList",
 	}
 
@@ -73,7 +73,7 @@ func TestCollectK8sMetrics(t *testing.T) {
 			},
 		},
 	}
-	
+
 	_, _ = fakeClient.Resource(pgGVR).Namespace("default").Create(ctx, pgObj, metav1.CreateOptions{})
 	_, _ = fakeClient.Resource(mongoGVR).Namespace("default").Create(ctx, mongoObj, metav1.CreateOptions{})
 

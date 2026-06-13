@@ -38,7 +38,7 @@ func TestValidateRequiredEnvVars(t *testing.T) {
 		for _, env := range required {
 			os.Setenv(env, "dummy-value")
 		}
-		
+
 		err := validateRequiredEnvVars()
 		assert.NoError(t, err)
 	})
@@ -49,10 +49,10 @@ func TestValidateRequiredEnvVars(t *testing.T) {
 			for _, env := range required {
 				os.Setenv(env, "dummy-value")
 			}
-			
+
 			// Unset one
 			os.Unsetenv(missingEnv)
-			
+
 			err := validateRequiredEnvVars()
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), missingEnv+" is required")
@@ -63,13 +63,13 @@ func TestValidateRequiredEnvVars(t *testing.T) {
 func TestCloseResources_NilManagers(t *testing.T) {
 	// Ensure that calling CloseResources with nil managers does not panic
 	// Note: We avoid calling database.Close() if database is not initialized,
-	// but the function unconditionally calls it. We will just test it doesn't crash 
+	// but the function unconditionally calls it. We will just test it doesn't crash
 	// for the manager variables. To prevent database.Close from panicking,
 	// database package usually handles nil pool safely.
-	
+
 	pgInstanceManager = nil
 	mongoInstanceManager = nil
-	
+
 	assert.NotPanics(t, func() {
 		CloseResources()
 	})

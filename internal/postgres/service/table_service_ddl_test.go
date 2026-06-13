@@ -330,7 +330,7 @@ func TestTableService_UpdateTable_AddFK(t *testing.T) {
 	result, err := svc.UpdateTable(context.Background(), uuid.New(), uuid.New(), "public", "users", &model.UpdateTableRequest{
 		ForeignKeys: &model.TableForeignKeyDef{
 			Schema: "public",
-			Table: "profiles",
+			Table:  "profiles",
 			References: []model.ForeignKeyRef{
 				{LocalColumn: "profile_id", ForeignColumn: "id", OnDelete: "CASCADE", OnUpdate: "CASCADE"},
 			},

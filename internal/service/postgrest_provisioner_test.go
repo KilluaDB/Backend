@@ -18,10 +18,10 @@ import (
 func TestPostgREST_NamesAndURL(t *testing.T) {
 	p := newTestProvisioner(t)
 	projectID := uuid.New()
-	
+
 	ns := p.NamespaceForProject(projectID)
 	assert.True(t, strings.HasPrefix(ns, "pg-"))
-	
+
 	dep := postgrestDeploymentName(projectID)
 	assert.True(t, strings.HasPrefix(dep, "postgrest-"))
 
@@ -133,7 +133,7 @@ func TestPostgREST_SignPostgRESTAPIKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, parsedToken.Valid)
-	
+
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	require.True(t, ok)
 	assert.Equal(t, "app_user", claims["role"])

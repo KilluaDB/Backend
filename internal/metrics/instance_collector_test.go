@@ -68,10 +68,10 @@ func TestInstanceCollector_Collect_Error(t *testing.T) {
 	// Since prometheus framework will panic on Gather if an invalid metric is sent (because Collect returns it),
 	// we test Collect directly instead of via GatherAndCompare.
 	ch := make(chan prometheus.Metric, 1)
-	
+
 	// Collect won't panic, it sends InvalidMetric to the channel
 	collector.Collect(ch)
-	
+
 	m := <-ch
 	assert.Contains(t, m.Desc().String(), "killuadb_active_instances")
 	assert.NoError(t, mockPool.ExpectationsWereMet())

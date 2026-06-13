@@ -1,8 +1,8 @@
 package testutil
 
 import (
-	"testing"
 	"backend/internal/utils"
+	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -22,14 +22,14 @@ func TestGinContext(t *testing.T) {
 
 func TestJWT(t *testing.T) {
 	userID := uuid.New()
-	
+
 	// Test SetupJWTSecrets implicitly called by BearerToken
 	token := BearerToken(t, userID)
 	assert.Contains(t, token, "Bearer ")
-	
+
 	expiredToken := ExpiredBearerToken(t, userID)
 	assert.Contains(t, expiredToken, "Bearer ")
-	
+
 	assert.Equal(t, []byte(TestAccessSecret), utils.AccessTokenSecret)
 	assert.Equal(t, []byte(TestRefreshSecret), utils.RefreshTokenSecret)
 }
