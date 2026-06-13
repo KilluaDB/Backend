@@ -42,30 +42,43 @@ type DashboardSchemaSummary struct {
 
 type DashboardOverviewService struct {
 	instanceConn infra.InstanceConnectionService
-	projectRepo  *repository.ProjectRepository
+	projectRepo  repository.ProjectStore
+	runnerSource queryRunnerSource
 }
 
-func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo *repository.ProjectRepository) *DashboardOverviewService {
+func NewDashboardOverviewService(instanceConn infra.InstanceConnectionService, instanceRepo repository.ProjectStore) *DashboardOverviewService {
 	return &DashboardOverviewService{instanceConn: instanceConn, projectRepo: instanceRepo}
 }
 
 func (s *DashboardOverviewService) GetOverview(ctx context.Context, userID, projectID uuid.UUID) (*DashboardOverview, error) {
-	project, _ := s.projectRepo.GetByID(ctx, projectID)
 	var instInfo *DashboardInstanceInfo
-	if project != nil {
-		instInfo = &DashboardInstanceInfo{
-			ID:        project.ID,
-			Status:    project.Status,
-			Host:      nil,
-			CreatedAt: project.RuntimeCreatedAt,
-			UpdatedAt: project.RuntimeUpdatedAt,
+	if s.projectRepo != nil {
+		project, _ := s.projectRepo.GetByID(ctx, projectID)
+		if project != nil {
+			instInfo = &DashboardInstanceInfo{
+				ID:        project.ID,
+				Status:    project.Status,
+				Host:      nil,
+				CreatedAt: project.RuntimeCreatedAt,
+				UpdatedAt: project.RuntimeUpdatedAt,
+			}
 		}
 	}
 
 	start := time.Now()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
+	var pool pgQueryRunner
+	if s.runnerSource != nil {
+		runner, _, err := s.runnerSource.QueryRunner(ctx, userID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		pool = runner
+	} else {
+		runner, err := s.instanceConn.GetPool(ctx, userID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		pool = runner
 	}
 
 	var (

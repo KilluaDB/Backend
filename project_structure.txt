@@ -1,0 +1,200 @@
+.
+├── Dockerfile
+├── README.md
+├── TESTING.md
+├── cmd
+│   ├── api
+│   │   └── main.go
+│   └── pgproxy
+│       └── main.go
+├── coverage.out
+├── coverage_after.out
+├── coverage_before.out
+├── deploy
+│   ├── configmap.yaml
+│   ├── deployment.yaml
+│   ├── ingress.yaml
+│   ├── mongodb-operator-mongodb-instances-rbac.yaml
+│   ├── pgproxy.yaml
+│   ├── postgres.yaml
+│   ├── rbac.yaml
+│   ├── redis.yaml
+│   ├── secret.yaml
+│   ├── service.yaml
+│   └── traefik-tcp-config.yaml
+├── docker-compose.yml
+├── go.mod
+├── go.sum
+├── internal
+│   ├── backup
+│   │   ├── exec.go
+│   │   ├── handler.go
+│   │   ├── handler_test.go
+│   │   ├── mongodb.go
+│   │   ├── mongodb_test.go
+│   │   ├── postgres.go
+│   │   ├── postgres_test.go
+│   │   ├── routes.go
+│   │   ├── service.go
+│   │   └── service_test.go
+│   ├── config
+│   │   ├── oauth.go
+│   │   ├── oauth_test.go
+│   │   ├── redis.go
+│   │   └── redis_test.go
+│   ├── database
+│   │   ├── migrations.go
+│   │   └── postgres.go
+│   ├── handler
+│   │   ├── auth_handler.go
+│   │   ├── auth_handler_test.go
+│   │   ├── google_auth_handler.go
+│   │   ├── google_auth_handler_test.go
+│   │   ├── project_handler.go
+│   │   ├── project_handler_helpers_test.go
+│   │   ├── project_handler_test.go
+│   │   ├── user_handler.go
+│   │   └── user_handler_test.go
+│   ├── middleware
+│   │   ├── auth_middleware.go
+│   │   ├── auth_middleware_test.go
+│   │   ├── authorization_middleware.go
+│   │   ├── authorization_middleware_test.go
+│   │   ├── project_db_middleware.go
+│   │   └── project_db_middleware_test.go
+│   ├── mocks
+│   │   ├── google_client.go
+│   │   ├── project_store.go
+│   │   └── user_store.go
+│   ├── model
+│   │   ├── project.go
+│   │   ├── query_history.go
+│   │   ├── user.go
+│   │   └── user_test.go
+│   ├── mongodb
+│   │   ├── handler
+│   │   │   ├── collection_handler.go
+│   │   │   ├── collection_handler_test.go
+│   │   │   └── mongo_handler.go
+│   │   ├── infra
+│   │   │   ├── connection_manager.go
+│   │   │   ├── connection_manager_test.go
+│   │   │   └── instance_connection.go
+│   │   ├── model
+│   │   │   └── collection.go
+│   │   ├── repository
+│   │   │   └── collection_repository.go
+│   │   ├── route
+│   │   │   └── routes.go
+│   │   └── service
+│   │       ├── collection_service.go
+│   │       └── collection_service_test.go
+│   ├── postgres
+│   │   ├── handler
+│   │   │   ├── dashboard_handler.go
+│   │   │   ├── dashboard_handler_test.go
+│   │   │   ├── pg_responses.go
+│   │   │   ├── pg_responses_test.go
+│   │   │   ├── postgres_handler.go
+│   │   │   ├── query_handler.go
+│   │   │   ├── query_handler_test.go
+│   │   │   ├── schema_handler.go
+│   │   │   ├── schema_handler_test.go
+│   │   │   ├── table_handler.go
+│   │   │   ├── table_handler_test.go
+│   │   │   ├── text_to_sql_handler.go
+│   │   │   └── text_to_sql_handler_test.go
+│   │   ├── infra
+│   │   │   ├── connection_manager.go
+│   │   │   └── instance_connection.go
+│   │   ├── model
+│   │   │   ├── schema.go
+│   │   │   └── table.go
+│   │   ├── repository
+│   │   │   ├── index_repository.go
+│   │   │   ├── index_repository_test.go
+│   │   │   ├── pool_querier.go
+│   │   │   ├── schema_repository.go
+│   │   │   ├── schema_repository_test.go
+│   │   │   ├── table_repository.go
+│   │   │   ├── table_repository_test.go
+│   │   │   ├── table_rows_repository.go
+│   │   │   └── table_rows_repository_test.go
+│   │   ├── route
+│   │   │   └── routes.go
+│   │   └── service
+│   │       ├── dashboard_metrics_service.go
+│   │       ├── dashboard_metrics_service_test.go
+│   │       ├── dashboard_overview_service.go
+│   │       ├── dashboard_overview_service_test.go
+│   │       ├── query_service.go
+│   │       ├── query_service_test.go
+│   │       ├── schema_service.go
+│   │       ├── schema_service_test.go
+│   │       ├── table_service.go
+│   │       ├── table_service_ddl.go
+│   │       ├── table_service_ddl_test.go
+│   │       ├── table_service_indexes.go
+│   │       ├── table_service_rows.go
+│   │       ├── table_service_rows_test.go
+│   │       ├── table_service_test.go
+│   │       ├── table_validation.go
+│   │       ├── table_validation_test.go
+│   │       ├── text_to_sql_service.go
+│   │       └── text_to_sql_service_test.go
+│   ├── repository
+│   │   ├── interfaces.go
+│   │   ├── interfaces_compile_test.go
+│   │   ├── project_repository.go
+│   │   └── user_repository.go
+│   ├── response
+│   │   ├── json.go
+│   │   └── json_test.go
+│   ├── route
+│   │   ├── auth.go
+│   │   ├── project.go
+│   │   ├── routes.go
+│   │   └── user.go
+│   ├── server
+│   │   └── server.go
+│   ├── service
+│   │   ├── auth_service.go
+│   │   ├── auth_service_test.go
+│   │   ├── google_auth_service.go
+│   │   ├── google_auth_service_test.go
+│   │   ├── instance_dsn_service.go
+│   │   ├── instance_dsn_service_test.go
+│   │   ├── mock_provisioner_test.go
+│   │   ├── operator_provisioner.go
+│   │   ├── operator_provisioner_test.go
+│   │   ├── project_service.go
+│   │   ├── project_service_test.go
+│   │   ├── provisioner_iface.go
+│   │   ├── servicetest
+│   │   │   └── provisioner.go
+│   │   ├── user_service.go
+│   │   ├── user_service_delete_test.go
+│   │   └── user_service_test.go
+│   ├── testutil
+│   │   ├── gin.go
+│   │   ├── jwt.go
+│   │   └── redis.go
+│   └── utils
+│       ├── auth.go
+│       ├── auth_test.go
+│       ├── crypto.go
+│       ├── crypto_test.go
+│       ├── helper.go
+│       ├── helper_test.go
+│       ├── jwt.go
+│       └── jwt_test.go
+├── openapi.yaml
+├── pg_svc.out
+├── project_structure.txt
+├── scripts
+│   ├── k3d-cluster-delete.sh
+│   ├── k3s-local-setup.sh
+│   └── run-tests.sh
+└── start.sh
+
+36 directories, 162 files

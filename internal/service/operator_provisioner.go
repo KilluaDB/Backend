@@ -80,6 +80,8 @@ type OperatorProvisioner struct {
 	externalDomain    string // EXTERNAL_DB_DOMAIN env; empty = no external access
 	postgresExtPort   int    // POSTGRES_EXTERNAL_PORT (default 5432)
 	mongoExtPort      int    // MONGO_EXTERNAL_PORT (default 27017)
+	pollInterval      time.Duration // test-seam: poll wait interval (default 5s)
+	pollTimeout       time.Duration // test-seam: poll wait timeout (default 10m)
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
@@ -141,16 +143,18 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 	}
 
 	return &OperatorProvisioner{
-		postgresNamespace:  postgresNS,
-		mongoNamespace:     mongoNS,
-		dynamic:            dyn,
-		core:               core,
-		cnpgGVR:            schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
-		mongoGVR:           schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
-		ingressRouteTCPGVR: schema.GroupVersionResource{Group: "traefik.containo.us", Version: "v1alpha1", Resource: "ingressroutetcps"},
-		externalDomain:     os.Getenv("EXTERNAL_DB_DOMAIN"),
-		postgresExtPort:    postgresExtPort,
-		mongoExtPort:       mongoExtPort,
+		postgresNamespace:    postgresNS,
+		mongoNamespace:       mongoNS,
+		dynamic:              dyn,
+		core:                 core,
+		cnpgGVR:              schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"},
+		mongoGVR:             schema.GroupVersionResource{Group: "mongodbcommunity.mongodb.com", Version: "v1", Resource: "mongodbcommunity"},
+		ingressRouteTCPGVR:   schema.GroupVersionResource{Group: "traefik.containo.us", Version: "v1alpha1", Resource: "ingressroutetcps"},
+		externalDomain:       os.Getenv("EXTERNAL_DB_DOMAIN"),
+		postgresExtPort:      postgresExtPort,
+		mongoExtPort:         mongoExtPort,
+		pollInterval:         5 * time.Second,
+		pollTimeout:          10 * time.Minute,
 	}, nil
 }
 
@@ -251,7 +255,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 				"namespace": ns,
 			},
 			"spec": map[string]interface{}{
-				"instances": 1,
+				"instances": float64(1),
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
 						"database": postgresAppDBName,
@@ -316,7 +320,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 	return result, nil
 }
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
-	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(ctx, p.pollInterval, p.pollTimeout, true, func(ctx context.Context) (bool, error) {
 		cluster, err := p.dynamic.Resource(p.cnpgGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return false, nil
@@ -325,10 +329,10 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespac
 			return false, err
 		}
 		spec, _, _ := unstructured.NestedMap(cluster.Object, "spec")
-		instances, _, _ := unstructured.NestedInt64(spec, "instances")
+		instances, _, _ := unstructured.NestedNumberAsFloat64(spec, "instances")
 		status, _, _ := unstructured.NestedMap(cluster.Object, "status")
-		readyInstances, _, _ := unstructured.NestedInt64(status, "readyInstances")
-		return readyInstances >= instances && readyInstances > 0, nil
+		readyInstances, _, _ := unstructured.NestedNumberAsFloat64(status, "readyInstances")
+		return int64(readyInstances) >= int64(instances) && int64(readyInstances) > 0, nil
 	})
 }
 func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
@@ -385,7 +389,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 				"namespace": ns,
 			},
 			"spec": map[string]interface{}{
-				"members": 1,
+				"members": float64(1),
 				"type":    "ReplicaSet",
 				"version": "7.0.0",
 				"security": map[string]interface{}{
@@ -476,7 +480,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 	return result, nil
 }
 func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
-	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(ctx, p.pollInterval, p.pollTimeout, true, func(ctx context.Context) (bool, error) {
 		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -591,7 +595,7 @@ func (p *OperatorProvisioner) createIngressRouteTCP(ctx context.Context, project
 						"services": []interface{}{
 							map[string]interface{}{
 								"name": svcName,
-								"port": port,
+								"port": float64(port),
 							},
 						},
 					},

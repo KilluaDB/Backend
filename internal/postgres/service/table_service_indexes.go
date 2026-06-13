@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var allowedIndexMethods = map[string]struct{}{
@@ -34,7 +33,7 @@ func (s *TableService) ListTableIndexes(ctx context.Context, projectID, userID u
 		return nil, fmt.Errorf("invalid table name: %w", err)
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) ([]model.TableIndexInfo, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) ([]model.TableIndexInfo, error) {
 		return s.tableRepo.ListIndexes(ctx, pool, schema, table)
 	})
 }
@@ -67,7 +66,7 @@ func (s *TableService) CreateTableIndex(ctx context.Context, projectID, userID u
 		return fmt.Errorf("%w: unsupported index method %q", ErrInvalidTableRequest, req.Method)
 	}
 
-	return withProjectPoolErr(s, ctx, userID, projectID, func(pool *pgxpool.Pool) error {
+	return withProjectPoolErr(s, ctx, userID, projectID, func(pool pgPoolRunner) error {
 		err := s.tableRepo.CreateIndex(ctx, pool, schema, table, req.Name, req.Columns, req.Unique, method)
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -96,7 +95,7 @@ func (s *TableService) DropTableIndex(ctx context.Context, projectID, userID uui
 		return fmt.Errorf("invalid index name: %w", err)
 	}
 
-	return withProjectPoolErr(s, ctx, userID, projectID, func(pool *pgxpool.Pool) error {
+	return withProjectPoolErr(s, ctx, userID, projectID, func(pool pgPoolRunner) error {
 		return s.tableRepo.DropIndex(ctx, pool, schema, table, indexName)
 	})
 }

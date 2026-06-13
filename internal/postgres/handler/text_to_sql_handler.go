@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,13 +14,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type textToSQLServiceI interface {
+	GenerateSQL(ctx context.Context, userID uuid.UUID, req *service.TextToSQLRequest, projectId uuid.UUID) (*service.TextToSQLResponse, error)
+}
+
 type TextToSQLHandler struct {
-	textToSQLService *service.TextToSQLService
+	textToSQLService textToSQLServiceI
 	queryService     *service.QueryService
 }
 
 func NewTextToSQLHandler(
-	textToSQLService *service.TextToSQLService,
+	textToSQLService textToSQLServiceI,
 	queryService *service.QueryService,
 ) *TextToSQLHandler {
 	return &TextToSQLHandler{

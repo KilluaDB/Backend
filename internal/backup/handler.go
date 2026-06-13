@@ -150,6 +150,8 @@ func writeServiceError(c *gin.Context, err error, fallback string) {
 		response.Fail(c, http.StatusConflict, err, "Database instance is not running")
 	case errors.Is(err, ErrUnsupportedDBType):
 		response.Fail(c, http.StatusBadRequest, err, "Project database type does not support backup/restore")
+	case errors.Is(err, ErrInvalidPostgresFormat):
+		response.Fail(c, http.StatusBadRequest, err, "Unsupported postgres format")
 	default:
 		// Surface tool-level errors as 500 with a sanitized message.
 		response.JSON(c, http.StatusInternalServerError, "error", nil, fallback, err)

@@ -1,8 +1,8 @@
 package service
 
 import (
+	"backend/internal/model"
 	"backend/internal/postgres/infra"
-	"backend/internal/repository"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,10 +17,6 @@ import (
 	"strings"
 	"time"
 
-	_ "backend/internal/repository"
-	// "backend/internal/service"
-	_ "backend/internal/utils"
-
 	"github.com/google/uuid"
 )
 
@@ -33,11 +29,16 @@ var (
 	ErrTextToSQLInvalidResponse = errors.New("invalid response from text-to-sql service")
 )
 
+// projectGetter is satisfied by *repository.ProjectRepository in production.
+type projectGetter interface {
+	GetByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*model.Project, error)
+}
+
 // TextToSQLService handles communication with the FastAPI Text-to-SQL service
 type TextToSQLService struct {
 	baseURL     string
 	httpClient  *http.Client
-	projectRepo *repository.ProjectRepository
+	projectRepo projectGetter
 	dsnProvider infra.DSNProvider
 }
 
@@ -64,7 +65,7 @@ type TextToSQLResponse struct {
 }
 
 // NewTextToSQLService creates a new Text-to-SQL service client
-func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo *repository.ProjectRepository) *TextToSQLService {
+func NewTextToSQLService(dsnProvider infra.DSNProvider, projectRepo projectGetter) *TextToSQLService {
 	baseURL := os.Getenv("TEXT_TO_SQL")
 	timeout := 120 * time.Second
 	if s := os.Getenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS"); s != "" {

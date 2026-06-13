@@ -7,14 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 )
 
 // exportMongo runs mongodump --archive --gzip and streams the resulting archive to dst.
 // The archive contains all databases the user can read, packaged as a single gzipped stream
 // suitable for `mongorestore --archive --gzip`.
 func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
-	cmd := exec.CommandContext(ctx,
+	cmd := commandContext(ctx,
 		"mongodump",
 		"--uri="+dsn,
 		"--archive",
@@ -58,7 +57,7 @@ func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
 // The archive is assumed to be a gzipped mongodump --archive stream; mongorestore
 // detects the format automatically from --archive + --gzip flags.
 func importMongo(ctx context.Context, dsn string, src io.Reader) error {
-	cmd := exec.CommandContext(ctx,
+	cmd := commandContext(ctx,
 		"mongorestore",
 		"--uri="+dsn,
 		"--archive",

@@ -26,8 +26,8 @@ var (
 )
 
 type ProjectService struct {
-	projectRepo          *repository.ProjectRepository
-	provisioner          *OperatorProvisioner
+	projectRepo          repository.ProjectStore
+	provisioner          InstanceProvisioner
 	postgresTableService *service.TableService
 	poolEvicter          ProjectPoolEvicter
 	dsnService           *InstanceDSNService
@@ -38,8 +38,8 @@ type ProjectPoolEvicter interface {
 }
 
 func NewProjectService(
-	projectRepo *repository.ProjectRepository,
-	provisioner *OperatorProvisioner,
+	projectRepo repository.ProjectStore,
+	provisioner InstanceProvisioner,
 	postgresTableService *service.TableService,
 	poolEvicter ProjectPoolEvicter,
 ) *ProjectService {
@@ -96,7 +96,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req C
 	}
 
 	// tierResources validates the tier early so we fail before writing anything to the DB.
-	if _, _, _, err = s.provisioner.tierResources(req.ResourceTier); err != nil {
+	if _, _, _, err = s.provisioner.TierResources(req.ResourceTier); err != nil {
 		return nil, ErrInvalidResourceTier
 	}
 

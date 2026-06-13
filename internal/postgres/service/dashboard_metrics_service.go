@@ -20,6 +20,7 @@ type DashboardMetrics struct {
 
 type DashboardMetricsService struct {
 	instanceConn infra.InstanceConnectionService
+	runnerSource queryRunnerSource
 }
 
 func NewDashboardMetricsService(instanceConn infra.InstanceConnectionService) *DashboardMetricsService {
@@ -27,9 +28,19 @@ func NewDashboardMetricsService(instanceConn infra.InstanceConnectionService) *D
 }
 
 func (s *DashboardMetricsService) GetMetrics(ctx context.Context, userID, projectID uuid.UUID) (*DashboardMetrics, error) {
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
+	var pool pgQueryRunner
+	if s.runnerSource != nil {
+		runner, _, err := s.runnerSource.QueryRunner(ctx, userID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		pool = runner
+	} else {
+		runner, err := s.instanceConn.GetPool(ctx, userID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		pool = runner
 	}
 
 	// Basic DB stats.

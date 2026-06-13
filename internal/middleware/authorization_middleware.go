@@ -10,7 +10,7 @@ import (
 
 // RequireAdmin checks if the authenticated user is an admin
 // This middleware should be used after Authenticate middleware
-func RequireAdmin(userRepo *repository.UserRepository) gin.HandlerFunc {
+func RequireAdmin(userRepo repository.UserStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get authenticated user ID from context (set by Authenticate middleware)
 		authenticatedUserID, ok := utils.UserIDFromGin(c)

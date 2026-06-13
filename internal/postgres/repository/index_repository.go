@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 )
 
@@ -20,7 +19,7 @@ var (
 )
 
 // ListIndexes returns indexes defined on the given table (excluding internal-only rels).
-func (r *TableRepository) ListIndexes(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]model.TableIndexInfo, error) {
+func (r *TableRepository) ListIndexes(ctx context.Context, pool poolQuerier, schema, table string) ([]model.TableIndexInfo, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT i.relname,
 		       ix.indisunique,
@@ -53,7 +52,7 @@ func (r *TableRepository) ListIndexes(ctx context.Context, pool *pgxpool.Pool, s
 }
 
 // CreateIndex runs CREATE [UNIQUE] INDEX with quoted identifiers only (method must be allowlisted by caller).
-func (r *TableRepository) CreateIndex(ctx context.Context, pool *pgxpool.Pool, schema, table, indexName string, columns []string, unique bool, method string) error {
+func (r *TableRepository) CreateIndex(ctx context.Context, pool poolQuerier, schema, table, indexName string, columns []string, unique bool, method string) error {
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method == "" {
 		method = "btree"
@@ -91,7 +90,7 @@ func (r *TableRepository) CreateIndex(ctx context.Context, pool *pgxpool.Pool, s
 }
 
 // DropIndex drops an index by name if it belongs to the given table and is not the primary key index.
-func (r *TableRepository) DropIndex(ctx context.Context, pool *pgxpool.Pool, schema, table, indexName string) error {
+func (r *TableRepository) DropIndex(ctx context.Context, pool poolQuerier, schema, table, indexName string) error {
 	var isPrimary bool
 	err := pool.QueryRow(ctx, `
 		SELECT ix.indisprimary

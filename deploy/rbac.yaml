@@ -49,7 +49,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-  - apiGroups: ["traefik.containo.us"]
+  - apiGroups: ["traefik.containo.us"] 
     resources: ["ingressroutetcps"]
     verbs: ["create", "get", "list", "watch", "delete"]
 ---

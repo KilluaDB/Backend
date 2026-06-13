@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -24,6 +23,8 @@ const (
 	PgFormatCustom PostgresFormat = "custom" // pg_dump -Fc binary archive; restorable with pg_restore
 )
 
+var ErrInvalidPostgresFormat = errors.New("unsupported postgres format")
+
 func parsePostgresFormat(s string) (PostgresFormat, error) {
 	switch s {
 	case "", "sql", "plain", "p":
@@ -31,7 +32,7 @@ func parsePostgresFormat(s string) (PostgresFormat, error) {
 	case "custom", "c", "dump":
 		return PgFormatCustom, nil
 	default:
-		return "", fmt.Errorf("unsupported postgres format: %q (use sql or custom)", s)
+		return "", fmt.Errorf("%w: %q (use sql or custom)", ErrInvalidPostgresFormat, s)
 	}
 }
 
@@ -56,7 +57,7 @@ func exportPostgres(ctx context.Context, dsn string, format PostgresFormat, dst 
 	}
 	args = append(args, "--dbname="+dsn)
 
-	cmd := exec.CommandContext(ctx, "pg_dump", args...)
+	cmd := commandContext(ctx, "pg_dump", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -178,7 +179,7 @@ func importPostgres(ctx context.Context, dsn string, forced PostgresFormat, src 
 // any failed statement abort the whole restore (the export-side filter already
 // removed the owner-only extension statements, so a well-formed dump runs clean).
 func importPostgresSQL(ctx context.Context, dsn string, src io.Reader) error {
-	cmd := exec.CommandContext(ctx,
+	cmd := commandContext(ctx,
 		"psql",
 		"--no-psqlrc",
 		"--quiet",
@@ -251,7 +252,7 @@ func importPostgresCustom(ctx context.Context, dsn string, src io.Reader) error 
 
 	// List the archive's table of contents, then drop the EXTENSION entries.
 	var tocBuf, listErr bytes.Buffer
-	listCmd := exec.CommandContext(ctx, "pg_restore", "--list", archivePath)
+	listCmd := commandContext(ctx, "pg_restore", "--list", archivePath)
 	listCmd.Stdout = &tocBuf
 	listCmd.Stderr = &listErr
 	if err := listCmd.Run(); err != nil {
@@ -265,7 +266,7 @@ func importPostgresCustom(ctx context.Context, dsn string, src io.Reader) error 
 	defer func() { _ = os.Remove(listPath) }()
 
 	var stderr bytes.Buffer
-	restoreCmd := exec.CommandContext(ctx,
+	restoreCmd := commandContext(ctx,
 		"pg_restore",
 		"--clean",
 		"--if-exists",

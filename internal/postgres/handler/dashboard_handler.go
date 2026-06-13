@@ -5,20 +5,30 @@ import (
 	"backend/internal/response"
 	"backend/internal/service"
 	"backend/internal/utils"
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
+type OverviewService interface {
+	GetOverview(ctx context.Context, userID, projectID uuid.UUID) (*pgservice.DashboardOverview, error)
+}
+
+type MetricsService interface {
+	GetMetrics(ctx context.Context, userID, projectID uuid.UUID) (*pgservice.DashboardMetrics, error)
+}
+
 type DashboardHandler struct {
-	overview *pgservice.DashboardOverviewService
-	metrics  *pgservice.DashboardMetricsService
+	overview OverviewService
+	metrics  MetricsService
 }
 
 func NewDashboardHandler(
-	overview *pgservice.DashboardOverviewService,
-	metrics *pgservice.DashboardMetricsService,
+	overview OverviewService,
+	metrics MetricsService,
 ) *DashboardHandler {
 	return &DashboardHandler{overview: overview, metrics: metrics}
 }

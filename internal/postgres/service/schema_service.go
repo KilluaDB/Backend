@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,6 +32,48 @@ const (
 type SchemaService struct {
 	instanceConn infra.InstanceConnectionService
 	redisClient  *redis.Client
+	ddlSource    schemaDDLRunnerSource
+	poolSource   schemaPoolSource // nil in production
+}
+
+// schemaPoolRunner is the subset of *pgxpool.Pool used by SchemaService (mockable via pgxmock).
+type schemaPoolRunner interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// schemaPoolSource optionally overrides pool resolution for tests (nil in production).
+type schemaPoolSource interface {
+	SchemaPool(ctx context.Context, userID, projectID uuid.UUID) (schemaPoolRunner, error)
+}
+
+// schemaPool resolves the project pool, preferring an injected source in tests.
+func (s *SchemaService) schemaPool(ctx context.Context, userID, projectID uuid.UUID) (schemaPoolRunner, error) {
+	if s.poolSource != nil {
+		return s.poolSource.SchemaPool(ctx, userID, projectID)
+	}
+	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return pool, nil
+}
+
+type schemaDDLRunner interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+type schemaDDLRunnerSource interface {
+	DDLRunner(ctx context.Context, userID, projectID uuid.UUID) (schemaDDLRunner, error)
+}
+
+type instanceSchemaDDLRunnerSource struct {
+	instanceConn infra.InstanceConnectionService
+}
+
+func (s instanceSchemaDDLRunnerSource) DDLRunner(ctx context.Context, userID, projectID uuid.UUID) (schemaDDLRunner, error) {
+	return s.instanceConn.GetPool(ctx, userID, projectID)
 }
 
 // NewSchemaService creates a new SchemaService
@@ -37,6 +81,7 @@ func NewSchemaService(instanceConn infra.InstanceConnectionService, redisClient 
 	return &SchemaService{
 		instanceConn: instanceConn,
 		redisClient:  redisClient,
+		ddlSource:    instanceSchemaDDLRunnerSource{instanceConn: instanceConn},
 	}
 }
 
@@ -60,7 +105,7 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 	}
 
 	ctx := context.Background()
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	pool, err := s.schemaPool(ctx, userID, projectID)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +124,7 @@ func (s *SchemaService) VisualizeSchema(userID uuid.UUID, projectID uuid.UUID, s
 
 // ListSchemas returns schema names available in the project's database.
 func (s *SchemaService) ListSchemas(ctx context.Context, userID, projectID uuid.UUID) ([]string, error) {
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	pool, err := s.schemaPool(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +415,15 @@ func (s *SchemaService) CachePendingDDL(ctx context.Context, projectID uuid.UUID
 
 // ApplyDDL executes the approved DDL (Data Definition Language) SQL cached in Redis on the project's database instance.
 func (s *SchemaService) ApplyDDL(ctx context.Context, userID, projectID uuid.UUID) error {
+	source := s.ddlSource
+	if source == nil {
+		source = instanceSchemaDDLRunnerSource{instanceConn: s.instanceConn}
+	}
+	pool, err := source.DDLRunner(ctx, userID, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection pool: %w", err)
+	}
+
 	key := fmt.Sprintf("pending_schema:%s", projectID.String())
 	ddl, err := s.redisClient.Get(ctx, key).Result()
 	if err != nil {
@@ -382,11 +436,6 @@ func (s *SchemaService) ApplyDDL(ctx context.Context, userID, projectID uuid.UUI
 	trimmed := strings.TrimSpace(ddl)
 	if trimmed == "" {
 		return ErrNoPendingDDL
-	}
-
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
-	if err != nil {
-		return fmt.Errorf("failed to get connection pool: %w", err)
 	}
 
 	// Exec executing full batch of DDL statements inside the transaction/session

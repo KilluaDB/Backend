@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // GetTables lists base tables in the given schema.
@@ -18,7 +17,7 @@ func (s *TableService) GetTables(ctx context.Context, projectID, userID uuid.UUI
 		return nil, fmt.Errorf("%w: %v", ErrInvalidTableRequest, err)
 	}
 	schema = PostgresSchema(schema)
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) ([]string, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) ([]string, error) {
 		schemaRepo := repository.NewSchemaRepository(pool)
 		return schemaRepo.GetTables(ctx, schema)
 	})
@@ -34,7 +33,7 @@ func (s *TableService) GetTableMetadata(ctx context.Context, projectID, userID u
 		return nil, fmt.Errorf("invalid table name: %w", err)
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*model.TableMetadata, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) (*model.TableMetadata, error) {
 		schemaRepo := repository.NewSchemaRepository(pool)
 		exists, err := schemaRepo.TableExists(ctx, schema, table)
 		if err != nil {
@@ -83,7 +82,7 @@ func (s *TableService) GetRows(ctx context.Context, projectID, userID uuid.UUID,
 		}
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*model.GetRowsResult, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) (*model.GetRowsResult, error) {
 		rows, hasMore, err := s.tableRepo.SelectRows(ctx, pool, schema, table, filter, limit, offset)
 		if err != nil {
 			return nil, err
@@ -128,7 +127,7 @@ func (s *TableService) UpdateRows(ctx context.Context, projectID, userID uuid.UU
 		}
 	}
 
-	return withProjectPoolErr(s, ctx, userID, projectID, func(pool *pgxpool.Pool) error {
+	return withProjectPoolErr(s, ctx, userID, projectID, func(pool pgPoolRunner) error {
 		return s.tableRepo.UpdateRows(ctx, pool, schema, table, filter, update)
 	})
 }
@@ -148,7 +147,7 @@ func (s *TableService) DeleteRowsByFilter(ctx context.Context, userID, projectID
 		}
 	}
 
-	return withProjectPoolErr(s, ctx, userID, projectID, func(pool *pgxpool.Pool) error {
+	return withProjectPoolErr(s, ctx, userID, projectID, func(pool pgPoolRunner) error {
 		return s.tableRepo.DeleteRowsByFilter(ctx, pool, schema, table, filter)
 	})
 }
@@ -184,7 +183,7 @@ func (s *TableService) InsertRow(ctx context.Context, userID, projectID uuid.UUI
 		}
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*InsertRowResponse, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) (*InsertRowResponse, error) {
 		rowID, err := s.tableRepo.InsertRow(ctx, pool, schema, req.Table, req.Values)
 		if err != nil {
 			return nil, err
@@ -280,7 +279,7 @@ func (s *TableService) AddColumn(ctx context.Context, userID, projectID uuid.UUI
 		}
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*AddColumnResponse, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) (*AddColumnResponse, error) {
 		schemaRepo := repository.NewSchemaRepository(pool)
 		exists, err := schemaRepo.TableExists(ctx, schema, req.TableName)
 		if err != nil {
@@ -348,7 +347,7 @@ func (s *TableService) DeleteColumn(ctx context.Context, userID, projectID uuid.
 	if err := validateRowColumnIdentifier(columnName); err != nil {
 		return fmt.Errorf("invalid column name: %w", err)
 	}
-	return withProjectPoolErr(s, ctx, userID, projectID, func(pool *pgxpool.Pool) error {
+	return withProjectPoolErr(s, ctx, userID, projectID, func(pool pgPoolRunner) error {
 		if err := s.tableRepo.DropColumn(ctx, pool, schema, req.TableName, columnName); err != nil {
 			return fmt.Errorf("failed to delete column: %w", err)
 		}

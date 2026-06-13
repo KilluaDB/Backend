@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 )
 
@@ -99,7 +98,7 @@ func qualifiedTableIdent(schema, table string) string {
 
 // SelectRows selects up to limit rows with optional equality filter.
 // It requests one extra row to compute hasMore; the returned slice is trimmed to limit.
-func (r *TableRepository) SelectRows(ctx context.Context, pool *pgxpool.Pool, schema, table string, filter map[string]interface{}, limit, offset int) ([]map[string]interface{}, bool, error) {
+func (r *TableRepository) SelectRows(ctx context.Context, pool poolQuerier, schema, table string, filter map[string]interface{}, limit, offset int) ([]map[string]interface{}, bool, error) {
 	if limit < 1 || limit > MaxGetRowsLimit {
 		return nil, false, fmt.Errorf("limit must be between 1 and %d", MaxGetRowsLimit)
 	}
@@ -133,7 +132,7 @@ func (r *TableRepository) SelectRows(ctx context.Context, pool *pgxpool.Pool, sc
 }
 
 // CountRows returns the number of rows matching the optional equality filter.
-func (r *TableRepository) CountRows(ctx context.Context, pool *pgxpool.Pool, schema, table string, filter map[string]interface{}) (int64, error) {
+func (r *TableRepository) CountRows(ctx context.Context, pool poolQuerier, schema, table string, filter map[string]interface{}) (int64, error) {
 	q := fmt.Sprintf("SELECT COUNT(*) FROM %s", qualifiedTableIdent(schema, table))
 	whereClause, whereArgs, _ := buildEqWhere(filter, 1)
 	if whereClause != "" {
@@ -145,7 +144,7 @@ func (r *TableRepository) CountRows(ctx context.Context, pool *pgxpool.Pool, sch
 }
 
 // UpdateRows runs UPDATE with equality filter; nil/empty filter updates all rows.
-func (r *TableRepository) UpdateRows(ctx context.Context, pool *pgxpool.Pool, schema, table string, filter, update map[string]interface{}) error {
+func (r *TableRepository) UpdateRows(ctx context.Context, pool poolQuerier, schema, table string, filter, update map[string]interface{}) error {
 	setKeys := sortedMapKeys(update)
 	setParts := make([]string, 0, len(setKeys))
 	args := make([]interface{}, 0, len(update)+len(filter))
@@ -168,7 +167,7 @@ func (r *TableRepository) UpdateRows(ctx context.Context, pool *pgxpool.Pool, sc
 }
 
 // DeleteRowsByFilter deletes rows matching an optional equality filter; empty filter deletes all rows.
-func (r *TableRepository) DeleteRowsByFilter(ctx context.Context, pool *pgxpool.Pool, schema, table string, filter map[string]interface{}) error {
+func (r *TableRepository) DeleteRowsByFilter(ctx context.Context, pool poolQuerier, schema, table string, filter map[string]interface{}) error {
 	query := fmt.Sprintf("DELETE FROM %s", qualifiedTableIdent(schema, table))
 	var args []interface{}
 	whereClause, whereArgs, _ := buildEqWhere(filter, 1)
@@ -183,7 +182,7 @@ func (r *TableRepository) DeleteRowsByFilter(ctx context.Context, pool *pgxpool.
 }
 
 // InsertRow inserts a row; returned rowID is string (UUID), int64 (serial), or int64(0) when no RETURNING id.
-func (r *TableRepository) InsertRow(ctx context.Context, pool *pgxpool.Pool, schema, table string, values map[string]interface{}) (rowID interface{}, err error) {
+func (r *TableRepository) InsertRow(ctx context.Context, pool poolQuerier, schema, table string, values map[string]interface{}) (rowID interface{}, err error) {
 	var hasIDColumn bool
 	var idDataType string
 	_ = pool.QueryRow(ctx, `

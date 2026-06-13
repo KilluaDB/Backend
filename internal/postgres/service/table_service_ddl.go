@@ -11,14 +11,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func (s *TableService) CreateTable(ctx context.Context, req *model.CreateTableRequest, userId uuid.UUID, projectId uuid.UUID) (*model.TableOpResult, error) {
 	if err := s.validateCreateTableRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidTableRequest, err)
 	}
-	return withProjectPool(s, ctx, userId, projectId, func(pool *pgxpool.Pool) (*model.TableOpResult, error) {
+	return withProjectPool(s, ctx, userId, projectId, func(pool pgPoolRunner) (*model.TableOpResult, error) {
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to start transaction: %w", err)
@@ -51,7 +50,7 @@ func (s *TableService) DeleteTable(ctx context.Context, req *model.DeleteTableRe
 	if !isValidIdentifier(req.Table) {
 		return nil, fmt.Errorf("%w: invalid table name", ErrInvalidTableRequest)
 	}
-	return withProjectPool(s, ctx, userId, projectId, func(pool *pgxpool.Pool) (*model.TableOpResult, error) {
+	return withProjectPool(s, ctx, userId, projectId, func(pool pgPoolRunner) (*model.TableOpResult, error) {
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to start transaction: %w", err)
@@ -161,7 +160,7 @@ func (s *TableService) UpdateTable(ctx context.Context, userID, projectID uuid.U
 		}
 	}
 
-	return withProjectPool(s, ctx, userID, projectID, func(pool *pgxpool.Pool) (*model.TableOpResult, error) {
+	return withProjectPool(s, ctx, userID, projectID, func(pool pgPoolRunner) (*model.TableOpResult, error) {
 		schemaRepo := repository.NewSchemaRepository(pool)
 		exists, err := schemaRepo.TableExists(ctx, currentSchema, currentTable)
 		if err != nil {

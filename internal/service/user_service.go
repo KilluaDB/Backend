@@ -9,16 +9,23 @@ import (
 	// "time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type UserService struct {
-	userRepo    *repository.UserRepository
-	projectRepo *repository.ProjectRepository
-	pool        *pgxpool.Pool
+// txBeginner abstracts transaction start for DeleteUser (mockable in tests).
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-func NewUserService(userRepo *repository.UserRepository, projectRepo *repository.ProjectRepository, pool *pgxpool.Pool) *UserService {
+type UserService struct {
+	userRepo    repository.UserStore
+	projectRepo repository.ProjectStore
+	pool        *pgxpool.Pool
+	txPool      txBeginner // nil in production; set in tests to inject pgxmock
+}
+
+func NewUserService(userRepo repository.UserStore, projectRepo repository.ProjectStore, pool *pgxpool.Pool) *UserService {
 	return &UserService{
 		userRepo:    userRepo,
 		projectRepo: projectRepo,
@@ -134,7 +141,7 @@ func (s *UserService) DeleteUser(ctx context.Context, userID uuid.UUID, authenti
 		}
 	}
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -168,4 +175,11 @@ func (s *UserService) GetAllUsers(ctx context.Context) ([]model.User, error) {
 	}
 
 	return users, nil
+}
+
+func (s *UserService) beginTx(ctx context.Context) (pgx.Tx, error) {
+	if s.txPool != nil {
+		return s.txPool.Begin(ctx)
+	}
+	return s.pool.Begin(ctx)
 }
