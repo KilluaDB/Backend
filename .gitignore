@@ -22,6 +22,9 @@ tmp/
 .vscode
 .idea
 
+# Claude Code local working directory
+.claude/
+
 # .env file
 .env
 
