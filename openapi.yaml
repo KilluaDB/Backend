@@ -188,10 +188,16 @@ components:
 
     PostgresTableIndexInfo:
       type: object
-      required: [name, unique, primary, method, definition, valid]
+      required: [name, table, columns, unique, primary, method, definition, valid]
       properties:
         name:
           type: string
+        table:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
         unique:
           type: boolean
         primary:
@@ -235,6 +241,23 @@ components:
           type: string
           description: Access method; omit or `btree` for default B-tree
           enum: [btree, hash, gin, gist, spgist, brin]
+
+    PostgresCreateIndexData:
+      type: object
+      required: [name, table, columns, unique, method]
+      properties:
+        name:
+          type: string
+        table:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
+        unique:
+          type: boolean
+        method:
+          type: string
 
     # --- PostgreSQL handler payloads (data field shapes) ---
     PostgresListTablesData:
@@ -3274,15 +3297,26 @@ paths:
               method: btree
       responses:
         '201':
-          description: |
-            Index created successfully. Response has `status` and `message` only; `data` is omitted (no body payload).
+          description: Index created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIResponseSuccessMessageOnly'
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PostgresCreateIndexData'
               example:
                 status: success
                 message: Index created successfully
+                data:
+                  name: idx_customers_email
+                  table: customers
+                  columns:
+                    - email
+                  unique: true
+                  method: btree
         '400':
           description: Invalid body, identifiers, or unsupported method
           content:
