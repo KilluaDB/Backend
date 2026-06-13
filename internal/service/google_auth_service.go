@@ -14,67 +14,74 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type GoogleAuthService struct {
-	userRepo *repository.UserRepository
+// GoogleUserInfoClient fetches Google user profile data (mocked in tests).
+type GoogleUserInfoClient interface {
+	FetchUserInfo(ctx context.Context, accessToken string) (email string, verified bool, err error)
 }
 
-func NewGoogleAuthService(userRepo *repository.UserRepository) *GoogleAuthService {
-	return &GoogleAuthService{
-		userRepo: userRepo,
-	}
-}
+type defaultGoogleUserInfoClient struct{}
 
-func (s *GoogleAuthService) Callback(ctx context.Context, token *oauth2.Token) (string, error) {
-	// Create OAuth2 HTTP client with the token
-	oauthClient := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
+func (defaultGoogleUserInfoClient) FetchUserInfo(ctx context.Context, accessToken string) (string, bool, error) {
+	oauthClient := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create userinfo request: %w", err)
+		return "", false, fmt.Errorf("failed to create userinfo request: %w", err)
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 
-	// Fetch user info from Google
 	response, err := oauthClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to get user info: %w", err)
+		return "", false, fmt.Errorf("failed to get user info: %w", err)
 	}
 	defer response.Body.Close()
 
 	var googleUser struct {
-		ID            string `json:"id"`
 		Email         string `json:"email"`
 		VerifiedEmail bool   `json:"verified_email"`
-		Name          string `json:"name"`
-		Picture       string `json:"picture"`
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %s", err.Error())
+		return "", false, fmt.Errorf("failed to read response: %w", err)
 	}
-
 	if err := json.Unmarshal(body, &googleUser); err != nil {
-		return "", fmt.Errorf("failed to parse user info: %w", err)
+		return "", false, fmt.Errorf("failed to parse user info: %w", err)
 	}
+	return googleUser.Email, googleUser.VerifiedEmail, nil
+}
 
-	if !googleUser.VerifiedEmail {
+type GoogleAuthService struct {
+	userRepo repository.UserStore
+	userInfo GoogleUserInfoClient
+}
+
+func NewGoogleAuthService(userRepo repository.UserStore) *GoogleAuthService {
+	return &GoogleAuthService{
+		userRepo: userRepo,
+		userInfo: defaultGoogleUserInfoClient{},
+	}
+}
+
+// NewGoogleAuthServiceWithClient allows injecting a mock Google userinfo client in tests.
+func NewGoogleAuthServiceWithClient(userRepo repository.UserStore, client GoogleUserInfoClient) *GoogleAuthService {
+	return &GoogleAuthService{userRepo: userRepo, userInfo: client}
+}
+
+func (s *GoogleAuthService) Callback(ctx context.Context, token *oauth2.Token) (string, error) {
+	email, verified, err := s.userInfo.FetchUserInfo(ctx, token.AccessToken)
+	if err != nil {
+		return "", err
+	}
+	if !verified {
 		return "", fmt.Errorf("email is not verified by Google")
 	}
 
-	user, err := s.userRepo.FindUserByEmail(ctx, googleUser.Email)
+	user, err := s.userRepo.FindUserByEmail(ctx, email)
 	if err != nil || user == nil {
-		// User doesn't exist, create new one
-		newUser := &model.User{
-			Email: googleUser.Email,
-		}
-
+		newUser := &model.User{Email: email}
 		if err := s.userRepo.Create(ctx, newUser); err != nil {
 			return "", fmt.Errorf("failed to create user: %w", err)
 		}
-
 		user = newUser
 	}
 
@@ -82,6 +89,5 @@ func (s *GoogleAuthService) Callback(ctx context.Context, token *oauth2.Token) (
 	if err != nil {
 		return "", fmt.Errorf("failed to generate access token: %w", err)
 	}
-
 	return accessToken, nil
 }

@@ -8,15 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ProjectRepository stores and reads project metadata.
 type ProjectRepository struct {
-	pool *pgxpool.Pool
+	pool pgxPool
 }
 
-func NewProjectRepository(pool *pgxpool.Pool) *ProjectRepository {
+func NewProjectRepository(pool pgxPool) *ProjectRepository {
 	return &ProjectRepository{pool: pool}
 }
 

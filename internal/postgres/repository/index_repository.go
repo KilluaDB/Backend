@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 )
 
@@ -27,7 +26,7 @@ var allowedIndexMethods = map[string]struct{}{
 }
 
 // ListIndexes returns indexes defined on the given table (excluding internal-only rels).
-func (r *TableRepository) ListIndexes(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]model.TableIndexInfo, error) {
+func (r *TableRepository) ListIndexes(ctx context.Context, pool poolQuerier, schema, table string) ([]model.TableIndexInfo, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT i.relname,
 		       t.relname,
@@ -67,7 +66,7 @@ func (r *TableRepository) ListIndexes(ctx context.Context, pool *pgxpool.Pool, s
 }
 
 // TableExists returns true if the table exists in the given schema.
-func (r *TableRepository) TableExists(ctx context.Context, pool *pgxpool.Pool, schema, table string) (bool, error) {
+func (r *TableRepository) TableExists(ctx context.Context, pool poolQuerier, schema, table string) (bool, error) {
 	var exists bool
 	err := pool.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -79,8 +78,8 @@ func (r *TableRepository) TableExists(ctx context.Context, pool *pgxpool.Pool, s
 	return exists, err
 }
 
-// CreateIndex runs CREATE [UNIQUE] INDEX with quoted identifiers only (method must be allowlisted).
-func (r *TableRepository) CreateIndex(ctx context.Context, pool *pgxpool.Pool, schema, table, indexName string, columns []string, unique bool, method string) error {
+// CreateIndex runs CREATE [UNIQUE] INDEX with quoted identifiers only (method must be allowlisted by caller).
+func (r *TableRepository) CreateIndex(ctx context.Context, pool poolQuerier, schema, table, indexName string, columns []string, unique bool, method string) error {
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method == "" {
 		method = "btree"
@@ -121,16 +120,9 @@ func (r *TableRepository) CreateIndex(ctx context.Context, pool *pgxpool.Pool, s
 }
 
 // DropIndex drops an index by name if it belongs to the given table and is not the primary key index.
-// The check and drop are wrapped in a transaction to prevent TOCTOU races.
-func (r *TableRepository) DropIndex(ctx context.Context, pool *pgxpool.Pool, schema, table, indexName string) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
+func (r *TableRepository) DropIndex(ctx context.Context, pool poolQuerier, schema, table, indexName string) error {
 	var isPrimary bool
-	err = tx.QueryRow(ctx, `
+	err := pool.QueryRow(ctx, `
 		SELECT ix.indisprimary
 		FROM pg_class i
 		JOIN pg_index ix ON i.oid = ix.indexrelid
@@ -150,9 +142,9 @@ func (r *TableRepository) DropIndex(ctx context.Context, pool *pgxpool.Pool, sch
 
 	q := fmt.Sprintf("DROP INDEX %s.%s",
 		pq.QuoteIdentifier(schema), pq.QuoteIdentifier(indexName))
-	if _, err = tx.Exec(ctx, q); err != nil {
+	if _, err = pool.Exec(ctx, q); err != nil {
 		return err
 	}
 
-	return tx.Commit(ctx)
+	return nil
 }

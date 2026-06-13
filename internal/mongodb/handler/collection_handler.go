@@ -6,6 +6,7 @@ import (
 	"backend/internal/response"
 	"backend/internal/service"
 	"backend/internal/utils"
+	"context"
 	"errors"
 	"net/http"
 
@@ -13,12 +14,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// CollectionHandler handles MongoDB collection endpoints.
-type CollectionHandler struct {
-	collectionService *mongoservice.CollectionService
+type collectionServiceI interface {
+	ListCollections(ctx context.Context, userID, projectID uuid.UUID) ([]string, error)
+	CreateCollection(ctx context.Context, userID, projectID uuid.UUID, name string) error
+	DeleteCollection(ctx context.Context, userID, projectID uuid.UUID, name string) error
+	AddField(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.AddFieldRequest) (*model.FieldUpdateResult, error)
+	RemoveField(ctx context.Context, userID, projectID uuid.UUID, collection, field string) (*model.FieldUpdateResult, error)
 }
 
-func NewCollectionHandler(collectionService *mongoservice.CollectionService) *CollectionHandler {
+// CollectionHandler handles MongoDB collection endpoints.
+type CollectionHandler struct {
+	collectionService collectionServiceI
+}
+
+func NewCollectionHandler(collectionService collectionServiceI) *CollectionHandler {
 	return &CollectionHandler{
 		collectionService: collectionService,
 	}
@@ -116,7 +125,7 @@ func (h *CollectionHandler) DeleteCollection(c *gin.Context) {
 		case failMongoInstanceError(c, err):
 			return
 		default:
-			response.Fail(c, http.StatusBadRequest, err, "Failed to delete collection")
+			response.Fail(c, http.StatusInternalServerError, err, "Failed to delete collection")
 			return
 		}
 	}
@@ -154,7 +163,7 @@ func (h *CollectionHandler) AddField(c *gin.Context) {
 		case failMongoInstanceError(c, err):
 			return
 		default:
-			response.Fail(c, http.StatusBadRequest, err, "Failed to add field")
+			response.Fail(c, http.StatusInternalServerError, err, "Failed to add field")
 			return
 		}
 	}
@@ -188,7 +197,7 @@ func (h *CollectionHandler) RemoveField(c *gin.Context) {
 		case failMongoInstanceError(c, err):
 			return
 		default:
-			response.Fail(c, http.StatusBadRequest, err, "Failed to remove field")
+			response.Fail(c, http.StatusInternalServerError, err, "Failed to remove field")
 			return
 		}
 	}

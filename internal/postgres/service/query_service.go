@@ -12,8 +12,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// pgQueryRunner is the subset of pgxpool.Pool used for SQL execution (mockable in tests).
+type pgQueryRunner interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// queryRunnerSource optionally overrides pool resolution (used by tests only).
+type queryRunnerSource interface {
+	QueryRunner(ctx context.Context, userID, projectID uuid.UUID) (pgQueryRunner, uuid.UUID, error)
+}
 
 type QueryResult struct {
 	Columns       []string                 `json:"columns"`
@@ -47,6 +60,7 @@ var (
 type QueryService struct {
 	instanceConn infra.InstanceConnectionService
 	maxLimit     int
+	runnerSource queryRunnerSource // nil in production; set in tests to inject pgxmock
 }
 
 func NewQueryService(instanceConn infra.InstanceConnectionService, maxLimit int) *QueryService {
@@ -127,12 +141,34 @@ func (s *QueryService) ValidateSQLQuery(query string) error {
 	return nil
 }
 
+func (s *QueryService) poolForQuery(ctx context.Context, userID, projectID uuid.UUID) (pgQueryRunner, uuid.UUID, error) {
+	if s.runnerSource != nil {
+		return s.runnerSource.QueryRunner(ctx, userID, projectID)
+	}
+	pool, id, err := s.instanceConn.GetPoolWithMeta(ctx, userID, projectID)
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	return pool, id, nil
+}
+
+func (s *QueryService) poolForHistory(ctx context.Context, userID, projectID uuid.UUID) (pgQueryRunner, error) {
+	if s.runnerSource != nil {
+		r, _, err := s.runnerSource.QueryRunner(ctx, userID, projectID)
+		return r, err
+	}
+	return s.instanceConn.GetPool(ctx, userID, projectID)
+}
+
 // ExecuteSQLQuery executes a SQL query on the project's PostgreSQL database instance.
 func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, req *ExecuteQueryRequest, projectId uuid.UUID) (*QueryResult, *model.QueryHistory, error) {
 	startTime := time.Now()
 
 	if err := s.ValidateSQLQuery(req.Query); err != nil {
-		instanceID, _ := s.instanceConn.GetInstanceID(ctx, userID, projectId)
+		var instanceID uuid.UUID
+		if s.instanceConn != nil {
+			instanceID, _ = s.instanceConn.GetInstanceID(ctx, userID, projectId)
+		}
 		execTime := time.Since(startTime).Milliseconds()
 		success := false
 		execTimeInt := int(execTime)
@@ -147,12 +183,12 @@ func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, re
 		return &QueryResult{Error: err.Error(), ExecutionTime: execTime}, exec, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 	}
 
-	pool, instanceID2, err := s.instanceConn.GetPoolWithMeta(ctx, userID, projectId)
+	runner, instanceID2, err := s.poolForQuery(ctx, userID, projectId)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	result, err := s.executeSQLQuery(ctx, pool, req.Query)
+	result, err := s.executeSQLQuery(ctx, runner, req.Query)
 	execTime := time.Since(startTime).Milliseconds()
 	if result != nil {
 		result.ExecutionTime = execTime
@@ -182,19 +218,19 @@ func (s *QueryService) ExecuteSQLQuery(ctx context.Context, userID uuid.UUID, re
 	return result, exec, nil
 }
 
-func (s *QueryService) executeSQLQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+func (s *QueryService) executeSQLQuery(ctx context.Context, runner pgQueryRunner, query string) (*QueryResult, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(query))
 	isSelect := strings.HasPrefix(normalized, "SELECT") || strings.HasPrefix(normalized, "EXPLAIN SELECT")
 
 	if isSelect {
-		return s.executeSelectQuery(ctx, pool, query)
+		return s.executeSelectQuery(ctx, runner, query)
 	}
-	return s.executeNonSelectQuery(ctx, pool, query)
+	return s.executeNonSelectQuery(ctx, runner, query)
 }
 
-func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+func (s *QueryService) executeSelectQuery(ctx context.Context, runner pgQueryRunner, query string) (*QueryResult, error) {
 	start := time.Now()
-	rows, err := pool.Query(ctx, query)
+	rows, err := runner.Query(ctx, query)
 	duration := time.Since(start).Seconds()
 	metrics.PgQueryDuration.WithLabelValues("select").Observe(duration)
 	if err != nil {
@@ -256,11 +292,12 @@ func (s *QueryService) executeSelectQuery(ctx context.Context, pool *pgxpool.Poo
 	}, nil
 }
 
-func (s *QueryService) executeNonSelectQuery(ctx context.Context, pool *pgxpool.Pool, query string) (*QueryResult, error) {
+func (s *QueryService) executeNonSelectQuery(ctx context.Context, runner pgQueryRunner, query string) (*QueryResult, error) {
 	start := time.Now()
-	cmdTag, err := pool.Exec(ctx, query)
+	cmdTag, err := runner.Exec(ctx, query)
 	duration := time.Since(start).Seconds()
-	metrics.PgQueryDuration.WithLabelValues("exec").Observe(duration)
+	metrics.PgQueryDuration.WithLabelValues("select").Observe(duration)
+
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("postgres", "exec").Inc()
 		return &QueryResult{Error: err.Error()}, nil
@@ -281,13 +318,13 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 		limit = 30
 	}
 
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	runner, err := s.poolForHistory(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
 
 	var hasStatStatements bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&hasStatStatements); err != nil {
+	if err := runner.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&hasStatStatements); err != nil {
 		return nil, err
 	}
 	if !hasStatStatements {
@@ -297,7 +334,7 @@ func (s *QueryService) GetQueryHistory(ctx context.Context, userID, projectID uu
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	rows, err := pool.Query(queryCtx, `
+	rows, err := runner.Query(queryCtx, `
 		SELECT query, calls::bigint, total_exec_time, mean_exec_time, rows::bigint,
 		       shared_blks_hit::bigint, shared_blks_read::bigint, temp_blks_written::bigint
 		FROM pg_stat_statements
@@ -373,4 +410,33 @@ func isSystemQueryText(query string) bool {
 		}
 	}
 	return false
+}
+
+// QueryRunner is the pool subset used for SQL execution (pgxmock satisfies this in tests).
+type QueryRunner interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// QueryRunnerSource resolves the SQL runner (for handler tests).
+type QueryRunnerSource interface {
+	QueryRunner(ctx context.Context, userID, projectID uuid.UUID) (QueryRunner, uuid.UUID, error)
+}
+
+// SetRunnerSourceForTest injects pool resolution for tests in other packages.
+func (s *QueryService) SetRunnerSourceForTest(src QueryRunnerSource) {
+	if src == nil {
+		s.runnerSource = nil
+		return
+	}
+	s.runnerSource = exportedRunnerBridge{src}
+}
+
+type exportedRunnerBridge struct {
+	src QueryRunnerSource
+}
+
+func (b exportedRunnerBridge) QueryRunner(ctx context.Context, userID, projectID uuid.UUID) (pgQueryRunner, uuid.UUID, error) {
+	return b.src.QueryRunner(ctx, userID, projectID)
 }

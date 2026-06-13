@@ -8,14 +8,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type UserRepository struct {
-	pool *pgxpool.Pool
+	pool pgxPool
 }
 
-func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
+func NewUserRepository(pool pgxPool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 

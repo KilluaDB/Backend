@@ -18,9 +18,14 @@ type DSNProvider interface {
 	GetConnectionDSN(ctx context.Context, userID, projectID uuid.UUID) (dsn string, instanceID uuid.UUID, err error)
 }
 
+type PoolConnector interface {
+	Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error)
+}
+
 // PostgresConnectionManager manages a pool cache for project database connections.
 type PostgresConnectionManager struct {
-	provider DSNProvider
+	provider  DSNProvider
+	connector PoolConnector
 
 	pgPoolMu sync.Mutex
 	pgPools  map[uuid.UUID]cachedPgPool // keyed by projectID
@@ -34,8 +39,9 @@ type cachedPgPool struct {
 // NewPostgresConnectionManager creates a manager for Postgres pools using a DSNProvider.
 func NewPostgresConnectionManager(provider DSNProvider) *PostgresConnectionManager {
 	mgr := &PostgresConnectionManager{
-		provider: provider,
-		pgPools:  make(map[uuid.UUID]cachedPgPool),
+		provider:  provider,
+		connector: &defaultPoolConnector{},
+		pgPools:   make(map[uuid.UUID]cachedPgPool),
 	}
 	go mgr.backgroundTask()
 	return mgr
@@ -101,7 +107,7 @@ func (s *PostgresConnectionManager) acquireCachedPool(ctx context.Context, proje
 		pingErr := entry.pool.Ping(pingCtx)
 		cancel()
 		if pingErr == nil {
-					return entry.pool, nil
+			return entry.pool, nil
 		}
 
 		// Stale pool — evict and reconnect.
@@ -118,7 +124,7 @@ func (s *PostgresConnectionManager) acquireCachedPool(ctx context.Context, proje
 }
 
 func (s *PostgresConnectionManager) connectAndCachePool(ctx context.Context, projectID uuid.UUID, dsn string) (*pgxpool.Pool, error) {
-	pool, err := s.connectPostgresPool(ctx, dsn)
+	pool, err := s.connector.Connect(ctx, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +135,7 @@ func (s *PostgresConnectionManager) connectAndCachePool(ctx context.Context, pro
 		if existing.dsn == dsn && existing.pool != nil {
 			s.pgPoolMu.Unlock()
 			pool.Close()
-					return existing.pool, nil
+			return existing.pool, nil
 		}
 		if existing.pool != nil {
 			oldPoolToClose = existing.pool
@@ -141,11 +147,13 @@ func (s *PostgresConnectionManager) connectAndCachePool(ctx context.Context, pro
 	if oldPoolToClose != nil {
 		oldPoolToClose.Close()
 	}
-	
+
 	return pool, nil
 }
 
-func (s *PostgresConnectionManager) connectPostgresPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+type defaultPoolConnector struct{}
+
+func (c *defaultPoolConnector) Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		metrics.PgPoolErrorsTotal.WithLabelValues("connect").Inc()

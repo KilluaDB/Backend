@@ -22,7 +22,8 @@ type DSNProvider interface {
 
 // MongoConnectionManager manages a client cache for project MongoDB connections.
 type MongoConnectionManager struct {
-	provider DSNProvider
+	provider  DSNProvider
+	connectFn func(ctx context.Context, dsn string) (*mongo.Client, error)
 
 	clientMu sync.Mutex
 	clients  map[uuid.UUID]cachedMongoClient
@@ -37,8 +38,9 @@ type cachedMongoClient struct {
 // NewMongoConnectionManager creates a manager for MongoDB clients using a DSNProvider.
 func NewMongoConnectionManager(provider DSNProvider) *MongoConnectionManager {
 	return &MongoConnectionManager{
-		provider: provider,
-		clients:  make(map[uuid.UUID]cachedMongoClient),
+		provider:  provider,
+		connectFn: defaultConnectClient,
+		clients:   make(map[uuid.UUID]cachedMongoClient),
 	}
 }
 
@@ -54,6 +56,15 @@ func (s *MongoConnectionManager) GetDatabase(ctx context.Context, userID, projec
 		return nil, err
 	}
 	return client.Database(dbName), nil
+}
+
+// GetInstanceID returns the Kubernetes instance ID for the project's MongoDB.
+func (s *MongoConnectionManager) GetInstanceID(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error) {
+	_, instanceID, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return instanceID, nil
 }
 
 func (s *MongoConnectionManager) acquireCachedClient(ctx context.Context, projectID uuid.UUID, dsn string) (*mongo.Client, string, error) {
@@ -138,8 +149,7 @@ func (s *MongoConnectionManager) connectAndCacheClient(ctx context.Context, proj
 	return retClient, retName, nil
 }
 
-func (s *MongoConnectionManager) connectMongoClient(ctx context.Context, dsn string) (*mongo.Client, error) {
-	// mongo-driver v2: Connect does not accept context; use Ping to verify.
+func defaultConnectClient(ctx context.Context, dsn string) (*mongo.Client, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "connect").Inc()
@@ -157,6 +167,10 @@ func (s *MongoConnectionManager) connectMongoClient(ctx context.Context, dsn str
 	metrics.MongoPingLatency.Observe(time.Since(pingStart).Seconds())
 
 	return client, nil
+}
+
+func (s *MongoConnectionManager) connectMongoClient(ctx context.Context, dsn string) (*mongo.Client, error) {
+	return s.connectFn(ctx, dsn)
 }
 
 // EvictProject closes and removes a cached project client if present.

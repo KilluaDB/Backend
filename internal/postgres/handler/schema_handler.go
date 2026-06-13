@@ -6,6 +6,7 @@ import (
 	"backend/internal/service"
 	"backend/internal/utils"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,7 +16,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+type schemaServiceI interface {
+	VisualizeSchema(ctx context.Context, userID, projectID uuid.UUID, schema string) (string, error)
+	ListSchemas(ctx context.Context, userID, projectID uuid.UUID) ([]string, error)
+	CachePendingDDL(ctx context.Context, projectID uuid.UUID, ddl string) error
+	ApplyDDL(ctx context.Context, userID, projectID uuid.UUID) error
+}
 
 var sseClient = &http.Client{
 	Timeout: 0, // streaming
@@ -27,10 +36,10 @@ var sseClient = &http.Client{
 }
 
 type SchemaHandler struct {
-	schemaService *pgservice.SchemaService
+	schemaService schemaServiceI
 }
 
-func NewSchemaHandler(schemaService *pgservice.SchemaService) *SchemaHandler {
+func NewSchemaHandler(schemaService schemaServiceI) *SchemaHandler {
 	return &SchemaHandler{
 		schemaService: schemaService,
 	}

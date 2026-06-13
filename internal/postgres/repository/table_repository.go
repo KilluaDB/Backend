@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 )
 
@@ -135,7 +134,7 @@ func (r *TableRepository) Delete(ctx context.Context, tx pgx.Tx, schema string, 
 }
 
 // AddColumn runs ALTER TABLE ADD COLUMN and returns information_schema ordinal_position.
-func (r *TableRepository) AddColumn(ctx context.Context, pool *pgxpool.Pool, schema, tableName, colName, colType string, defaultVal interface{}) (columnID int64, err error) {
+func (r *TableRepository) AddColumn(ctx context.Context, pool poolQuerier, schema, tableName, colName, colType string, defaultVal interface{}) (columnID int64, err error) {
 	var qb strings.Builder
 	tableQualified := fmt.Sprintf("%s.%s", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(tableName))
 	columnNameQuoted := pq.QuoteIdentifier(colName)
@@ -155,7 +154,7 @@ func (r *TableRepository) AddColumn(ctx context.Context, pool *pgxpool.Pool, sch
 }
 
 // DropColumn runs ALTER TABLE DROP COLUMN.
-func (r *TableRepository) DropColumn(ctx context.Context, pool *pgxpool.Pool, schema, tableName, columnName string) error {
+func (r *TableRepository) DropColumn(ctx context.Context, pool poolQuerier, schema, tableName, columnName string) error {
 	tableQualified := fmt.Sprintf("%s.%s", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(tableName))
 	columnNameQuoted := pq.QuoteIdentifier(columnName)
 	query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", tableQualified, columnNameQuoted)

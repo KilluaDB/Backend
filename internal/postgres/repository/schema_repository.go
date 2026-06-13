@@ -9,14 +9,13 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type SchemaRepository struct {
-	pool *pgxpool.Pool
+	pool poolQuerier
 }
 
-func NewSchemaRepository(pool *pgxpool.Pool) *SchemaRepository {
+func NewSchemaRepository(pool poolQuerier) *SchemaRepository {
 	return &SchemaRepository{pool: pool}
 }
 

@@ -26,25 +26,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// TODO(sharding): Namespace sharding for scale
-//
-// Current design uses per-project namespaces (pg-<uuid>, mongo-<uuid>).
-// This works up to ~10,000 clusters but degrades beyond that due to
-// Kubernetes API server list/watch cost, operator reconcile load, and
-// etcd hotspots.
-//
-// When needed, shard by first byte of project UUID:
-//
-//	shard = projectID[0] % numShards
-//	namespace = "pg-{shard}-{projectID[:8]}"
-//
-// This is deterministic — no shard mapping needs to be stored. UUID v4 first
-// byte is uniformly random so shards fill evenly. Start with 16 shards
-// (~6,250 clusters/shard at 100k total), design for 256.
-//
-// Do not decrease numShards after deployment — it reshuffles project→namespace
-// mapping and loses cluster references.
-
 // ExternalAccess holds the external hostname and port for direct DB access via Traefik TCP SNI.
 type ExternalAccess struct {
 	Hostname string // e.g. db-abc123def456.postgres.db.example.com
@@ -73,9 +54,12 @@ type OperatorProvisioner struct {
 	cnpgGVR            schema.GroupVersionResource
 	mongoGVR           schema.GroupVersionResource
 	ingressRouteTCPGVR schema.GroupVersionResource
-	externalDomain     string // EXTERNAL_DB_DOMAIN env; empty = no external access
-	postgresExtPort    int    // POSTGRES_EXTERNAL_PORT (default 5432)
-	mongoExtPort       int    // MONGO_EXTERNAL_PORT (default 27017)
+	externalDomain     string        // EXTERNAL_DB_DOMAIN env; empty = no external access
+	postgresExtPort    int           // POSTGRES_EXTERNAL_PORT (default 5432)
+	mongoExtPort       int           // MONGO_EXTERNAL_PORT (default 27017)
+	pollInterval       time.Duration // test-seam: poll wait interval (default 5s)
+	pollTimeout        time.Duration // test-seam: poll wait timeout (default 10m)
+	skipPostgRESTSetup bool          // test-seam: skip connecting to DB for PostgREST setup
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
@@ -135,6 +119,8 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 		externalDomain:     os.Getenv("EXTERNAL_DB_DOMAIN"),
 		postgresExtPort:    postgresExtPort,
 		mongoExtPort:       mongoExtPort,
+		pollInterval:       5 * time.Second,
+		pollTimeout:        10 * time.Minute,
 	}, nil
 }
 
@@ -317,7 +303,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 			"spec": map[string]interface{}{
 				"imageName":             "ghcr.io/cloudnative-pg/postgresql:16.3",
 				"imagePullPolicy":       "IfNotPresent",
-				"instances":             1,
+				"instances":             int64(1),
 				"enableSuperuserAccess": true,
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
@@ -427,7 +413,7 @@ func (p *OperatorProvisioner) provisioningError(dbType, tier string, start time.
 func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespace, name string) error {
 	waitStart := time.Now()
 	iterations := 0
-	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, p.pollInterval, p.pollTimeout, true, func(ctx context.Context) (bool, error) {
 		iterations++
 		cluster, err := p.dynamic.Resource(p.cnpgGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
@@ -440,11 +426,11 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespac
 		instances, _, _ := unstructured.NestedInt64(spec, "instances")
 		status, _, _ := unstructured.NestedMap(cluster.Object, "status")
 		readyInstances, _, _ := unstructured.NestedInt64(status, "readyInstances")
-		
+
 		if iterations%6 == 0 || readyInstances > 0 {
 			slog.Info("Postgres wait progress", "namespace", namespace, "name", name, "ready_instances", readyInstances, "target", instances)
 		}
-		
+
 		return readyInstances >= instances && readyInstances > 0, nil
 	})
 
@@ -550,11 +536,11 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 				"labels":    p.mongoProjectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
-				"members": 1,
+				"members": int64(1),
 				"type":    "ReplicaSet",
 				"version": "7.0.0",
 				"additionalMongodConfig": map[string]interface{}{
-					"net.port": 27017,
+					"net.port": int64(27017),
 				},
 				"security": map[string]interface{}{
 					"authentication": map[string]interface{}{
@@ -604,7 +590,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 										"ports": []interface{}{
 											map[string]interface{}{
 												"name":          "metrics",
-												"containerPort": 9216,
+												"containerPort": int64(9216),
 											},
 										},
 										"env": []interface{}{
@@ -674,7 +660,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, name string) error {
 	waitStart := time.Now()
 	iterations := 0
-	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, p.pollInterval, p.pollTimeout, true, func(ctx context.Context) (bool, error) {
 		iterations++
 		obj, err := p.dynamic.Resource(p.mongoGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
@@ -829,6 +815,9 @@ func (p *OperatorProvisioner) deleteIngressRouteTCP(ctx context.Context, project
 	if dbType == "postgres" || dbType == "postgresql" {
 		return nil
 	}
+	if dbType != "mongodb" {
+		return fmt.Errorf("unsupported db type: %s", dbType)
+	}
 	name := p.ClusterNameForProject(projectID)
 	ns := p.MongoNamespaceForProject(projectID)
 	err := p.dynamic.Resource(p.ingressRouteTCPGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
@@ -919,5 +908,3 @@ func (p *OperatorProvisioner) updateInstanceCountFromK8s(pgList, mongoList *unst
 	metrics.InstancesCurrent.WithLabelValues("postgresql").Set(pgCount)
 	metrics.InstancesCurrent.WithLabelValues("mongodb").Set(mongoCount)
 }
-
-

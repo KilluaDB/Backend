@@ -1,18 +1,25 @@
 package handler
 
 import (
-	mongoservice "backend/internal/mongodb/service"
-	"backend/internal/response"
+	"context"
 	"net/http"
 
+	"backend/internal/mongodb/model"
+	"backend/internal/response"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-type MongoDashboardHandler struct {
-	metrics *mongoservice.MongoDashboardMetricsService
+type dashboardMetricsServiceI interface {
+	GetMetrics(ctx context.Context, userID, projectID uuid.UUID) (*model.MongoDashboardMetrics, error)
 }
 
-func NewMongoDashboardHandler(metrics *mongoservice.MongoDashboardMetricsService) *MongoDashboardHandler {
+type MongoDashboardHandler struct {
+	metrics dashboardMetricsServiceI
+}
+
+func NewMongoDashboardHandler(metrics dashboardMetricsServiceI) *MongoDashboardHandler {
 	return &MongoDashboardHandler{metrics: metrics}
 }
 

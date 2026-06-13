@@ -28,11 +28,11 @@ type DSNResolver interface {
 
 // Service is the cross-DB backup orchestrator.
 type Service struct {
-	projectRepo *repository.ProjectRepository
+	projectRepo repository.ProjectStore
 	dsn         DSNResolver
 }
 
-func NewService(projectRepo *repository.ProjectRepository, dsn DSNResolver) *Service {
+func NewService(projectRepo repository.ProjectStore, dsn DSNResolver) *Service {
 	return &Service{
 		projectRepo: projectRepo,
 		dsn:         dsn,

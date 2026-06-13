@@ -25,12 +25,18 @@ const (
 	RefreshTokenDuration = 30 * 24 * time.Hour // 30 days
 )
 
-type AuthService struct {
-	userRepo     *repository.UserRepository
-	refreshStore *config.RefreshTokenStore
+type refreshTokenStorer interface {
+	Set(ctx context.Context, token string, userID uuid.UUID) error
+	Get(ctx context.Context, token string) (uuid.UUID, error)
+	Delete(ctx context.Context, token string) error
 }
 
-func NewAuthService(userRepo *repository.UserRepository, refreshStore *config.RefreshTokenStore) *AuthService {
+type AuthService struct {
+	userRepo     repository.UserStore
+	refreshStore refreshTokenStorer
+}
+
+func NewAuthService(userRepo repository.UserStore, refreshStore refreshTokenStorer) *AuthService {
 	return &AuthService{
 		userRepo:     userRepo,
 		refreshStore: refreshStore,
