@@ -1,17 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"testing"
 
 	"backend/internal/mocks"
 	"backend/internal/model"
 	"backend/internal/testutil"
 
-	"golang.org/x/oauth2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
 
 type stubGoogleClient struct {
@@ -77,4 +80,45 @@ func TestGoogleAuthService_Callback_createUserFails(t *testing.T) {
 	_, err := svc.Callback(context.Background(), &oauth2.Token{AccessToken: "at"})
 	require.ErrorContains(t, err, "failed to create user")
 	require.ErrorContains(t, err, "db insert failed")
+}
+
+type roundTripFunc func(req *http.Request) *http.Response
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req), nil
+}
+
+func TestDefaultGoogleUserInfoClient_FetchUserInfo(t *testing.T) {
+	oldTransport := http.DefaultTransport
+	defer func() { http.DefaultTransport = oldTransport }()
+
+	client := defaultGoogleUserInfoClient{}
+
+	t.Run("Success", func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) *http.Response {
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewBufferString(`{"email":"test@example.com","verified_email":true}`)),
+				Header:     make(http.Header),
+			}
+		})
+		email, verified, err := client.FetchUserInfo(context.Background(), "token")
+		assert.NoError(t, err)
+		assert.Equal(t, "test@example.com", email)
+		assert.True(t, verified)
+	})
+
+	t.Run("HTTP Error", func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) *http.Response {
+			return &http.Response{
+				StatusCode: 400,
+				Body:       io.NopCloser(bytes.NewBufferString(`bad request`)),
+				Header:     make(http.Header),
+			}
+		})
+		email, verified, err := client.FetchUserInfo(context.Background(), "token")
+		assert.Error(t, err)
+		assert.Empty(t, email)
+		assert.False(t, verified)
+	})
 }

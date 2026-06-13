@@ -64,17 +64,33 @@ func TestMongoRoutes_RegisterRoutes(t *testing.T) {
 	// interface and merely closes over it at registration time. The handler's
 	// Collection sub-handler must be non-nil because route registration takes a
 	// method value off it (without invoking it).
-	mongo := &mongohandler.MongoHandler{Collection: &mongohandler.CollectionHandler{}}
+	mongo := &mongohandler.MongoHandler{
+		Collection: &mongohandler.CollectionHandler{},
+		Document:   &mongohandler.DocumentHandler{},
+		Dashboard:  &mongohandler.MongoDashboardHandler{},
+	}
 	routes := mongoroute.NewMongoRoutes((*repository.ProjectRepository)(nil), mongo)
 	routes.RegisterRoutes(api)
 
 	const base = "/api/v1/projects/:id/mongodb"
 	want := []route{
+		{"GET", base + "/dashboard/metrics"},
 		{"GET", base + "/collections"},
 		{"POST", base + "/collections"},
 		{"DELETE", base + "/collections/:collection"},
 		{"POST", base + "/collections/:collection/fields"},
 		{"DELETE", base + "/collections/:collection/fields/:field"},
+		{"GET", base + "/collections/:collection/documents"},
+		{"POST", base + "/collections/:collection/documents"},
+		{"PATCH", base + "/collections/:collection/documents"},
+		{"DELETE", base + "/collections/:collection/documents"},
+		{"POST", base + "/collections/:collection/documents/count"},
+		{"POST", base + "/collections/:collection/documents/query"},
+		{"GET", base + "/collections/:collection/documents/:docId"},
+		{"DELETE", base + "/collections/:collection/documents/:docId"},
+		{"POST", base + "/collections/:collection/documents/:docId/fields"},
+		{"PATCH", base + "/collections/:collection/documents/:docId/fields/:field"},
+		{"DELETE", base + "/collections/:collection/documents/:docId/fields/:field"},
 	}
 
 	assertRoutes(t, engine, want)

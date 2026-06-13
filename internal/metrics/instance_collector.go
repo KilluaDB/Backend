@@ -3,16 +3,20 @@ package metrics
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type Queryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 type InstanceCollector struct {
-	db         *pgxpool.Pool
+	db         Queryer
 	activeDesc *prometheus.Desc
 }
 
-func NewInstanceCollector(db *pgxpool.Pool) *InstanceCollector {
+func NewInstanceCollector(db Queryer) *InstanceCollector {
 	return &InstanceCollector{
 		db: db,
 		activeDesc: prometheus.NewDesc(

@@ -321,3 +321,44 @@ type deleteProjectFailStore struct {
 func (s *deleteProjectFailStore) DeleteByIDAndUserID(_ context.Context, _, _ uuid.UUID) error {
 	return s.deleteErr
 }
+
+func TestProjectService_ProvisionInstanceAsync(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("success", func(t *testing.T) {
+		projects := mocks.NewProjectStore()
+		userID := uuid.New()
+		p := projects.SeedProject(userID, "postgresql")
+		prov := &mockInstanceProvisioner{
+			createFn: func(ctx context.Context, projectID uuid.UUID, dbType, resourceTier, password string) (*ProvisionResult, error) {
+				return &ProvisionResult{}, nil
+			},
+		}
+		svc := NewProjectService(projects, prov, nil, nil)
+		
+		// The original method runs asynchronously inside a goroutine, but we can call it synchronously for the test
+		svc.provisionInstanceAsync(ctx, p.ID, p.DBType, p.ResourceTier, "pass")
+
+		updated, err := projects.GetByID(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "running", updated.Status)
+	})
+
+	t.Run("provisioning fails updates status to failed", func(t *testing.T) {
+		projects := mocks.NewProjectStore()
+		userID := uuid.New()
+		p := projects.SeedProject(userID, "postgresql")
+		prov := &mockInstanceProvisioner{
+			createFn: func(ctx context.Context, projectID uuid.UUID, dbType, resourceTier, password string) (*ProvisionResult, error) {
+				return nil, errors.New("provisioning failed")
+			},
+		}
+		svc := NewProjectService(projects, prov, nil, nil)
+		
+		svc.provisionInstanceAsync(ctx, p.ID, p.DBType, p.ResourceTier, "pass")
+
+		updated, err := projects.GetByID(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "failed", updated.Status)
+	})
+}

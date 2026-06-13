@@ -150,7 +150,11 @@ func TestRegisterRoutes_All(t *testing.T) {
 		&handler.ProjectHandler{},
 		(*repository.ProjectRepository)(nil),
 		newPostgresHandler(),
-		&mongohandler.MongoHandler{Collection: &mongohandler.CollectionHandler{}},
+		&mongohandler.MongoHandler{
+			Collection: &mongohandler.CollectionHandler{},
+			Document:   &mongohandler.DocumentHandler{},
+			Dashboard:  &mongohandler.MongoDashboardHandler{},
+		},
 		&backup.Handler{},
 	)
 
@@ -209,11 +213,23 @@ func TestRegisterRoutes_All(t *testing.T) {
 		{"POST", pg + "/text-to-sql"},
 
 		// MongoDB
+		{"GET", mongo + "/dashboard/metrics"},
 		{"GET", mongo + "/collections"},
 		{"POST", mongo + "/collections"},
 		{"DELETE", mongo + "/collections/:collection"},
 		{"POST", mongo + "/collections/:collection/fields"},
 		{"DELETE", mongo + "/collections/:collection/fields/:field"},
+		{"GET", mongo + "/collections/:collection/documents"},
+		{"POST", mongo + "/collections/:collection/documents"},
+		{"PATCH", mongo + "/collections/:collection/documents"},
+		{"DELETE", mongo + "/collections/:collection/documents"},
+		{"POST", mongo + "/collections/:collection/documents/count"},
+		{"POST", mongo + "/collections/:collection/documents/query"},
+		{"GET", mongo + "/collections/:collection/documents/:docId"},
+		{"DELETE", mongo + "/collections/:collection/documents/:docId"},
+		{"POST", mongo + "/collections/:collection/documents/:docId/fields"},
+		{"PATCH", mongo + "/collections/:collection/documents/:docId/fields/:field"},
+		{"DELETE", mongo + "/collections/:collection/documents/:docId/fields/:field"},
 
 		// Backup
 		{"GET", "/api/v1/projects/:id/export"},

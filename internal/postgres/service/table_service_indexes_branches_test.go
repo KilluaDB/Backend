@@ -80,6 +80,9 @@ func TestTableService_ListTableIndexes_validation(t *testing.T) {
 
 func TestTableService_ListTableIndexes_repoError(t *testing.T) {
 	mock := newTableRowsMockPool(t)
+	mock.ExpectQuery(`(?s)SELECT EXISTS`).
+		WithArgs("public", "users").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).
 		WithArgs("public", "users").
 		WillReturnError(errors.New("list boom"))

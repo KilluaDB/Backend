@@ -98,7 +98,7 @@ func (s *SchemaService) VisualizeSchema(ctx context.Context, userID uuid.UUID, p
 	if !isValidSchemaName(schema) {
 		return "", ErrInvalidSchema
 	}
-	pool, err := s.instanceConn.GetPool(ctx, userID, projectID)
+	pool, err := s.schemaPool(ctx, userID, projectID)
 	if err != nil {
 		return "", err
 	}

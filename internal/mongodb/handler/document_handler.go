@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,14 +10,29 @@ import (
 	"backend/internal/response"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+type documentServiceI interface {
+	QueryDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.QueryDocumentsRequest) (*model.QueryDocumentsResult, error)
+	GetDocumentByID(ctx context.Context, userID, projectID uuid.UUID, collection string, id string) (map[string]interface{}, error)
+	GetDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.GetDocumentsRequest) (*model.GetDocumentsResult, error)
+	InsertDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.InsertDocumentsRequest) (*model.InsertDocumentResult, error)
+	UpdateDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.UpdateDocumentsRequest) (*model.UpdateDocumentsResult, error)
+	DeleteDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.DeleteDocumentsRequest) (*model.DeleteDocumentsResult, error)
+	CountDocuments(ctx context.Context, userID, projectID uuid.UUID, collection string, req model.CountDocumentsRequest) (*model.CountDocumentsResult, error)
+	UpdateDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string, req model.UpdateFieldRequest) error
+	AddDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id string, req model.AddDocumentFieldRequest) error
+	DeleteDocumentField(ctx context.Context, userID, projectID uuid.UUID, collection, id, field string) error
+	DeleteDocument(ctx context.Context, userID, projectID uuid.UUID, collection, id string) error
+}
 
 // DocumentHandler handles MongoDB document endpoints.
 type DocumentHandler struct {
-	documentService *mongoservice.DocumentService
+	documentService documentServiceI
 }
 
-func NewDocumentHandler(documentService *mongoservice.DocumentService) *DocumentHandler {
+func NewDocumentHandler(documentService documentServiceI) *DocumentHandler {
 	return &DocumentHandler{documentService: documentService}
 }
 
@@ -34,7 +50,10 @@ func (h *DocumentHandler) QueryDocuments(c *gin.Context) {
 
 	var req model.QueryDocumentsRequest
 	// filter/sort are optional so we allow an empty body
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil && err.Error() != "EOF" {
+		response.Fail(c, http.StatusBadRequest, err, "Invalid request body")
+		return
+	}
 
 	result, err := h.documentService.QueryDocuments(c.Request.Context(), userUUID, projectUUID, collection, req)
 	if err != nil {
@@ -283,25 +302,25 @@ func (h *DocumentHandler) DeleteDocument(c *gin.Context) {
 
 func handleDocumentError(c *gin.Context, err error) {
 	switch {
-		case errors.Is(err, mongoservice.ErrDocumentNotFound):
-			response.Fail(c, http.StatusNotFound, err, "Document not found")
-		case errors.Is(err, mongoservice.ErrInvalidDocumentID):
-			response.Fail(c, http.StatusBadRequest, err, "Invalid document ID")
-		case errors.Is(err, mongoservice.ErrInvalidFilter):
-			response.Fail(c, http.StatusBadRequest, err, "Invalid filter")
-		case errors.Is(err, mongoservice.ErrInvalidUpdate):
-			response.Fail(c, http.StatusBadRequest, err, "Invalid update")
-		case errors.Is(err, mongoservice.ErrInvalidCollectionName):
-			response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
-		case errors.Is(err, mongoservice.ErrTypeMismatch):
-    		response.Fail(c, http.StatusConflict, err, "Value type does not match existing field type")
-		case errors.Is(err, mongoservice.ErrInvalidFieldType):
-    		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
-		case errors.Is(err, mongoservice.ErrFieldAlreadyExists):
-			response.Fail(c, http.StatusConflict, err, "Field already exists")
-		case failMongoInstanceError(c, err):
-			return
-		default:
-			response.Fail(c, http.StatusBadRequest, err, "Operation failed")
+	case errors.Is(err, mongoservice.ErrDocumentNotFound):
+		response.Fail(c, http.StatusNotFound, err, "Document not found")
+	case errors.Is(err, mongoservice.ErrInvalidDocumentID):
+		response.Fail(c, http.StatusBadRequest, err, "Invalid document ID")
+	case errors.Is(err, mongoservice.ErrInvalidFilter):
+		response.Fail(c, http.StatusBadRequest, err, "Invalid filter")
+	case errors.Is(err, mongoservice.ErrInvalidUpdate):
+		response.Fail(c, http.StatusBadRequest, err, "Invalid update")
+	case errors.Is(err, mongoservice.ErrInvalidCollectionName):
+		response.Fail(c, http.StatusBadRequest, err, "Invalid collection name")
+	case errors.Is(err, mongoservice.ErrTypeMismatch):
+		response.Fail(c, http.StatusConflict, err, "Value type does not match existing field type")
+	case errors.Is(err, mongoservice.ErrInvalidFieldType):
+		response.Fail(c, http.StatusBadRequest, err, "Invalid field type")
+	case errors.Is(err, mongoservice.ErrFieldAlreadyExists):
+		response.Fail(c, http.StatusConflict, err, "Field already exists")
+	case failMongoInstanceError(c, err):
+		return
+	default:
+		response.Fail(c, http.StatusBadRequest, err, "Operation failed")
 	}
 }

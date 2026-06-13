@@ -91,7 +91,7 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestIsMongoCommandCode(t *testing.T) {
-	const target = mongoNamespaceExistsCode // 48
+	const target = mongoNamespaceExistsCode  // 48
 	const other = mongoNamespaceNotFoundCode // 26
 
 	tests := []struct {
@@ -101,40 +101,40 @@ func TestIsMongoCommandCode(t *testing.T) {
 		want  bool
 	}{
 		{
-			name: "nil error",
-			err:  nil,
+			name:  "nil error",
+			err:   nil,
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
-			name: "plain non-command error",
-			err:  errors.New("boom"),
+			name:  "plain non-command error",
+			err:   errors.New("boom"),
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
-			name: "command error matching code",
-			err:  mongo.CommandError{Code: int32(target), Name: "NamespaceExists"},
+			name:  "command error matching code",
+			err:   mongo.CommandError{Code: int32(target), Name: "NamespaceExists"},
 			codes: []int{target},
-			want: true,
+			want:  true,
 		},
 		{
-			name: "command error non-matching code",
-			err:  mongo.CommandError{Code: int32(other), Name: "NamespaceNotFound"},
+			name:  "command error non-matching code",
+			err:   mongo.CommandError{Code: int32(other), Name: "NamespaceNotFound"},
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
-			name: "command error matches one of several codes",
-			err:  mongo.CommandError{Code: int32(other)},
+			name:  "command error matches one of several codes",
+			err:   mongo.CommandError{Code: int32(other)},
 			codes: []int{target, other},
-			want: true,
+			want:  true,
 		},
 		{
-			name: "wrapped command error matching code",
-			err:  fmt.Errorf("op failed: %w", mongo.CommandError{Code: int32(target)}),
+			name:  "wrapped command error matching code",
+			err:   fmt.Errorf("op failed: %w", mongo.CommandError{Code: int32(target)}),
 			codes: []int{target},
-			want: true,
+			want:  true,
 		},
 		{
 			name: "write exception matching code",
@@ -142,7 +142,7 @@ func TestIsMongoCommandCode(t *testing.T) {
 				WriteErrors: mongo.WriteErrors{{Code: target, Message: "exists"}},
 			},
 			codes: []int{target},
-			want: true,
+			want:  true,
 		},
 		{
 			name: "write exception non-matching code",
@@ -150,13 +150,13 @@ func TestIsMongoCommandCode(t *testing.T) {
 				WriteErrors: mongo.WriteErrors{{Code: other}},
 			},
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
-			name: "write exception empty errors",
-			err:  mongo.WriteException{},
+			name:  "write exception empty errors",
+			err:   mongo.WriteException{},
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
 			name: "bulk write exception matching code",
@@ -166,7 +166,7 @@ func TestIsMongoCommandCode(t *testing.T) {
 				},
 			},
 			codes: []int{target},
-			want: true,
+			want:  true,
 		},
 		{
 			name: "bulk write exception non-matching code",
@@ -176,13 +176,13 @@ func TestIsMongoCommandCode(t *testing.T) {
 				},
 			},
 			codes: []int{target},
-			want: false,
+			want:  false,
 		},
 		{
-			name: "no codes provided",
-			err:  mongo.CommandError{Code: int32(target)},
+			name:  "no codes provided",
+			err:   mongo.CommandError{Code: int32(target)},
 			codes: nil,
-			want: false,
+			want:  false,
 		},
 	}
 

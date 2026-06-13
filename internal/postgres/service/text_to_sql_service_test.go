@@ -9,7 +9,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -160,4 +162,25 @@ func TestTextToSQLService_GenerateSQL(t *testing.T) {
 		assert.True(t, result.Success)
 		assert.Equal(t, "SELECT * FROM users", result.SQL)
 	})
+}
+
+func TestNewTextToSQLService(t *testing.T) {
+	dsn := &mockDSNProvider{}
+	repo := &mockProjectGetter{}
+
+	// Test default timeout
+	svc := NewTextToSQLService(dsn, repo)
+	assert.NotNil(t, svc)
+	assert.Equal(t, 120*time.Second, svc.httpClient.Timeout)
+
+	// Test with valid env var
+	os.Setenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS", "30")
+	defer os.Unsetenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS")
+	svc = NewTextToSQLService(dsn, repo)
+	assert.Equal(t, 30*time.Second, svc.httpClient.Timeout)
+
+	// Test with invalid env var (should fallback to default)
+	os.Setenv("TEXT_TO_SQL_HTTP_TIMEOUT_SECONDS", "invalid")
+	svc = NewTextToSQLService(dsn, repo)
+	assert.Equal(t, 120*time.Second, svc.httpClient.Timeout)
 }

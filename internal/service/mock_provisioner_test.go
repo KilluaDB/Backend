@@ -61,3 +61,11 @@ func (m *mockInstanceProvisioner) TierResources(tier string) (float64, float64, 
 		return 0, 0, 0, fmt.Errorf("unknown tier: %s", tier)
 	}
 }
+
+func (m *mockInstanceProvisioner) PostgRESTURL(projectID uuid.UUID) string {
+	return "http://postgrest.mock.local"
+}
+
+func (m *mockInstanceProvisioner) GetPostgRESTCredentials(ctx context.Context, projectID uuid.UUID) (string, string, error) {
+	return "mock-secret", "mock-apikey", nil
+}

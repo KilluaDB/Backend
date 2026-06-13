@@ -191,6 +191,12 @@ func TestAuthService_Logout_deleteError(t *testing.T) {
 	require.ErrorContains(t, err, "delete failed")
 }
 
+func TestAuthService_Logout_nilStore(t *testing.T) {
+	svc := NewAuthService(mocks.NewUserStore(), nil)
+	err := svc.Logout(context.Background(), "some-token")
+	require.NoError(t, err)
+}
+
 type uniqueViolationStore struct {
 	*mocks.UserStore
 }
@@ -236,5 +242,3 @@ type failingHardDeleteStore struct {
 func (s *failingHardDeleteStore) HardDeleteSoftDeletedByEmail(_ context.Context, _ string) error {
 	return s.hardDeleteErr
 }
-
-

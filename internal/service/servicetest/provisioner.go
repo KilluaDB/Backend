@@ -66,3 +66,11 @@ func (m *Provisioner) TierResources(tier string) (float64, float64, int, error) 
 		return 0, 0, 0, fmt.Errorf("unknown tier: %s", tier)
 	}
 }
+
+func (m *Provisioner) PostgRESTURL(projectID uuid.UUID) string {
+	return "http://postgrest.example.com"
+}
+
+func (m *Provisioner) GetPostgRESTCredentials(ctx context.Context, projectID uuid.UUID) (string, string, error) {
+	return "secret", "apikey", nil
+}

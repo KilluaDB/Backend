@@ -16,8 +16,8 @@ func TestTableRepository_ListIndexes_success(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).
 		WithArgs("public", "users").
 		WillReturnRows(pgxmock.NewRows([]string{
-			"relname", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
-		}).AddRow("users_pkey", true, true, "btree", "CREATE UNIQUE INDEX ...", true))
+			"relname", "relname_t", "attnames", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
+		}).AddRow("users_pkey", "users", []string{"id"}, true, true, "btree", "CREATE UNIQUE INDEX ...", true))
 
 	repo := NewTableRepository()
 	list, err := repo.ListIndexes(context.Background(), mock, "public", "users")
@@ -32,7 +32,7 @@ func TestTableRepository_ListIndexes_empty(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).
 		WithArgs("public", "empty").
 		WillReturnRows(pgxmock.NewRows([]string{
-			"relname", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
+			"relname", "relname_t", "attnames", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
 		}))
 
 	repo := NewTableRepository()
@@ -122,8 +122,8 @@ func TestTableRepository_ListIndexes_scanError(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).
 		WithArgs("public", "users").
 		WillReturnRows(pgxmock.NewRows([]string{
-			"relname", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
-		}).AddRow("ok", true, true, "ok", "ok", true).RowError(0, errors.New("bad scan")))
+			"relname", "relname_t", "attnames", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
+		}).AddRow("ok", "ok", []string{"ok"}, true, true, "ok", "ok", true).RowError(0, errors.New("bad scan")))
 
 	repo := NewTableRepository()
 	_, err := repo.ListIndexes(context.Background(), mock, "public", "users")

@@ -307,6 +307,39 @@ func TestTableService_UpdateTable_FKOnlySync_removeAll(t *testing.T) {
 	assert.Greater(t, result.RowsAffected, int64(0))
 }
 
+func TestTableService_UpdateTable_AddFK(t *testing.T) {
+	mock := newMockPool(t)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = $1 AND table_name = $2 AND table_type = 'BASE TABLE'
+		LIMIT 1`)).
+		WithArgs("public", "users").
+		WillReturnRows(pgxmock.NewRows([]string{"1"}).AddRow(1))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT.*constraint_name.*FROM information_schema.table_constraints.*FOREIGN KEY.*`).
+		WithArgs("public", "users").
+		WillReturnRows(pgxmock.NewRows([]string{"constraint_name", "column_name", "foreign_table_schema", "foreign_table_name", "foreign_column_name", "update_rule", "delete_rule"}))
+
+	// adding new FK
+	mock.ExpectExec(regexp.QuoteMeta(`ALTER TABLE "public"."users" ADD CONSTRAINT`)).
+		WillReturnResult(pgxmock.NewResult("ALTER TABLE", 0))
+	mock.ExpectCommit()
+
+	svc := tableSvcWithMock(t, mock)
+	result, err := svc.UpdateTable(context.Background(), uuid.New(), uuid.New(), "public", "users", &model.UpdateTableRequest{
+		ForeignKeys: &model.TableForeignKeyDef{
+			Schema: "public",
+			Table: "profiles",
+			References: []model.ForeignKeyRef{
+				{LocalColumn: "profile_id", ForeignColumn: "id", OnDelete: "CASCADE", OnUpdate: "CASCADE"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Greater(t, result.RowsAffected, int64(0))
+}
+
 func TestTableService_UpdateTable_columnTypeChange(t *testing.T) {
 	mock := newMockPool(t)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT 1

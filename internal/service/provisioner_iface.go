@@ -16,6 +16,8 @@ type InstanceProvisioner interface {
 	ExternalHostname(projectID uuid.UUID, dbType string) string
 	ExternalPort(dbType string) int
 	TierResources(tier string) (cpu float64, memoryMB float64, storageGB int, err error)
+	PostgRESTURL(projectID uuid.UUID) string
+	GetPostgRESTCredentials(ctx context.Context, projectID uuid.UUID) (jwtSecret, apiKey string, err error)
 }
 
 // TierResources exposes tier sizing for OperatorProvisioner.

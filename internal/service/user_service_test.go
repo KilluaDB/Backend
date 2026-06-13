@@ -49,12 +49,12 @@ func TestUserService_UpdateUser(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		targetID    uuid.UUID
-		actorID     uuid.UUID
-		req         UpdateUserRequest
-		wantErr     string
-		wantEmail   string
+		name      string
+		targetID  uuid.UUID
+		actorID   uuid.UUID
+		req       UpdateUserRequest
+		wantErr   string
+		wantEmail string
 	}{
 		{
 			name:     "non-admin cannot change role",

@@ -82,6 +82,9 @@ func (p *OperatorProvisioner) PostgRESTURL(projectID uuid.UUID) string {
 // Must connect as superuser because only superusers can CREATE ROLE.
 // Returns the generated authenticator password.
 func (p *OperatorProvisioner) SetupPostgRESTRoles(ctx context.Context, namespace, clusterName string) (authenticatorPassword string, err error) {
+	if p.skipPostgRESTSetup {
+		return "test-auth-pw", nil
+	}
 	authenticatorPassword, err = utils.GeneratePasswordBase64(32)
 	if err != nil {
 		return "", fmt.Errorf("generate authenticator password: %w", err)

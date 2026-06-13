@@ -299,10 +299,12 @@ func TestTableHandler_DropColumn_success(t *testing.T) {
 
 func TestTableHandler_ListIndexes_success(t *testing.T) {
 	mock := newTableHandlerMockPool(t)
+	mock.ExpectQuery(`(?s)SELECT EXISTS`).WithArgs("public", "users").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).WithArgs("public", "users").
 		WillReturnRows(pgxmock.NewRows([]string{
-			"relname", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
-		}).AddRow("idx_email", true, false, "btree", "def", true))
+			"relname", "relname_t", "attnames", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
+		}).AddRow("idx_email", "users", []string{"email"}, true, false, "btree", "def", true))
 
 	h := newTableHandler(t, mock)
 	pid := uuid.New()

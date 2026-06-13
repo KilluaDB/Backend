@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/lib/pq"
 )
 
 var (
@@ -118,14 +121,8 @@ func (r *TableRepository) CreateIndex(ctx context.Context, pool poolQuerier, sch
 
 // DropIndex drops an index by name if it belongs to the given table and is not the primary key index.
 func (r *TableRepository) DropIndex(ctx context.Context, pool poolQuerier, schema, table, indexName string) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	var isPrimary bool
-	err = tx.QueryRow(ctx, `
+	err := pool.QueryRow(ctx, `
 		SELECT ix.indisprimary
 		FROM pg_class i
 		JOIN pg_index ix ON i.oid = ix.indexrelid
@@ -145,9 +142,9 @@ func (r *TableRepository) DropIndex(ctx context.Context, pool poolQuerier, schem
 
 	q := fmt.Sprintf("DROP INDEX %s.%s",
 		pq.QuoteIdentifier(schema), pq.QuoteIdentifier(indexName))
-	if _, err = tx.Exec(ctx, q); err != nil {
+	if _, err = pool.Exec(ctx, q); err != nil {
 		return err
 	}
 
-	return tx.Commit(ctx)
+	return nil
 }

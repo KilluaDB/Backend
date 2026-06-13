@@ -28,7 +28,7 @@ type mockSchemaService struct {
 	applyDDLErr           error
 }
 
-func (m *mockSchemaService) VisualizeSchema(userID, projectID uuid.UUID, schema string) (string, error) {
+func (m *mockSchemaService) VisualizeSchema(ctx context.Context, userID, projectID uuid.UUID, schema string) (string, error) {
 	return m.visualizeSchemaResult, m.visualizeSchemaErr
 }
 

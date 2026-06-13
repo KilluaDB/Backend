@@ -54,11 +54,12 @@ type OperatorProvisioner struct {
 	cnpgGVR            schema.GroupVersionResource
 	mongoGVR           schema.GroupVersionResource
 	ingressRouteTCPGVR schema.GroupVersionResource
-	externalDomain     string // EXTERNAL_DB_DOMAIN env; empty = no external access
-	postgresExtPort    int    // POSTGRES_EXTERNAL_PORT (default 5432)
-	mongoExtPort       int    // MONGO_EXTERNAL_PORT (default 27017)
-	pollInterval      time.Duration // test-seam: poll wait interval (default 5s)
-	pollTimeout       time.Duration // test-seam: poll wait timeout (default 10m)
+	externalDomain     string        // EXTERNAL_DB_DOMAIN env; empty = no external access
+	postgresExtPort    int           // POSTGRES_EXTERNAL_PORT (default 5432)
+	mongoExtPort       int           // MONGO_EXTERNAL_PORT (default 27017)
+	pollInterval       time.Duration // test-seam: poll wait interval (default 5s)
+	pollTimeout        time.Duration // test-seam: poll wait timeout (default 10m)
+	skipPostgRESTSetup bool          // test-seam: skip connecting to DB for PostgREST setup
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
@@ -118,8 +119,8 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 		externalDomain:     os.Getenv("EXTERNAL_DB_DOMAIN"),
 		postgresExtPort:    postgresExtPort,
 		mongoExtPort:       mongoExtPort,
-		pollInterval:         5 * time.Second,
-		pollTimeout:          10 * time.Minute,
+		pollInterval:       5 * time.Second,
+		pollTimeout:        10 * time.Minute,
 	}, nil
 }
 
@@ -302,7 +303,7 @@ func (p *OperatorProvisioner) createPostgresCluster(ctx context.Context, project
 			"spec": map[string]interface{}{
 				"imageName":             "ghcr.io/cloudnative-pg/postgresql:16.3",
 				"imagePullPolicy":       "IfNotPresent",
-				"instances":             1,
+				"instances":             int64(1),
 				"enableSuperuserAccess": true,
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
@@ -535,11 +536,11 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 				"labels":    p.mongoProjectLabelsMap(projectID),
 			},
 			"spec": map[string]interface{}{
-				"members": 1,
+				"members": int64(1),
 				"type":    "ReplicaSet",
 				"version": "7.0.0",
 				"additionalMongodConfig": map[string]interface{}{
-					"net.port": 27017,
+					"net.port": int64(27017),
 				},
 				"security": map[string]interface{}{
 					"authentication": map[string]interface{}{
@@ -589,7 +590,7 @@ func (p *OperatorProvisioner) createMongoDBCluster(ctx context.Context, projectI
 										"ports": []interface{}{
 											map[string]interface{}{
 												"name":          "metrics",
-												"containerPort": 9216,
+												"containerPort": int64(9216),
 											},
 										},
 										"env": []interface{}{
@@ -814,6 +815,9 @@ func (p *OperatorProvisioner) deleteIngressRouteTCP(ctx context.Context, project
 	if dbType == "postgres" || dbType == "postgresql" {
 		return nil
 	}
+	if dbType != "mongodb" {
+		return fmt.Errorf("unsupported db type: %s", dbType)
+	}
 	name := p.ClusterNameForProject(projectID)
 	ns := p.MongoNamespaceForProject(projectID)
 	err := p.dynamic.Resource(p.ingressRouteTCPGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
@@ -904,5 +908,3 @@ func (p *OperatorProvisioner) updateInstanceCountFromK8s(pgList, mongoList *unst
 	metrics.InstancesCurrent.WithLabelValues("postgresql").Set(pgCount)
 	metrics.InstancesCurrent.WithLabelValues("mongodb").Set(mongoCount)
 }
-
-

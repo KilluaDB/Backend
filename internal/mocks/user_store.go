@@ -11,8 +11,8 @@ import (
 
 // UserStore is an in-memory UserStore for tests.
 type UserStore struct {
-	mu    sync.Mutex
-	users map[uuid.UUID]*model.User
+	mu      sync.Mutex
+	users   map[uuid.UUID]*model.User
 	byEmail map[string]uuid.UUID
 }
 

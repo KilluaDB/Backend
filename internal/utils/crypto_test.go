@@ -85,8 +85,8 @@ func TestGetEncryptionKey_exactLength(t *testing.T) {
 }
 
 func TestGetEncryptionKey_trimming(t *testing.T) {
-	longKey := "0123456789abcdef0123456789abcdef0123456789"                         // 40 bytes
-	shortKey := longKey[:32]                                                         // first 32 bytes
+	longKey := "0123456789abcdef0123456789abcdef0123456789" // 40 bytes
+	shortKey := longKey[:32]                                // first 32 bytes
 
 	t.Setenv("DB_CRED_ENCRYPTION_KEY", longKey)
 	plain := "long-key-test"

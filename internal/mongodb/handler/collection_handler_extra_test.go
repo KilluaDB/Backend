@@ -20,7 +20,7 @@ import (
 
 func TestNewMongoHandler(t *testing.T) {
 	collection := NewCollectionHandler(mockCollectionService{})
-	h := NewMongoHandler(collection)
+	h := NewMongoHandler(collection, nil, nil)
 	require.NotNil(t, h)
 	assert.Same(t, collection, h.Collection)
 }

@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"context"
 	pgservice "backend/internal/postgres/service"
 	"backend/internal/response"
 	"backend/internal/service"
 	"backend/internal/utils"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,7 +20,7 @@ import (
 )
 
 type schemaServiceI interface {
-	VisualizeSchema(userID, projectID uuid.UUID, schema string) (string, error)
+	VisualizeSchema(ctx context.Context, userID, projectID uuid.UUID, schema string) (string, error)
 	ListSchemas(ctx context.Context, userID, projectID uuid.UUID) ([]string, error)
 	CachePendingDDL(ctx context.Context, projectID uuid.UUID, ddl string) error
 	ApplyDDL(ctx context.Context, userID, projectID uuid.UUID) error

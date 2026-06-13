@@ -15,9 +15,9 @@ import (
 
 func TestBuildCreateTableSQL(t *testing.T) {
 	tests := []struct {
-		name     string
-		req      *model.CreateTableRequest
-		checks   []string // substrings the SQL must contain
+		name   string
+		req    *model.CreateTableRequest
+		checks []string // substrings the SQL must contain
 	}{
 		{
 			name: "basic primary + not null + default",
@@ -548,34 +548,34 @@ func TestTableRepository_AddColumnFromDefTx_primaryExists(t *testing.T) {
 
 func TestTableRepository_AddColumnFromDefTx_withOptions(t *testing.T) {
 	tests := []struct {
-		name     string
-		col      model.TableColumnDef
+		name       string
+		col        model.TableColumnDef
 		tableHasPK bool
-		sqlCheck string
+		sqlCheck   string
 	}{
 		{
-			name: "identity",
-			col:  model.TableColumnDef{Name: "c", Type: "BIGINT", IsIdentity: true},
+			name:     "identity",
+			col:      model.TableColumnDef{Name: "c", Type: "BIGINT", IsIdentity: true},
 			sqlCheck: `ALTER TABLE "public"."t" ADD COLUMN "c" BIGINT GENERATED ALWAYS AS IDENTITY`,
 		},
 		{
-			name: "primary no existing pk",
-			col:  model.TableColumnDef{Name: "c", Type: "INT", Primary: true},
+			name:     "primary no existing pk",
+			col:      model.TableColumnDef{Name: "c", Type: "INT", Primary: true},
 			sqlCheck: `ALTER TABLE "public"."t" ADD COLUMN "c" INT PRIMARY KEY`,
 		},
 		{
-			name: "unique",
-			col:  model.TableColumnDef{Name: "c", Type: "TEXT", IsUnique: true},
+			name:     "unique",
+			col:      model.TableColumnDef{Name: "c", Type: "TEXT", IsUnique: true},
 			sqlCheck: `ALTER TABLE "public"."t" ADD COLUMN "c" TEXT UNIQUE`,
 		},
 		{
-			name: "not null",
-			col:  model.TableColumnDef{Name: "c", Type: "INT", Nullable: false},
+			name:     "not null",
+			col:      model.TableColumnDef{Name: "c", Type: "INT", Nullable: false},
 			sqlCheck: `ALTER TABLE "public"."t" ADD COLUMN "c" INT NOT NULL`,
 		},
 		{
-			name: "default non-empty",
-			col:  model.TableColumnDef{Name: "c", Type: "INT", Nullable: true, Default: ptr("42")},
+			name:     "default non-empty",
+			col:      model.TableColumnDef{Name: "c", Type: "INT", Nullable: true, Default: ptr("42")},
 			sqlCheck: `ALTER TABLE "public"."t" ADD COLUMN "c" INT DEFAULT 42`,
 		},
 	}

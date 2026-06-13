@@ -78,3 +78,27 @@ func TestValidateCreateTableRequest(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+type mockTablePoolSourceTest struct {
+	pool TablePoolRunner
+	err  error
+}
+
+func (m *mockTablePoolSourceTest) TablePool(ctx context.Context, userID, projectID uuid.UUID) (TablePoolRunner, error) {
+	return m.pool, m.err
+}
+
+func TestSetPoolSourceForTest(t *testing.T) {
+	svc := newTableService()
+	src := &mockTablePoolSourceTest{}
+	
+	svc.SetPoolSourceForTest(src)
+	assert.NotNil(t, svc.poolSource)
+	
+	pool, err := svc.projectPool(context.Background(), uuid.New(), uuid.New())
+	assert.Nil(t, pool)
+	assert.NoError(t, err)
+
+	svc.SetPoolSourceForTest(nil)
+	assert.Nil(t, svc.poolSource)
+}

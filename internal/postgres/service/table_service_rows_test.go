@@ -278,11 +278,14 @@ func TestTableService_DeleteColumn_invalidName(t *testing.T) {
 
 func TestTableService_ListTableIndexes_success(t *testing.T) {
 	mock := newTableRowsMockPool(t)
+	mock.ExpectQuery(`(?s)SELECT EXISTS`).
+		WithArgs("public", "users").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`(?s)SELECT i\.relname.*pg_class t`).
 		WithArgs("public", "users").
 		WillReturnRows(pgxmock.NewRows([]string{
-			"relname", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
-		}).AddRow("idx_email", true, false, "btree", "def", true))
+			"relname", "relname_t", "attnames", "indisunique", "indisprimary", "amname", "indexdef", "indisvalid",
+		}).AddRow("idx_email", "users", []string{"email"}, true, false, "btree", "def", true))
 
 	svc := tableSvcWithRowsMock(t, mock)
 	list, err := svc.ListTableIndexes(context.Background(), uuid.New(), uuid.New(), "public", "users")

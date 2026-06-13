@@ -33,7 +33,7 @@ func (s stubConn) GetDatabase(ctx context.Context, userID, projectID uuid.UUID) 
 // no timing dependence.
 func lazyDB(t *testing.T) *mongo.Database {
 	t.Helper()
-	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://127.0.0.1:27017/testdb"))
+	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://127.0.0.1:27019/testdb"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 	return client.Database("testdb")

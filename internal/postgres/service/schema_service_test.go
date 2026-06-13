@@ -614,14 +614,14 @@ func (m mockSchemaPoolSource) SchemaPool(ctx context.Context, userID, projectID 
 func TestSchemaService_VisualizeSchema(t *testing.T) {
 	t.Run("invalid schema name returns error", func(t *testing.T) {
 		svc := NewSchemaService(mockSchemaInstanceConn{}, nil)
-		_, err := svc.VisualizeSchema(uuid.New(), uuid.New(), "bad-name")
+		_, err := svc.VisualizeSchema(context.Background(), uuid.New(), uuid.New(), "bad-name")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid schema")
 	})
 
 	t.Run("GetPool fails returns error", func(t *testing.T) {
 		svc := NewSchemaService(mockSchemaInstanceConn{err: errors.New("pool error")}, nil)
-		_, err := svc.VisualizeSchema(uuid.New(), uuid.New(), "public")
+		_, err := svc.VisualizeSchema(context.Background(), uuid.New(), uuid.New(), "public")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "pool error")
 	})
@@ -636,7 +636,7 @@ func TestSchemaService_VisualizeSchema(t *testing.T) {
 		svc := NewSchemaService(mockSchemaInstanceConn{}, nil)
 		svc.poolSource = mockSchemaPoolSource{pool: mock}
 
-		got, err := svc.VisualizeSchema(uuid.New(), uuid.New(), "public")
+		got, err := svc.VisualizeSchema(context.Background(), uuid.New(), uuid.New(), "public")
 		require.NoError(t, err)
 		assert.Contains(t, got, "erDiagram")
 		assert.Contains(t, got, "USERS")

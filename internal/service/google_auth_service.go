@@ -51,8 +51,8 @@ func (defaultGoogleUserInfoClient) FetchUserInfo(ctx context.Context, accessToke
 }
 
 type GoogleAuthService struct {
-	userRepo   repository.UserStore
-	userInfo   GoogleUserInfoClient
+	userRepo repository.UserStore
+	userInfo GoogleUserInfoClient
 }
 
 func NewGoogleAuthService(userRepo repository.UserStore) *GoogleAuthService {

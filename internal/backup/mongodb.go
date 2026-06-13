@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os/exec"
+
 	"strings"
 )
 
@@ -16,7 +16,7 @@ import (
 // The archive contains all collections in the project's database, packaged as a single
 // gzipped stream suitable for `mongorestore --archive --gzip`.
 func exportMongo(ctx context.Context, dsn string, dst io.Writer) error {
-	cmd := exec.CommandContext(ctx,
+	cmd := commandContext(ctx,
 		"mongodump",
 		"--uri="+dsn,
 		"--archive",
@@ -72,7 +72,7 @@ func stripMongoDatabase(dsn string) string {
 // detects the format automatically from --archive + --gzip flags.
 func importMongo(ctx context.Context, dsn string, src io.Reader) error {
 	restoreURI := stripMongoDatabase(dsn)
-	cmd := exec.CommandContext(ctx,
+	cmd := commandContext(ctx,
 		"mongorestore",
 		"--uri="+restoreURI,
 		"--archive",
@@ -116,13 +116,13 @@ func importMongo(ctx context.Context, dsn string, src io.Reader) error {
 
 	if err := cmd.Wait(); err != nil {
 		combined := trimStderr(stderr.String() + stdout.String())
-		
+
 		// mongorestore fails with EOF if the archive contains no collections/documents.
 		// We treat restoring an empty database as a success rather than a 500 error.
 		if strings.Contains(combined, "Failed: EOF") && strings.Contains(combined, "0 document(s) restored successfully") {
 			return nil
 		}
-		
+
 		if copyErr != nil {
 			return fmt.Errorf("mongorestore failed: %w (copy: %v): %s", err, copyErr, combined)
 		}
