@@ -67,13 +67,14 @@ func (r *DocumentRepository) CountDocuments(ctx context.Context, db *mongo.Datab
 	return db.Collection(collection).CountDocuments(ctx, filter)
 }
 
-func (r *DocumentRepository) UpdateDocuments(ctx context.Context, db *mongo.Database, collection string, filter, update bson.D, upsert, updateOne bool) (*mongo.UpdateResult, error) {
-	if updateOne {
-		opts := options.UpdateOne().SetUpsert(upsert)
-		return db.Collection(collection).UpdateOne(ctx, filter, update, opts)
-	}
+func (r *DocumentRepository) UpdateManyDocuments(ctx context.Context, db *mongo.Database, collection string, filter, update bson.D, upsert bool) (*mongo.UpdateResult, error) {	
 	opts := options.UpdateMany().SetUpsert(upsert)
 	return db.Collection(collection).UpdateMany(ctx, filter, update, opts)
+}
+
+func (r *DocumentRepository) UpdateOneDocument(ctx context.Context, db *mongo.Database, collection string, filter, update bson.D, upsert bool) (*mongo.UpdateResult, error) {
+	opts := options.UpdateOne().SetUpsert(upsert)
+	return db.Collection(collection).UpdateOne(ctx, filter, update, opts)
 }
 
 func (r *DocumentRepository) DeleteManyDocuments(ctx context.Context, db *mongo.Database, collection string, filter bson.D) (*mongo.DeleteResult, error) {
