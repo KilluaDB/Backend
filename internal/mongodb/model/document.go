@@ -23,8 +23,7 @@ type UpdateDocumentsResult struct {
 }
 
 type DeleteDocumentsRequest struct {
-	Filter    map[string]interface{} `json:"filter" binding:"required"`
-	DeleteOne *bool                  `json:"delete_one,omitempty"`
+	Filter    map[string]interface{} `json:"filter"`
 }
 
 type DeleteDocumentsResult struct {

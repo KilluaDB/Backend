@@ -303,13 +303,12 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 		return nil, ErrInvalidFilter
 	}
 
-	deleteOne := req.DeleteOne != nil && *req.DeleteOne
 	db, err := s.conn.GetDatabase(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, deleteOne)
+	result, err := s.repo.DeleteManyDocuments(ctx, db, collection, filter)
 	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()
@@ -487,7 +486,7 @@ func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID 
 
 	filter := bson.D{{Key: "_id", Value: objectID}}
 
-	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, true)
+	result, err := s.repo.DeleteOneDocument(ctx, db, collection, filter)
 	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()

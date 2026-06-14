@@ -76,11 +76,12 @@ func (r *DocumentRepository) UpdateDocuments(ctx context.Context, db *mongo.Data
 	return db.Collection(collection).UpdateMany(ctx, filter, update, opts)
 }
 
-func (r *DocumentRepository) DeleteDocuments(ctx context.Context, db *mongo.Database, collection string, filter bson.D, deleteOne bool) (*mongo.DeleteResult, error) {
-	if deleteOne {
-		return db.Collection(collection).DeleteOne(ctx, filter)
-	}
+func (r *DocumentRepository) DeleteManyDocuments(ctx context.Context, db *mongo.Database, collection string, filter bson.D) (*mongo.DeleteResult, error) {
 	return db.Collection(collection).DeleteMany(ctx, filter)
+}
+
+func (r *DocumentRepository) DeleteOneDocument(ctx context.Context, db *mongo.Database, collection string, filter bson.D) (*mongo.DeleteResult, error) {
+	return db.Collection(collection).DeleteOne(ctx, filter)
 }
 
 func (r *DocumentRepository) IncrementCounter(ctx context.Context, db *mongo.Database, operation string, count int64) error {
