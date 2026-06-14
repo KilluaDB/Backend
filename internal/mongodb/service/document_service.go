@@ -271,13 +271,12 @@ func (s *DocumentService) UpdateDocuments(ctx context.Context, userID, projectID
 	}
 
 	upsert := req.Upsert != nil && *req.Upsert
-	updateOne := req.UpdateOne != nil && *req.UpdateOne
 	db, err := s.conn.GetDatabase(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, upsert, updateOne)
+	result, err := s.repo.UpdateManyDocuments(ctx, db, collection, filter, update, upsert)
 	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
@@ -303,13 +302,12 @@ func (s *DocumentService) DeleteDocuments(ctx context.Context, userID, projectID
 		return nil, ErrInvalidFilter
 	}
 
-	deleteOne := req.DeleteOne != nil && *req.DeleteOne
 	db, err := s.conn.GetDatabase(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, deleteOne)
+	result, err := s.repo.DeleteManyDocuments(ctx, db, collection, filter)
 	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()
@@ -365,7 +363,7 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 	filter := bson.D{{Key: "_id", Value: objectID}}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: finalValue}}}}
 
-	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	result, err := s.repo.UpdateOneDocument(ctx, db, collection, filter, update, false)
 	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
@@ -420,7 +418,7 @@ func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectI
 	filter := bson.D{{Key: "_id", Value: objectID}}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: req.Field, Value: castedValue}}}}
 
-	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	result, err := s.repo.UpdateOneDocument(ctx, db, collection, filter, update, false)
 	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
@@ -456,7 +454,7 @@ func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, proje
 	filter := bson.D{{Key: "_id", Value: objectID}}
 	update := bson.D{{Key: "$unset", Value: bson.D{{Key: field, Value: ""}}}}
 
-	result, err := s.repo.UpdateDocuments(ctx, db, collection, filter, update, false, true)
+	result, err := s.repo.UpdateOneDocument(ctx, db, collection, filter, update, false)
 	metrics.MongoQueryDuration.WithLabelValues("update").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "update").Inc()
@@ -487,7 +485,7 @@ func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID 
 
 	filter := bson.D{{Key: "_id", Value: objectID}}
 
-	result, err := s.repo.DeleteDocuments(ctx, db, collection, filter, true)
+	result, err := s.repo.DeleteOneDocument(ctx, db, collection, filter)
 	metrics.MongoQueryDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.DbErrorsTotal.WithLabelValues("mongo", "delete").Inc()

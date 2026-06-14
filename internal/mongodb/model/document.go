@@ -10,10 +10,9 @@ type InsertDocumentResult struct {
 }
 
 type UpdateDocumentsRequest struct {
-	Filter    map[string]interface{} `json:"filter" binding:"required"`
+	Filter    map[string]interface{} `json:"filter"`
 	Update    map[string]interface{} `json:"update" binding:"required"`
 	Upsert    *bool                  `json:"upsert,omitempty"`
-	UpdateOne *bool                  `json:"update_one,omitempty"`
 }
 
 type UpdateDocumentsResult struct {
@@ -23,8 +22,7 @@ type UpdateDocumentsResult struct {
 }
 
 type DeleteDocumentsRequest struct {
-	Filter    map[string]interface{} `json:"filter" binding:"required"`
-	DeleteOne *bool                  `json:"delete_one,omitempty"`
+	Filter    map[string]interface{} `json:"filter"`
 }
 
 type DeleteDocumentsResult struct {
