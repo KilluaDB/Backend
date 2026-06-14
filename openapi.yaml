@@ -956,24 +956,21 @@ components:
 
     MongoUpdateDocumentsRequest:
       type: object
-      required: [filter, update]
+      required: [update]
       properties:
         filter:
           type: object
           additionalProperties: true
-          description: MongoDB filter to match documents
+          nullable: true
+          description: Optional MongoDB filter to match documents (when omitted, applies to all documents)
         update:
           type: object
           additionalProperties: true
-          description: Fields to update on matched documents
+          description: Update document or MongoDB update operators to apply to matched documents
         upsert:
           type: boolean
           nullable: true
           description: When true, inserts a document if no match is found
-        update_one:
-          type: boolean
-          nullable: true
-          description: When true, only the first matching document is updated
 
     MongoUpdateDocumentsResult:
       type: object
@@ -991,12 +988,12 @@ components:
 
     MongoDeleteDocumentsRequest:
       type: object
-      required: [filter]
       properties:
         filter:
           type: object
           additionalProperties: true
-          description: MongoDB filter to match documents for deletion
+          nullable: true
+          description: Optional MongoDB filter to match documents for deletion (omit to delete all documents)
         delete_one:
           type: boolean
           nullable: true
