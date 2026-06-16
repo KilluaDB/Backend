@@ -1,0 +1,33 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /media/azmy/Azmy/Study/College/4_Fourth Year/GP/Code/backend/k6-tests/scenarios/02-query-throughput-latency.js
+        output: json (/media/azmy/Azmy/Study/College/4_Fourth Year/GP/Code/backend/k6-tests/results/20260616-095829/02-query-throughput-latency.json)
+
+     scenarios: (100.00%) 1 scenario, 75 max VUs, 7m30s max duration (incl. graceful stop):
+              * mixed_workload: Up to 75 looping VUs for 7m0s over 6 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]
+
+Run              [ 100% ] setup()
+mixed_workload   [   0% ]

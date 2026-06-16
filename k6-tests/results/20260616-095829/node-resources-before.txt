@@ -1,0 +1,17 @@
+
+[0;34m[INFO][0m Checking metrics-server...
+[0;32m[OK][0m metrics-server is running (1 ready replicas)
+
+[1m[0;36m=== k3s Node Resource Availability ===[0m
+[1mNode:[0m k3d-dbaas-local-server-0
+[1mTime:[0m 2026-06-16 09:58:30 EEST
+
+  [1mCPU     [0m: 0.3 / 12 cores   (2% used, 11.7 cores free)
+  [1mMemory  [0m: 3.5Gi / 15.5Gi    (23% used, 11.9Gi free)
+  [1mDisk    [0m: 190.9Gi / 290.2Gi       (70% used, 84.5Gi free)
+  [1mPods    [0m: 33 / 110         (30% used, 77 slots free)
+
+[1m[0;36m======================================[0m
+
+[0;32m[OK][0m All resource levels are within safe thresholds for load testing.
+

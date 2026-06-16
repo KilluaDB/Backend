@@ -1,0 +1,31 @@
+
+[1m[0;36m╔══════════════════════════════════════╗[0m
+[1m[0;36m║   Post-Test Resource Snapshot         ║[0m
+[1m[0;36m╚══════════════════════════════════════╝[0m
+Namespace: default
+Timestamp: 20260616-095837
+
+[1m── Pod Resource Usage ──[0m
+NAME                        CPU(cores)   MEMORY(bytes)   
+backend-6b75fd7698-mtvjr    1m           30Mi            
+pgproxy-7f57894746-9z7ph    0m           1Mi             
+postgres-65b45866b7-xmj4l   4m           37Mi            
+redis-6c8dc6dcd5-jwqkb      5m           4Mi             
+
+[1m── Pod Resources vs Limits ──[0m
+POD                                      CPU_REQ         CPU_LIM         MEM_REQ         MEM_LIM        
+---                                      -------         -------         -------         -------        
+backend-6b75fd7698-mtvjr                 100m            500m            128Mi           512Mi          
+pgproxy-7f57894746-9z7ph                 —               —               —               —              
+postgres-65b45866b7-xmj4l                —               —               —               —              
+redis-6c8dc6dcd5-jwqkb                   —               —               —               —              
+
+[1m── Usage Warnings ──[0m
+  [0;32m✓[0m All pods within resource limits
+
+[1m── Node Overview ──[0m
+NAME                       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+k3d-dbaas-local-server-0   298m         2%       3625Mi          22%         
+
+[0;32mSnapshot captured at 20260616-095837[0m
+
