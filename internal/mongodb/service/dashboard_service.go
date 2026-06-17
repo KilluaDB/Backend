@@ -44,7 +44,7 @@ func (s *MongoDashboardMetricsService) GetMetrics(ctx context.Context, userID, p
 
 	var totalDocs int64
 	for _, col := range collections {
-		count, err := s.documentRepo.CountDocuments(ctx, db, col, bson.D{})
+		count, err := s.documentRepo.EstimatedDocumentCount(ctx, db, col)
 		if err != nil {
 			continue
 		}

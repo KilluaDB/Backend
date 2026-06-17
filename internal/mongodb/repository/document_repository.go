@@ -67,6 +67,10 @@ func (r *DocumentRepository) CountDocuments(ctx context.Context, db *mongo.Datab
 	return db.Collection(collection).CountDocuments(ctx, filter)
 }
 
+func (r *DocumentRepository) EstimatedDocumentCount(ctx context.Context, db *mongo.Database, collection string) (int64, error) {
+	return db.Collection(collection).EstimatedDocumentCount(ctx)
+}
+
 func (r *DocumentRepository) UpdateManyDocuments(ctx context.Context, db *mongo.Database, collection string, filter, update bson.D, upsert bool) (*mongo.UpdateResult, error) {	
 	opts := options.UpdateMany().SetUpsert(upsert)
 	return db.Collection(collection).UpdateMany(ctx, filter, update, opts)

@@ -47,6 +47,17 @@ func NewMongoConnectionManager(provider DSNProvider) *MongoConnectionManager {
 // GetDatabase returns a shared database handle for the project's MongoDB instance.
 // Callers must not Disconnect the returned client.
 func (s *MongoConnectionManager) GetDatabase(ctx context.Context, userID, projectID uuid.UUID) (*mongo.Database, error) {
+	s.clientMu.Lock()
+	entry, ok := s.clients[projectID]
+	if ok && entry.client != nil {
+		client := entry.client
+		dbName := entry.dbName
+		s.clientMu.Unlock()
+		s.emitClientMetrics()
+		return client.Database(dbName), nil
+	}
+	s.clientMu.Unlock()
+
 	dsn, _, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -60,6 +71,13 @@ func (s *MongoConnectionManager) GetDatabase(ctx context.Context, userID, projec
 
 // GetInstanceID returns the Kubernetes instance ID for the project's MongoDB.
 func (s *MongoConnectionManager) GetInstanceID(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error) {
+	s.clientMu.Lock()
+	if entry, ok := s.clients[projectID]; ok && entry.client != nil {
+		s.clientMu.Unlock()
+		return projectID, nil
+	}
+	s.clientMu.Unlock()
+
 	_, instanceID, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
 	if err != nil {
 		return uuid.Nil, err
@@ -80,28 +98,13 @@ func (s *MongoConnectionManager) acquireCachedClient(ctx context.Context, projec
 		return s.connectAndCacheClient(ctx, projectID, dsn)
 	}
 	if ok {
-		// Copy the entry and release the lock BEFORE doing network I/O.
+		// Copy the entry and release the lock.
 		cachedClient := entry.client
 		cachedDBName := entry.dbName
 		s.clientMu.Unlock()
 
-		// Ping outside the critical section to avoid blocking all goroutines.
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		pingErr := cachedClient.Ping(pingCtx, nil)
-		cancel()
-		if pingErr == nil {
-			s.emitClientMetrics()
-			return cachedClient, cachedDBName, nil
-		}
-
-		// Ping failed — evict the stale entry and reconnect.
-		s.clientMu.Lock()
-		if current, exists := s.clients[projectID]; exists && current.client == cachedClient {
-			delete(s.clients, projectID)
-		}
-		s.clientMu.Unlock()
-		_ = cachedClient.Disconnect(context.Background())
-		return s.connectAndCacheClient(ctx, projectID, dsn)
+		s.emitClientMetrics()
+		return cachedClient, cachedDBName, nil
 	}
 	s.clientMu.Unlock()
 

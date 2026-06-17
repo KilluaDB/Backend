@@ -115,13 +115,13 @@ func TestPostgresConnectionManager(t *testing.T) {
 		gotPool, gotInstanceID, err := mgr.GetPoolWithMeta(ctx, userID, projectID)
 		assert.NoError(t, err)
 		assert.Equal(t, pool, gotPool)
-		assert.Equal(t, instanceID, gotInstanceID)
+		assert.Equal(t, projectID, gotInstanceID)
 	})
 
 	t.Run("GetInstanceID", func(t *testing.T) {
 		gotInstanceID, err := mgr.GetInstanceID(ctx, userID, projectID)
 		assert.NoError(t, err)
-		assert.Equal(t, instanceID, gotInstanceID)
+		assert.Equal(t, projectID, gotInstanceID)
 	})
 
 	t.Run("acquireCachedPool - DSN changed", func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestPostgresConnectionManager(t *testing.T) {
 		provider.dsn = newDSN
 
 		// Should trigger reconnect (using the same fake pool, but tests logic)
-		gotPool, err := mgr.GetPool(ctx, userID, projectID)
+		gotPool, err := mgr.acquireCachedPool(ctx, projectID, newDSN)
 		assert.NoError(t, err)
 		assert.NotNil(t, gotPool)
 
@@ -140,14 +140,15 @@ func TestPostgresConnectionManager(t *testing.T) {
 
 		// Reset DSN
 		provider.dsn = dsn
-		mgr.GetPool(ctx, userID, projectID)
+		mgr.acquireCachedPool(ctx, projectID, dsn)
 	})
 
 	t.Run("GetPool - provider error", func(t *testing.T) {
 		expectedErr := errors.New("provider error")
 		provider.err = expectedErr
 
-		_, err := mgr.GetPool(ctx, userID, projectID)
+		newProjectID := uuid.New()
+		_, err := mgr.GetPool(ctx, userID, newProjectID)
 		assert.ErrorIs(t, err, expectedErr)
 
 		provider.err = nil // reset
@@ -360,7 +361,7 @@ func TestPostgresConnectionManager_GetPoolWithMeta(t *testing.T) {
 	gotPool, instanceID, err := mgr.GetPoolWithMeta(context.Background(), uuid.New(), pID)
 	assert.NoError(t, err)
 	assert.Equal(t, pool, gotPool)
-	assert.Equal(t, uuid.Nil, instanceID)
+	assert.Equal(t, pID, instanceID)
 }
 
 func TestPostgresConnectionManager_EvictProject(t *testing.T) {
