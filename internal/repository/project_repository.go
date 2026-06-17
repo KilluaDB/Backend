@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"backend/internal/metrics"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -20,6 +22,10 @@ func NewProjectRepository(pool pgxPool) *ProjectRepository {
 }
 
 func (r *ProjectRepository) Create(ctx context.Context, project *model.Project) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_create").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -49,6 +55,10 @@ func (r *ProjectRepository) Create(ctx context.Context, project *model.Project) 
 }
 
 func (r *ProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Project, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_get_by_id").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -83,6 +93,10 @@ func (r *ProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 }
 
 func (r *ProjectRepository) GetByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*model.Project, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_get_by_id_and_user_id").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -117,6 +131,10 @@ func (r *ProjectRepository) GetByIDAndUserID(ctx context.Context, id uuid.UUID, 
 }
 
 func (r *ProjectRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]model.Project, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_get_by_user_id").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -158,6 +176,10 @@ func (r *ProjectRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (
 }
 
 func (r *ProjectRepository) UpdateRuntimeStatus(ctx context.Context, id uuid.UUID, status string) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_update_runtime_status").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -173,6 +195,10 @@ func (r *ProjectRepository) UpdateRuntimeStatus(ctx context.Context, id uuid.UUI
 }
 
 func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_update").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -195,6 +221,10 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 }
 
 func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_delete").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -205,6 +235,10 @@ func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *ProjectRepository) DeleteByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_delete_by_id_and_user_id").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -223,6 +257,10 @@ func (r *ProjectRepository) DeleteByIDAndUserID(ctx context.Context, id uuid.UUI
 }
 
 func (r *ProjectRepository) DeleteByUserIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("project_delete_by_user_id_tx").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}

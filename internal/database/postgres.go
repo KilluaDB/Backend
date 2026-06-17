@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"backend/internal/metrics"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -149,6 +151,20 @@ func Connect() (*pgxpool.Pool, error) {
 
 	Pool = pool
 	log.Println("Database connection pool established successfully")
+
+	// Start background goroutine to collect pool stats periodically
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if Pool != nil {
+				stats := Pool.Stat()
+				metrics.MetaDbPoolAcquiredConns.Set(float64(stats.AcquiredConns()))
+				metrics.MetaDbPoolIdleConns.Set(float64(stats.IdleConns()))
+			}
+		}
+	}()
+
 	return pool, nil
 }
 

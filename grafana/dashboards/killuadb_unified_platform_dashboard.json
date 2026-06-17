@@ -370,7 +370,7 @@
     {
       "id": 12,
       "type": "row",
-      "title": "Internal Meta-Database Connection Metrics",
+      "title": "Tenant Databases (Data Plane) Connection Metrics",
       "gridPos": {
         "w": 24,
         "h": 1,
@@ -429,7 +429,7 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "Meta Postgres Connection States",
+      "title": "Tenant Postgres Connection States",
       "datasource": {
         "type": "prometheus",
         "uid": "dfooax2k8gjr4b"
@@ -477,7 +477,7 @@
     {
       "id": 15,
       "type": "timeseries",
-      "title": "Meta DB Query Latency (p95)",
+      "title": "Tenant DB Query Latency (p95)",
       "datasource": {
         "type": "prometheus",
         "uid": "dfooax2k8gjr4b"
@@ -672,6 +672,104 @@
           },
           "expr": "mongodb_ss_connections{conn_type=\"current\"} or vector(0)",
           "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "KilluaDB Meta-Database Health",
+      "gridPos": {
+        "w": 24,
+        "h": 1,
+        "x": 0,
+        "y": 46
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Meta Postgres Connection States",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 47
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "meta_db_pool_acquired_connections or vector(0)",
+          "legendFormat": "Acquired",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "meta_db_pool_idle_connections or vector(0)",
+          "legendFormat": "Idle",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Meta DB Query Latency (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dfooax2k8gjr4b"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 47
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dfooax2k8gjr4b"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(meta_db_query_duration_seconds_bucket[$__rate_interval]))) or vector(0)",
+          "legendFormat": "PG: {{operation}}",
           "refId": "A"
         }
       ],
