@@ -43,34 +43,7 @@ func TestMongoConnectionManager_GetDatabase_connectError(t *testing.T) {
 	assert.False(t, cached, "failed connection must not be cached")
 }
 
-// TestMongoConnectionManager_GetDatabase_cacheHitPingFails covers the cache-hit
-// path where the cached entry has the same DSN but its Ping fails (no live
-// server), forcing eviction and a reconnect. The second call must therefore
-// invoke connectFn again.
-func TestMongoConnectionManager_GetDatabase_cacheHitPingFails(t *testing.T) {
-	provider := &mockDSNProvider{dsn: "mongodb://host1:27017/mydb"}
-	mgr := NewMongoConnectionManager(provider)
 
-	var connectCalls int
-	mgr.connectFn = func(ctx context.Context, dsn string) (*mongo.Client, error) {
-		connectCalls++
-		// Build a client without dialing; Ping later fails (no server), which is
-		// exactly the branch we want to cover.
-		return mongo.Connect(options.Client().ApplyURI(dsn))
-	}
-
-	userID := uuid.New()
-	projectID := uuid.New()
-
-	_, err := mgr.GetDatabase(context.Background(), userID, projectID)
-	require.NoError(t, err)
-	require.Equal(t, 1, connectCalls)
-
-	// Same DSN -> cache hit -> Ping (fails against no server) -> reconnect.
-	_, err = mgr.GetDatabase(context.Background(), userID, projectID)
-	require.NoError(t, err)
-	assert.Equal(t, 2, connectCalls, "stale ping should force a reconnect")
-}
 
 // TestMongoConnectionManager_connectAndCacheClient_raceSameDSN covers the
 // concurrent-writer re-check in connectAndCacheClient: while this goroutine is

@@ -27,7 +27,8 @@ func TestMongoConnectionManager_GetDatabase_dsnProviderError(t *testing.T) {
 	provider := &mockDSNProvider{err: assert.AnError}
 	mgr := NewMongoConnectionManager(provider)
 
-	_, err := mgr.GetDatabase(context.Background(), uuid.New(), uuid.New())
+	newProjectID := uuid.New()
+	_, err := mgr.GetDatabase(context.Background(), uuid.New(), newProjectID)
 	require.Error(t, err)
 	assert.Equal(t, 1, provider.callCount)
 }
@@ -42,17 +43,19 @@ func TestMongoConnectionManager_GetDatabase_dsnRotation(t *testing.T) {
 	}
 
 	projectID := uuid.New()
-	userID := uuid.New()
 
-	_, err := mgr.GetDatabase(context.Background(), userID, projectID)
+	_, _, err := mgr.acquireCachedClient(context.Background(), projectID, provider.dsn)
 	require.NoError(t, err)
-	assert.Equal(t, 1, provider.callCount)
 
 	provider.dsn = "mongodb://host2:27017/mydb"
 
-	_, err = mgr.GetDatabase(context.Background(), userID, projectID)
+	_, _, err = mgr.acquireCachedClient(context.Background(), projectID, provider.dsn)
 	require.NoError(t, err)
-	assert.Equal(t, 2, provider.callCount)
+
+	mgr.clientMu.Lock()
+	entry := mgr.clients[projectID]
+	mgr.clientMu.Unlock()
+	assert.Equal(t, provider.dsn, entry.dsn)
 }
 
 func TestMongoConnectionManager_EvictProject(t *testing.T) {

@@ -76,7 +76,7 @@ func (s *DocumentService) InsertDocuments(ctx context.Context, userID, projectID
 	count := int64(len(result.InsertedIDs))
 
 	if count > 0 {
-		_ = s.repo.IncrementCounter(ctx, db, "insert", count)
+		s.asyncIncrementCounter(db, "insert", count)
 	}
 
 	return &model.InsertDocumentResult{
@@ -374,7 +374,7 @@ func (s *DocumentService) UpdateDocumentField(ctx context.Context, userID, proje
 		return ErrDocumentNotFound
 	}
 
-	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
+	s.asyncIncrementCounter(db, "update", result.MatchedCount)
 
 	return nil
 }
@@ -429,7 +429,7 @@ func (s *DocumentService) AddDocumentField(ctx context.Context, userID, projectI
 		return ErrDocumentNotFound
 	}
 
-	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
+	s.asyncIncrementCounter(db, "update", result.MatchedCount)
 
 	return nil
 }
@@ -465,7 +465,7 @@ func (s *DocumentService) DeleteDocumentField(ctx context.Context, userID, proje
 		return ErrDocumentNotFound
 	}
 
-	_ = s.repo.IncrementCounter(ctx, db, "update", result.MatchedCount)
+	s.asyncIncrementCounter(db, "update", result.MatchedCount)
 
 	return nil
 }
@@ -496,9 +496,20 @@ func (s *DocumentService) DeleteDocument(ctx context.Context, userID, projectID 
 		return ErrDocumentNotFound
 	}
 
-	_ = s.repo.IncrementCounter(ctx, db, "delete", result.DeletedCount)
+	s.asyncIncrementCounter(db, "delete", result.DeletedCount)
 
 	return nil
+}
+
+func (s *DocumentService) asyncIncrementCounter(db *mongo.Database, operation string, count int64) {
+	if count <= 0 {
+		return
+	}
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.repo.IncrementCounter(bgCtx, db, operation, count)
+	}()
 }
 
 func parseDocumentID(id string) interface{} {

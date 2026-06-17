@@ -154,9 +154,9 @@ func TestTableRepository_DeleteRowsByFilter_all(t *testing.T) {
 
 func TestTableRepository_InsertRow_noIDColumn(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(false, ""))
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}))
 	mock.ExpectExec(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\)`).
 		WithArgs("a@test.com").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
@@ -169,10 +169,10 @@ func TestTableRepository_InsertRow_noIDColumn(t *testing.T) {
 
 func TestTableRepository_InsertRow_withIntID(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(true, "integer"))
-	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING id`).
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}).AddRow("id", "integer"))
+	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING "id"`).
 		WithArgs("a@test.com").
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(42)))
 
@@ -184,9 +184,9 @@ func TestTableRepository_InsertRow_withIntID(t *testing.T) {
 
 func TestTableRepository_InsertRow_execError(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(false, ""))
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}))
 	mock.ExpectExec(`INSERT INTO "public"\."users"`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnError(errors.New("insert failed"))
@@ -260,10 +260,10 @@ func TestTableRepository_DeleteRowsByFilter_execError(t *testing.T) {
 
 func TestTableRepository_InsertRow_uuidReturning(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(true, "uuid"))
-	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING id::text`).
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}).AddRow("id", "uuid"))
+	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING "id"::text`).
 		WithArgs("a@test.com").
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"))
 
@@ -275,11 +275,11 @@ func TestTableRepository_InsertRow_uuidReturning(t *testing.T) {
 
 func TestTableRepository_InsertRow_fallback42703(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(true, "integer"))
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}).AddRow("id", "integer"))
 	// RETURNING id fails with 42703 (column doesn't exist → fallback to Exec).
-	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING id`).
+	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING "id"`).
 		WithArgs("a@test.com").
 		WillReturnError(&pgconn.PgError{Code: "42703"})
 	mock.ExpectExec(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\)`).
@@ -294,10 +294,10 @@ func TestTableRepository_InsertRow_fallback42703(t *testing.T) {
 
 func TestTableRepository_InsertRow_non42703ReturningError(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(true, "integer"))
-	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING id`).
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}).AddRow("id", "integer"))
+	mock.ExpectQuery(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\) RETURNING "id"`).
 		WithArgs("a@test.com").
 		WillReturnError(errors.New("network error"))
 
@@ -336,9 +336,9 @@ func TestTableRepository_SelectRows_rowsErr(t *testing.T) {
 
 func TestTableRepository_InsertRow_noIDMultipleColumns(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(false, ""))
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}))
 	mock.ExpectExec(`INSERT INTO "public"\."users" \("email", "name"\) VALUES \(\$1, \$2\)`).
 		WithArgs("a@test.com", "Alice").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
@@ -353,7 +353,7 @@ func TestTableRepository_InsertRow_noIDMultipleColumns(t *testing.T) {
 func TestTableRepository_InsertRow_initialQueryError(t *testing.T) {
 	mock := newRepoMock(t)
 	// Scan error on the initial query is silently ignored (hasIDColumn=false, idDataType="").
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
 		WillReturnError(errors.New("query error"))
 	mock.ExpectExec(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\)`).
@@ -368,9 +368,9 @@ func TestTableRepository_InsertRow_initialQueryError(t *testing.T) {
 
 func TestTableRepository_InsertRow_zeroRows(t *testing.T) {
 	mock := newRepoMock(t)
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*information_schema\.columns`).
+	mock.ExpectQuery(`(?s)SELECT a\.attname, format_type.*FROM pg_index i`).
 		WithArgs("public", "users").
-		WillReturnRows(pgxmock.NewRows([]string{"exists", "data_type"}).AddRow(false, ""))
+		WillReturnRows(pgxmock.NewRows([]string{"attname", "data_type"}))
 	mock.ExpectExec(`INSERT INTO "public"\."users" \("email"\) VALUES \(\$1\)`).
 		WithArgs("a@test.com").
 		WillReturnResult(pgxmock.NewResult("INSERT", 0))

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"backend/internal/metrics"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -19,6 +21,10 @@ func NewUserRepository(pool pgxPool) *UserRepository {
 }
 
 func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_create").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -54,6 +60,10 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
 }
 
 func (r *UserRepository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_find_by_id").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,6 +94,10 @@ func (r *UserRepository) FindUserByID(ctx context.Context, id uuid.UUID) (*model
 }
 
 func (r *UserRepository) FindUserByEmail(ctx context.Context, email string) (*model.User, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_find_by_email").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -116,6 +130,10 @@ func (r *UserRepository) FindUserByEmail(ctx context.Context, email string) (*mo
 // FindUserByEmailIncludingDeleted returns a user by email whether active or soft-deleted.
 // If multiple rows exist for the same email (e.g. multiple soft-deleted), returns one (most recently deleted).
 func (r *UserRepository) FindUserByEmailIncludingDeleted(ctx context.Context, email string) (*model.User, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_find_by_email_including_deleted").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -149,6 +167,10 @@ func (r *UserRepository) FindUserByEmailIncludingDeleted(ctx context.Context, em
 
 // HardDeleteSoftDeletedByEmail removes soft-deleted user(s) with the given email so the email can be reused on register.
 func (r *UserRepository) HardDeleteSoftDeletedByEmail(ctx context.Context, email string) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_hard_delete_soft_deleted_by_email").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -164,6 +186,10 @@ func (r *UserRepository) FindUserByName(username string) (*model.User, error) {
 }
 
 func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_update").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -185,6 +211,10 @@ func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
 }
 
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_delete").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -201,6 +231,10 @@ func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *UserRepository) DeleteTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_delete_tx").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -228,6 +262,10 @@ func (r *UserRepository) DeleteTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 }
 
 func (r *UserRepository) FindAll(ctx context.Context) ([]model.User, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_find_all").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -271,6 +309,10 @@ func (r *UserRepository) FindAll(ctx context.Context) ([]model.User, error) {
 
 // CountUsers returns the total number of active (non-deleted) users
 func (r *UserRepository) CountUsers(ctx context.Context) (int, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_count").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -288,6 +330,10 @@ func (r *UserRepository) CountUsers(ctx context.Context) (int, error) {
 
 // CountAdmins returns the number of active users with admin role
 func (r *UserRepository) CountAdmins(ctx context.Context) (int, error) {
+	defer func(start time.Time) {
+		metrics.MetaDbQueryDuration.WithLabelValues("user_count_admins").Observe(time.Since(start).Seconds())
+	}(time.Now())
+
 	if ctx == nil {
 		ctx = context.Background()
 	}

@@ -18,6 +18,28 @@ var (
 		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 	}, []string{"method", "path"})
 
+	// ── Meta DB metrics ──
+	MetaDbQueryDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "meta_db_query_duration_seconds",
+			Help:    "Latency of queries to the internal Meta DB",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		},
+		[]string{"operation"},
+	)
+	MetaDbPoolAcquiredConns = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "meta_db_pool_acquired_connections",
+			Help: "Number of acquired connections to the Meta DB",
+		},
+	)
+	MetaDbPoolIdleConns = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "meta_db_pool_idle_connections",
+			Help: "Number of idle connections to the Meta DB",
+		},
+	)
+
 	// ── DB pool / client count ──
 	PgPoolCount = promauto.NewGauge(
 		prometheus.GaugeOpts{

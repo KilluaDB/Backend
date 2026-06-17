@@ -183,22 +183,20 @@ func (r *TableRepository) DeleteRowsByFilter(ctx context.Context, pool poolQueri
 
 // InsertRow inserts a row; returned rowID is string (UUID), int64 (serial), or int64(0) when no RETURNING id.
 func (r *TableRepository) InsertRow(ctx context.Context, pool poolQuerier, schema, table string, values map[string]interface{}) (rowID interface{}, err error) {
-	var hasIDColumn bool
-	var idDataType string
-	_ = pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 
-			FROM information_schema.columns 
-			WHERE table_schema = $1 
-			AND LOWER(table_name) = LOWER($2) 
-			AND column_name = 'id'
-		),
-		COALESCE(
-			(SELECT data_type FROM information_schema.columns 
-			 WHERE table_schema = $1 AND LOWER(table_name) = LOWER($2) AND column_name = 'id'),
-			''
-		)
-	`, schema, table).Scan(&hasIDColumn, &idDataType)
+	var pkColumn string
+	var pkDataType string
+	errPK := pool.QueryRow(ctx, `
+		SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+		FROM pg_index i
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+		JOIN pg_class c ON c.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE i.indisprimary
+		AND n.nspname = $1
+		AND LOWER(c.relname) = LOWER($2)
+		LIMIT 1
+	`, schema, table).Scan(&pkColumn, &pkDataType)
+	hasPK := errPK == nil && pkColumn != ""
 
 	colOrder := sortedMapKeys(values)
 	columns := make([]string, 0, len(values))
@@ -225,13 +223,13 @@ func (r *TableRepository) InsertRow(ctx context.Context, pool poolQuerier, schem
 
 	tableName := qualifiedTableIdent(schema, table)
 
-	if hasIDColumn {
-		queryWithReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING id",
-			tableName, columnsStr, placeholdersStr)
-		switch idDataType {
+	if hasPK {
+		queryWithReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING %s",
+			tableName, columnsStr, placeholdersStr, pq.QuoteIdentifier(pkColumn))
+		switch pkDataType {
 		case "uuid":
-			queryUUIDReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING id::text",
-				tableName, columnsStr, placeholdersStr)
+			queryUUIDReturning := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING %s::text",
+				tableName, columnsStr, placeholdersStr, pq.QuoteIdentifier(pkColumn))
 			var rowIDStr string
 			err = pool.QueryRow(ctx, queryUUIDReturning, vals...).Scan(&rowIDStr)
 			if err == nil {

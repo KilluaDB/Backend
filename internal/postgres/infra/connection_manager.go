@@ -197,6 +197,14 @@ func (c *defaultPoolConnector) Connect(ctx context.Context, dsn string) (*pgxpoo
 // GetPool returns a shared connection pool for the project's PostgreSQL instance.
 // Do not Close the returned pool; it is cached for reuse across requests.
 func (s *PostgresConnectionManager) GetPool(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, error) {
+	s.pgPoolMu.Lock()
+	if entry, ok := s.pgPools[projectID]; ok && entry.pool != nil {
+		pool := entry.pool
+		s.pgPoolMu.Unlock()
+		return pool, nil
+	}
+	s.pgPoolMu.Unlock()
+
 	dsn, _, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -207,6 +215,14 @@ func (s *PostgresConnectionManager) GetPool(ctx context.Context, userID, project
 // GetPoolWithMeta returns a shared pool and the instance ID (for query history).
 // Do not Close the returned pool.
 func (s *PostgresConnectionManager) GetPoolWithMeta(ctx context.Context, userID, projectID uuid.UUID) (*pgxpool.Pool, uuid.UUID, error) {
+	s.pgPoolMu.Lock()
+	if entry, ok := s.pgPools[projectID]; ok && entry.pool != nil {
+		pool := entry.pool
+		s.pgPoolMu.Unlock()
+		return pool, projectID, nil
+	}
+	s.pgPoolMu.Unlock()
+
 	dsn, instanceID, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
 	if err != nil {
 		return nil, uuid.Nil, err
@@ -220,6 +236,13 @@ func (s *PostgresConnectionManager) GetPoolWithMeta(ctx context.Context, userID,
 
 // GetInstanceID returns the database instance ID for the project.
 func (s *PostgresConnectionManager) GetInstanceID(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error) {
+	s.pgPoolMu.Lock()
+	if entry, ok := s.pgPools[projectID]; ok && entry.pool != nil {
+		s.pgPoolMu.Unlock()
+		return projectID, nil
+	}
+	s.pgPoolMu.Unlock()
+
 	_, instanceID, err := s.provider.GetConnectionDSN(ctx, userID, projectID)
 	return instanceID, err
 }
