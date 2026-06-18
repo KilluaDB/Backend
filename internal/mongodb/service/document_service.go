@@ -141,11 +141,6 @@ func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uu
 		return nil, err
 	}
 
-	total, err := s.repo.CountDocuments(ctx, db, collection, filter)
-	if err != nil {
-		return nil, err
-	}
-
 	docs, err := s.repo.FindDocuments(ctx, db, collection, filter, sort, skip, limit)
 	metrics.MongoQueryDuration.WithLabelValues("find").Observe(time.Since(start).Seconds())
 	if err != nil {
@@ -159,7 +154,7 @@ func (s *DocumentService) GetDocuments(ctx context.Context, userID, projectID uu
 
 	return &model.GetDocumentsResult{
 		Documents: docs,
-		Total:     total,
+		Total:     int64(len(docs)),
 		Page:      page,
 		Limit:     limit,
 	}, nil
@@ -199,11 +194,6 @@ func (s *DocumentService) QueryDocuments(ctx context.Context, userID, projectID 
 		return nil, err
 	}
 
-	total, err := s.repo.CountDocuments(ctx, db, collection, filter)
-	if err != nil {
-		return nil, err
-	}
-
 	docs, err := s.repo.FindDocuments(ctx, db, collection, filter, sort, skip, limit)
 	metrics.MongoQueryDuration.WithLabelValues("find").Observe(time.Since(start).Seconds())
 	if err != nil {
@@ -217,7 +207,7 @@ func (s *DocumentService) QueryDocuments(ctx context.Context, userID, projectID 
 
 	return &model.QueryDocumentsResult{
 		Documents: docs,
-		Total:     total,
+		Total:     int64(len(docs)),
 		Page:      page,
 		Limit:     limit,
 	}, nil
