@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+*.log
 
 # Test binary, built with "go test -ctx"
 *.test
@@ -38,3 +39,5 @@ main
 bin/
 
 pgproxy
+
+k6-tests/results/

@@ -371,7 +371,7 @@ func (p *OperatorProvisioner) GetPostgRESTCredentials(ctx context.Context, proje
 	ns := p.NamespaceForProject(projectID)
 	secretName := postgrestSecretName(projectID)
 
-	secret, err := p.core.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{})
+	secret, err := p.getCachedSecret(ctx, ns, secretName)
 	if err != nil {
 		return "", "", fmt.Errorf("get PostgREST secret: %w", err)
 	}

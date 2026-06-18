@@ -1,0 +1,93 @@
+import { check, sleep } from "k6";
+import { Trend, Counter, Rate, Gauge } from "k6/metrics";
+import { TEST_EMAIL, TEST_PASSWORD, SLO } from "../lib/config.js";
+import { registerUser, createProject, waitForProjectReady, deleteProject, execSQL, queryMongoDocs, insertMongoDocs, getPgDashboardMetrics } from "../lib/helpers.js";
+
+const queryLatency = new Trend("soak_query_latency_ms", true);
+const latencyDrift = new Trend("soak_latency_drift_ms", true);
+const errorRate = new Rate("soak_error_rate");
+const activeConnGauge = new Gauge("soak_active_connections");
+const iterCount = new Counter("soak_iterations_total");
+
+export const options = { scenarios: { soak: { executor: "constant-vus", vus: 20, duration: "15m" } }, thresholds: { soak_query_latency_ms: ["p(95)<200", "p(99)<500"], soak_error_rate: ["rate<0.01"], http_req_duration: [`p(95)<${SLO.http_req_duration_p95}`], http_req_failed: [`rate<${SLO.http_req_failed_rate}`] }, tags: { testSuite: "soak_test" } };
+
+export function setup() {
+   const auth = registerUser(TEST_EMAIL, TEST_PASSWORD);
+   if (!auth)
+      throw new Error("auth failed");
+
+   const pg = createProject(auth.access_token, "k6-soak-pg", "sql");
+   const mg = createProject(auth.access_token, "k6-soak-mongo", "nosql");
+   let pgR = null, mgR = null;
+
+   if (pg) pgR = waitForProjectReady(auth.access_token, pg.id);
+   if (mg) mgR = waitForProjectReady(auth.access_token, mg.id);
+   if (pgR) {
+      execSQL(auth.access_token, pg.id, `CREATE TABLE IF NOT EXISTS k6_soak(id SERIAL PRIMARY KEY,payload TEXT DEFAULT 'x',created_at TIMESTAMPTZ DEFAULT NOW())`);
+      for (let i = 0;
+         i < 200;
+         i++)execSQL(auth.access_token, pg.id, `INSERT INTO k6_soak(payload) VALUES('seed-${i}')`);
+   } if (mgR) {
+      const d = [];
+      for (let i = 0;
+         i < 200;
+         i++)d.push({ index: i, payload: `seed-${i}` });
+      insertMongoDocs(auth.access_token, mg.id, "k6_soak", d);
+   } return { token: auth.access_token, pgId: pg ? pg.id : null, mgId: mg ? mg.id : null, pgR: !!pgR, mgR: !!mgR, t0: Date.now() };
+}
+
+export default function (d) {
+   iterCount.add(1);
+   if (__ITER % 2 === 0 && d.pgR) {
+      soakPg(d);
+
+   } else if (d.mgR) {
+      soakMg(d);
+
+   } else if (d.pgR) {
+      soakPg(d);
+
+   } if (__ITER % 50 === 0 && d.pgR) {
+      const r = getPgDashboardMetrics(d.token, d.pgId);
+      if (r.status === 200) try {
+         const m = r.json().data;
+         if (m && m.active_connections !== undefined) activeConnGauge.add(m.active_connections);
+
+      } catch (_) { }
+   } sleep(0.2);
+}
+
+function soakPg(d) {
+   let s, r;
+   if (Math.random() < 0.8) {
+      s = Date.now();
+      r = execSQL(d.token, d.pgId, `SELECT * FROM k6_soak ORDER BY RANDOM() LIMIT 20`);
+
+   } else {
+      s = Date.now();
+      r = execSQL(d.token, d.pgId, `INSERT INTO k6_soak(payload) VALUES('vu${__VU}-i${__ITER}') RETURNING id`);
+   } const e = Date.now() - s;
+   queryLatency.add(e);
+   latencyDrift.add(e);
+   errorRate.add(!check(r, { "soak pg ok": (r) => r.status === 200 }));
+}
+
+function soakMg(d) {
+   let s, r;
+   if (Math.random() < 0.8) {
+      s = Date.now();
+      r = queryMongoDocs(d.token, d.mgId, "k6_soak", { index: { $gte: Math.floor(Math.random() * 200) } }, 20, 1);
+   } else {
+      s = Date.now();
+      r = insertMongoDocs(d.token, d.mgId, "k6_soak", [{ index: __ITER, payload: `vu${__VU}` }]);
+   } const e = Date.now() - s;
+   queryLatency.add(e);
+   latencyDrift.add(e);
+   errorRate.add(!check(r, { "soak mg ok": (r) => r.status === 200 || r.status === 201 }));
+}
+
+export function teardown(d) {
+   if (d.pgId) deleteProject(d.token, d.pgId);
+   if (d.mgId) deleteProject(d.token, d.mgId);
+
+}

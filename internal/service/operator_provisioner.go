@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"backend/internal/metrics"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"golang.org/x/sync/singleflight"
 )
 
 // ExternalAccess holds the external hostname and port for direct DB access via Traefik TCP SNI.
@@ -60,6 +62,37 @@ type OperatorProvisioner struct {
 	pollInterval       time.Duration // test-seam: poll wait interval (default 5s)
 	pollTimeout        time.Duration // test-seam: poll wait timeout (default 10m)
 	skipPostgRESTSetup bool          // test-seam: skip connecting to DB for PostgREST setup
+
+	secretCache sync.Map // cache for k8s secrets
+	connCacheMu sync.RWMutex
+	connCache   map[string]*ProvisionResult
+	connGroup   singleflight.Group
+}
+
+type cachedSecret struct {
+	secret *corev1.Secret
+	exp    time.Time
+}
+
+func (p *OperatorProvisioner) getCachedSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	key := namespace + "/" + name
+	if val, ok := p.secretCache.Load(key); ok {
+		cs := val.(cachedSecret)
+		if time.Now().Before(cs.exp) {
+			return cs.secret, nil
+		}
+		p.secretCache.Delete(key)
+	}
+
+	secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	p.secretCache.Store(key, cachedSecret{
+		secret: secret,
+		exp:    time.Now().Add(5 * time.Minute),
+	})
+	return secret, nil
 }
 
 // NewOperatorProvisioner creates a provisioner using in-cluster config (when running in K8s)
@@ -86,6 +119,9 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 			return nil, fmt.Errorf("kubernetes config: %w", err)
 		}
 	}
+
+	config.QPS   = 50
+	config.Burst = 100
 
 	dyn, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -119,8 +155,9 @@ func NewOperatorProvisioner() (*OperatorProvisioner, error) {
 		externalDomain:     os.Getenv("EXTERNAL_DB_DOMAIN"),
 		postgresExtPort:    postgresExtPort,
 		mongoExtPort:       mongoExtPort,
-		pollInterval:       5 * time.Second,
+		pollInterval:       30 * time.Second,
 		pollTimeout:        10 * time.Minute,
+		connCache:          make(map[string]*ProvisionResult),
 	}, nil
 }
 
@@ -152,34 +189,60 @@ func (p *OperatorProvisioner) CreateInstance(ctx context.Context, projectID uuid
 // name is derived deterministically from projectID so no resource ref needs to be persisted.
 func (p *OperatorProvisioner) GetConnection(ctx context.Context, projectID uuid.UUID, dbType string) (*ProvisionResult, error) {
 	start := time.Now()
-	name := p.ClusterNameForProject(projectID)
+	cacheKey := projectID.String() + ":" + dbType
 
-	var res *ProvisionResult
-	var err error
-
-	switch dbType {
-	case "postgres", "postgresql":
-		ns := p.NamespaceForProject(projectID)
-		res, err = p.getPostgresConnection(ctx, ns, name)
-	case "mongodb":
-		ns := p.MongoNamespaceForProject(projectID)
-		res, err = p.getMongoConnection(ctx, ns, name)
-	default:
-		err = fmt.Errorf("unsupported database type: %s", dbType)
+	p.connCacheMu.RLock()
+	if cached, ok := p.connCache[cacheKey]; ok {
+		p.connCacheMu.RUnlock()
+		return cached, nil
 	}
+	p.connCacheMu.RUnlock()
+
+	v, err, _ := p.connGroup.Do(cacheKey, func() (interface{}, error) {
+		name := p.ClusterNameForProject(projectID)
+		var res *ProvisionResult
+		var err error
+
+		switch dbType {
+		case "postgres", "postgresql":
+			ns := p.NamespaceForProject(projectID)
+			res, err = p.getPostgresConnection(ctx, ns, name)
+		case "mongodb":
+			ns := p.MongoNamespaceForProject(projectID)
+			res, err = p.getMongoConnection(ctx, ns, name)
+		default:
+			err = fmt.Errorf("unsupported database type: %s", dbType)
+		}
+
+		if err != nil {
+			metrics.GetConnectionErrorsTotal.WithLabelValues(dbType).Inc()
+			metrics.GetConnectionDuration.WithLabelValues(dbType, "error").Observe(time.Since(start).Seconds())
+			slog.Error("Failed to get connection", "project_id", projectID, "db_type", dbType, "error", err)
+			return nil, err
+		}
+
+		p.connCacheMu.Lock()
+		p.connCache[cacheKey] = res
+		p.connCacheMu.Unlock()
+
+		return res, nil
+	})
 
 	if err != nil {
-		metrics.GetConnectionErrorsTotal.WithLabelValues(dbType).Inc()
-		metrics.GetConnectionDuration.WithLabelValues(dbType, "error").Observe(time.Since(start).Seconds())
-		slog.Error("Failed to get connection", "project_id", projectID, "db_type", dbType, "error", err)
 		return nil, err
 	}
+
 	metrics.GetConnectionDuration.WithLabelValues(dbType, "success").Observe(time.Since(start).Seconds())
-	return res, nil
+	return v.(*ProvisionResult), nil
 }
 
 func (p *OperatorProvisioner) DeleteInstance(ctx context.Context, projectID uuid.UUID, dbType string) error {
 	start := time.Now()
+	cacheKey := projectID.String() + ":" + dbType
+	p.connCacheMu.Lock()
+	delete(p.connCache, cacheKey)
+	p.connCacheMu.Unlock()
+
 	if err := p.deleteIngressRouteTCP(ctx, projectID, dbType); err != nil {
 		slog.Error("Failed to delete IngressRouteTCP", "project_id", projectID, "db_type", dbType, "error", err)
 		metrics.SubResourceErrorsTotal.WithLabelValues(dbType, "ingress_route_tcp").Inc()
@@ -444,7 +507,7 @@ func (p *OperatorProvisioner) waitForPostgresReady(ctx context.Context, namespac
 func (p *OperatorProvisioner) getPostgresConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
 	host := fmt.Sprintf("%s-rw.%s.svc.cluster.local", name, namespace)
 	appSecretName := name + "-app"
-	secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, appSecretName, metav1.GetOptions{})
+	secret, err := p.getCachedSecret(ctx, namespace, appSecretName)
 	if err != nil {
 		return nil, fmt.Errorf("get app secret %s: %w", appSecretName, err)
 	}
@@ -692,7 +755,7 @@ func (p *OperatorProvisioner) waitForMongoReady(ctx context.Context, namespace, 
 }
 func (p *OperatorProvisioner) getMongoConnection(ctx context.Context, namespace, name string) (*ProvisionResult, error) {
 	secretName := name + "-admin-password"
-	secret, err := p.core.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+	secret, err := p.getCachedSecret(ctx, namespace, secretName)
 	if err != nil {
 		return nil, fmt.Errorf("get mongo password secret %s: %w", secretName, err)
 	}
