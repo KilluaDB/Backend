@@ -54,15 +54,25 @@ run_test() {
   local name="$2"
   local script="$3"
   local output_file="$RESULTS_DIR/${num}-${name}.json"
+  local html_file="$RESULTS_DIR/${num}-${name}-report.html"
 
   echo ""
   echo -e "${BOLD}━━━ Test ${num}: ${name} ━━━${NC}"
   echo -e "${BLUE}Script:${NC} ${script}"
-  echo -e "${BLUE}Output:${NC} ${output_file}"
+  echo -e "${BLUE}Output JSON:${NC} ${output_file}"
+  echo -e "${BLUE}Output HTML:${NC} ${html_file}"
   echo ""
 
-  if k6 run \
+  # If this is the failover test, launch the pod killer in the background
+  if [ "$name" == "failover-recovery" ]; then
+    echo -e "${YELLOW}[ACTION]${NC} Launching pod killer in background for failover test..."
+    bash "$SCRIPT_DIR/kill-pod.sh" "k6-failover-pg" 60 &
+  fi
+
+
+  if K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT="$html_file" k6 run \
     --out json="$output_file" \
+    --out influxdb=http://127.0.0.1:8086/myk6db \
     --summary-trend-stats="min,avg,med,p(50),p(90),p(95),p(99),max" \
     --tag testrun="$(date +%s)" \
     "$script" 2>&1 | tee "$RESULTS_DIR/${num}-${name}.log"; then

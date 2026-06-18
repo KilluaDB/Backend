@@ -58,7 +58,7 @@ export function authHeaders(token) {
  * Create a project (SQL or NoSQL) and return the project object.
  * dbType: "sql" | "nosql"
  */
-export function createProject(token, name, dbType, tier = "free") {
+export function createProject(token, name, dbType, tier = "basic") {
   const payload = {
     name,
     db_type: dbType,

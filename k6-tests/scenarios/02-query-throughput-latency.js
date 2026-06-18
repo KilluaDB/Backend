@@ -169,9 +169,9 @@ export default function (data) {
 function pgReadWorkload(data) {
   group("pg_simple_select", () => {
     const start = Date.now();
-    const res = execSQL(data.token, data.pgProjectId,
-      `SELECT id, name, email FROM k6_users ORDER BY RANDOM() LIMIT 10`
-    );
+    // Simulate random reads using offset (since k6_users has 100 seeded rows)
+    const offset = Math.floor(Math.random() * 90);
+    const res = getPgRows(data.token, data.pgProjectId, "k6_users", 10, offset);
     pgReadLatency.add(Date.now() - start);
     const ok = check(res, { "pg read 200": (r) => r.status === 200 });
     querySuccessRate.add(ok);
@@ -184,11 +184,13 @@ function pgWriteWorkload(data) {
     const start = Date.now();
     const vuId = __VU;
     const iter = __ITER;
-    const res = execSQL(data.token, data.pgProjectId,
-      `INSERT INTO k6_orders (user_id, amount, status) VALUES (${(iter % 100) + 1}, ${(Math.random()*500).toFixed(2)}, 'pending') RETURNING id`
-    );
+    const res = insertPgRow(data.token, data.pgProjectId, "k6_orders", {
+      user_id: (iter % 100) + 1,
+      amount: parseFloat((Math.random() * 500).toFixed(2)),
+      status: 'pending'
+    });
     pgWriteLatency.add(Date.now() - start);
-    const ok = check(res, { "pg write 200": (r) => r.status === 200 });
+    const ok = check(res, { "pg write OK": (r) => r.status === 200 || r.status === 201 });
     querySuccessRate.add(ok);
     if (!ok) queryErrors.add(1, { type: "pg_write" });
   });
@@ -202,8 +204,7 @@ function pgJoinWorkload(data) {
        FROM k6_users u
        JOIN k6_orders o ON o.user_id = u.id
        GROUP BY u.id, u.name
-       ORDER BY total_spent DESC
-       LIMIT 20`
+       ORDER BY total_spent DESC`
     );
     pgJoinLatency.add(Date.now() - start);
     const ok = check(res, { "pg join 200": (r) => r.status === 200 });
