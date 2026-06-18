@@ -39,3 +39,5 @@ main
 bin/
 
 pgproxy
+
+k6-tests/results/
